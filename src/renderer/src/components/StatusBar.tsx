@@ -65,8 +65,10 @@ const StatusBar: React.FC = () => {
   }
 
   const handleClearTerminal = () => {
-    // TODO: Implement terminal clear functionality
-    console.log('Clear terminal requested')
+    // This will be connected via a ref from parent component
+    if (window.terminalRef?.current) {
+      window.terminalRef.current.clear()
+    }
   }
 
   return (

@@ -1,9 +1,10 @@
-import React from 'react'
-import Terminal from './Terminal'
+import React, { useRef, useEffect } from 'react'
+import Terminal, { TerminalRef } from './Terminal'
 import StatusBar from './StatusBar'
 import { useAppStore } from '../stores/appStore'
 
 const MainContent: React.FC = () => {
+  const terminalRef = useRef<TerminalRef>(null)
   const {
     sessions,
     activeSessionId,
@@ -32,6 +33,14 @@ const MainContent: React.FC = () => {
       console.error('Failed to change model:', error)
     }
   }
+
+  // Expose terminal ref globally for StatusBar
+  useEffect(() => {
+    (window as any).terminalRef = terminalRef
+    return () => {
+      delete (window as any).terminalRef
+    }
+  }, [])
 
   return (
     <main className="flex-grow flex flex-col">
@@ -92,7 +101,7 @@ const MainContent: React.FC = () => {
       {/* Terminal Area */}
       <div className="flex-grow">
         {activeSession ? (
-          <Terminal />
+          <Terminal ref={terminalRef} />
         ) : (
           <div className="h-full flex items-center justify-center text-gray-400">
             <div className="text-center">
