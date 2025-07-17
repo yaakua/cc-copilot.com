@@ -1,0 +1,57 @@
+{
+  "name": "cc-copilot",
+  "productName": "CC Copilot",
+  "version": "1.0.0",
+  "description": "A cross-platform desktop GUI wrapper for claude-code",
+  "main": "dist/main/main.js",
+  "homepage": "https://github.com/yangkui/cc-copilot",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/yangkui/cc-copilot.git"
+  },
+  "author": {
+    "name": "yangkui",
+    "email": "your-email@example.com"
+  },
+  "license": "MIT",
+  "directories": {
+    "buildResources": "resources"
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "dev": "electron-vite dev",
+    "build": "electron-vite build",
+    "build:win": "npm run build && electron-builder --win",
+    "build:mac": "npm run build && electron-builder --mac",
+    "build:linux": "npm run build && electron-builder --linux",
+    "preview": "electron-vite preview",
+    "postinstall": "electron-builder install-app-deps"
+  },
+  "devDependencies": {
+    "electron": "^32.0.0",
+    "electron-builder": "^25.0.0",
+    "electron-vite": "^2.0.0",
+    "vite": "^5.0.0",
+    "typescript": "^5.0.0",
+    "@vitejs/plugin-react": "^4.0.0",
+    "@types/react": "^18.0.0",
+    "@types/react-dom": "^18.0.0",
+    "tailwindcss": "^3.3.0",
+    "autoprefixer": "^10.4.0",
+    "postcss": "^8.4.0"
+  },
+  "dependencies": {
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "@electron-toolkit/preload": "^3.0.0",
+    "@electron-toolkit/utils": "^3.0.0",
+    "electron-store": "^10.0.0",
+    "@xterm/xterm": "^5.5.0",
+    "@xterm/addon-fit": "^0.10.0",
+    "express": "^4.18.0",
+    "http-proxy-middleware": "^3.0.0",
+    "zustand": "^4.4.0"
+  }
+}
