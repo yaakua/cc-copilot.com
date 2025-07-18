@@ -5,21 +5,32 @@ import { electronAPI } from '@electron-toolkit/preload'
 const api = {
   // Terminal APIs
   sendTerminalInput: (data: string) => ipcRenderer.invoke('terminal:input', data),
-  onTerminalOutput: (callback: (data: string) => void) => 
-    ipcRenderer.on('terminal:output', (_event, data) => callback(data)),
+  resizeTerminal: (cols: number, rows: number) => ipcRenderer.invoke('terminal:resize', cols, rows),
+  onTerminalData: (callback: (data: string) => void) => 
+    ipcRenderer.on('terminal:data', (_event, data) => callback(data)),
   
-  // Claude Code APIs
-  startClaudeCode: () => ipcRenderer.invoke('claude-code:start'),
-  stopClaudeCode: () => ipcRenderer.invoke('claude-code:stop'),
+  // PTY APIs
+  startPty: (options?: any) => ipcRenderer.invoke('pty:start', options),
+  stopPty: () => ipcRenderer.invoke('pty:stop'),
+  changeDirectory: (path: string) => ipcRenderer.invoke('pty:change-directory', path),
+  setEnvironmentVariable: (key: string, value: string) => ipcRenderer.invoke('pty:set-env', key, value),
+  getEnvironmentVariable: (key: string) => ipcRenderer.invoke('pty:get-env', key),
+  getAllEnvironmentVariables: () => ipcRenderer.invoke('pty:get-all-env'),
+  startClaudeCode: (workingDirectory?: string) => ipcRenderer.invoke('pty:start-claude-code', workingDirectory),
   
   // Project APIs
   getProjects: () => ipcRenderer.invoke('projects:get'),
-  createProject: (name: string) => ipcRenderer.invoke('projects:create', name),
+  createProject: (name: string, path: string) => ipcRenderer.invoke('projects:create', name, path),
   deleteProject: (id: string) => ipcRenderer.invoke('projects:delete', id),
+  selectProjectDirectory: () => ipcRenderer.invoke('projects:select-directory'),
+  getProjectHistory: () => ipcRenderer.invoke('projects:get-history'),
+  clearProjectHistory: () => ipcRenderer.invoke('projects:clear-history'),
+  extractProjectName: (path: string) => ipcRenderer.invoke('projects:extract-name', path),
   
   // Session APIs
   getSessions: (projectId: string) => ipcRenderer.invoke('sessions:get', projectId),
-  createSession: (projectId: string, name: string) => ipcRenderer.invoke('sessions:create', projectId, name),
+  createSession: (projectId: string, name?: string) => ipcRenderer.invoke('sessions:create', projectId, name),
+  activateSession: (sessionId: string) => ipcRenderer.invoke('sessions:activate', sessionId),
   deleteSession: (id: string) => ipcRenderer.invoke('sessions:delete', id),
   
   // Settings APIs

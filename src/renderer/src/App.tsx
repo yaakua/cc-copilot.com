@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react'
-import ProjectBar from './components/ProjectBar'
-import SessionList from './components/SessionList'
+import Sidebar from './components/Sidebar'
+import Toolbar from './components/Toolbar'
 import MainContent from './components/MainContent'
 import SettingsModal from './components/SettingsModal'
 import ErrorBoundary from './components/ErrorBoundary'
@@ -93,29 +93,31 @@ const App: React.FC = () => {
 
   return (
     <ErrorBoundary>
-      <div className="flex h-screen bg-gray-900 text-gray-300 font-sans antialiased">
-        {/* Project Bar (Left Sidebar) */}
+      <div className="flex h-screen bg-gray-900 text-gray-300 font-sans antialiased flex-col">
+        {/* Top Toolbar */}
         <ErrorBoundary fallback={
-          <div className="w-16 bg-gray-900 border-r border-gray-700 flex items-center justify-center">
-            <div className="text-red-400 text-xs text-center">Error</div>
+          <div className="h-16 bg-gray-800 border-b border-gray-700 flex items-center justify-center">
+            <div className="text-red-400 text-sm">Toolbar error</div>
           </div>
         }>
-          <ProjectBar />
+          <Toolbar />
         </ErrorBoundary>
         
-        {/* Session List */}
-        <ErrorBoundary fallback={
-          <div className="w-64 bg-gray-800 border-r border-gray-700 flex items-center justify-center">
-            <div className="text-red-400 text-sm">Session list error</div>
-          </div>
-        }>
-          <SessionList />
-        </ErrorBoundary>
-        
-        {/* Main Content Area */}
-        <ErrorBoundary>
-          <MainContent />
-        </ErrorBoundary>
+        <div className="flex flex-1 overflow-hidden">
+          {/* Sidebar with Projects and Sessions */}
+          <ErrorBoundary fallback={
+            <div className="w-80 bg-gray-800 border-r border-gray-700 flex items-center justify-center">
+              <div className="text-red-400 text-sm">Sidebar error</div>
+            </div>
+          }>
+            <Sidebar />
+          </ErrorBoundary>
+          
+          {/* Main Content Area */}
+          <ErrorBoundary>
+            <MainContent />
+          </ErrorBoundary>
+        </div>
         
         {/* Settings Modal (Hidden by default) */}
         <ErrorBoundary>

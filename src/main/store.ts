@@ -3,6 +3,7 @@ import Store from 'electron-store'
 export interface Project {
   id: string
   name: string
+  path: string
   createdAt: string
 }
 
@@ -52,6 +53,7 @@ export interface AppData {
     projects: { [projectId: string]: TokenUsage }
     sessions: { [sessionId: string]: TokenUsage }
   }
+  projectHistory: string[]
 }
 
 const schema = {
@@ -87,6 +89,10 @@ const schema = {
       projects: {},
       sessions: {}
     }
+  },
+  projectHistory: {
+    type: 'array',
+    default: []
   }
 }
 
@@ -105,16 +111,20 @@ export class DataStore {
     return this.store.get('projects', [])
   }
 
-  createProject(name: string): Project {
+  createProject(name: string, path: string): Project {
     const project: Project = {
       id: Date.now().toString(),
       name,
+      path,
       createdAt: new Date().toISOString()
     }
     
     const projects = this.getProjects()
     projects.push(project)
     this.store.set('projects', projects)
+    
+    // Add to project history
+    this.addToProjectHistory(path)
     
     return project
   }
@@ -133,11 +143,16 @@ export class DataStore {
     return projectId ? sessions.filter(s => s.projectId === projectId) : sessions
   }
 
-  createSession(projectId: string, name: string): Session {
+  createSession(projectId: string, name?: string): Session {
+    // 生成默认会话名称
+    const projectSessions = this.getSessions(projectId)
+    const sessionNumber = projectSessions.length + 1
+    const defaultName = name || `新会话 ${sessionNumber}`
+    
     const session: Session = {
       id: Date.now().toString(),
       projectId,
-      name,
+      name: defaultName,
       createdAt: new Date().toISOString(),
       history: [],
       tokenUsage: { prompt: 0, completion: 0, total: 0 }
@@ -207,5 +222,29 @@ export class DataStore {
     }
     
     this.store.set('stats', stats)
+  }
+
+  // Project History
+  getProjectHistory(): string[] {
+    return this.store.get('projectHistory', [])
+  }
+
+  addToProjectHistory(path: string): void {
+    const history = this.getProjectHistory()
+    
+    // Remove existing entry if it exists
+    const filteredHistory = history.filter(p => p !== path)
+    
+    // Add to beginning of array
+    filteredHistory.unshift(path)
+    
+    // Keep only last 10 entries
+    const limitedHistory = filteredHistory.slice(0, 10)
+    
+    this.store.set('projectHistory', limitedHistory)
+  }
+
+  clearProjectHistory(): void {
+    this.store.set('projectHistory', [])
   }
 }

@@ -43,6 +43,11 @@ const Terminal = forwardRef<TerminalRef>((_, ref) => {
   useEffect(() => {
     if (!terminalRef.current) return
 
+    // Clear existing terminal if it exists
+    if (xtermRef.current) {
+      xtermRef.current.dispose()
+    }
+
     // Initialize xterm.js
     const terminal = new XTerm({
       theme: {
@@ -95,6 +100,7 @@ const Terminal = forwardRef<TerminalRef>((_, ref) => {
     // Handle terminal input
     terminal.onData((data) => {
       // Send input to main process
+      console.log('[Terminal] Sending input:', data, 'Session:', activeSessionId)
       if (window.api?.sendTerminalInput) {
         window.api.sendTerminalInput(data)
       } else {
@@ -103,34 +109,40 @@ const Terminal = forwardRef<TerminalRef>((_, ref) => {
       }
     })
 
-    // Listen for output from main process
-    if (window.api?.onTerminalOutput) {
-      window.api.onTerminalOutput((data: string) => {
-        terminal.write(data)
-      })
+    // Listen for data from PTY process
+    let dataListener: ((data: string) => void) | null = null
+    if (window.api?.onTerminalData) {
+      dataListener = (data: string) => {
+        if (xtermRef.current === terminal) {
+          terminal.write(data)
+        }
+      }
+      window.api.onTerminalData(dataListener)
     }
 
     // Handle window resize
     const handleResize = () => {
       fitAddon.fit()
+      // Notify PTY about terminal resize
+      if (window.api?.resizeTerminal) {
+        window.api.resizeTerminal(terminal.cols, terminal.rows)
+      }
     }
     window.addEventListener('resize', handleResize)
 
     // Write initial message based on environment
     if (window.api) {
       terminal.write('\x1b[36mCC Copilot Terminal\x1b[0m\r\n')
-      terminal.write('\x1b[90mConnecting to claude-code...\x1b[0m\r\n\r\n')
-
-      // Start claude-code process
-      window.api.startClaudeCode()
-        .then(() => {
-          setClaudeCodeRunning(true)
-          terminal.write('\x1b[32m✓ Connected to claude-code\x1b[0m\r\n\r\n')
-        })
-        .catch((error) => {
-          setClaudeCodeRunning(false)
-          terminal.write(`\x1b[31m✗ Error starting claude-code: ${error.message}\x1b[0m\r\n`)
-        })
+      terminal.write('\x1b[32m✓ Connected to PTY\x1b[0m\r\n\r\n')
+      
+      // Focus the terminal after initialization
+      setTimeout(() => {
+        terminal.focus()
+        // Initial resize to match terminal size
+        if (window.api?.resizeTerminal) {
+          window.api.resizeTerminal(terminal.cols, terminal.rows)
+        }
+      }, 100)
     } else {
       // Browser mode - show demo content
       terminal.write('\x1b[36mCC Copilot Terminal (Demo Mode)\x1b[0m\r\n')

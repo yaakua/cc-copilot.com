@@ -6,20 +6,31 @@ declare global {
     api: {
       // Terminal APIs
       sendTerminalInput: (data: string) => Promise<void>
-      onTerminalOutput: (callback: (data: string) => void) => void
+      resizeTerminal: (cols: number, rows: number) => Promise<void>
+      onTerminalData: (callback: (data: string) => void) => void
       
-      // Claude Code APIs
-      startClaudeCode: () => Promise<void>
-      stopClaudeCode: () => Promise<void>
+      // PTY APIs
+      startPty: (options?: any) => Promise<void>
+      stopPty: () => Promise<void>
+      changeDirectory: (path: string) => Promise<void>
+      setEnvironmentVariable: (key: string, value: string) => Promise<void>
+      getEnvironmentVariable: (key: string) => Promise<string | undefined>
+      getAllEnvironmentVariables: () => Promise<Record<string, string>>
+      startClaudeCode: (workingDirectory?: string) => Promise<void>
       
       // Project APIs
       getProjects: () => Promise<Project[]>
-      createProject: (name: string) => Promise<Project>
+      createProject: (name: string, path: string) => Promise<Project>
       deleteProject: (id: string) => Promise<void>
+      selectProjectDirectory: () => Promise<string | null>
+      getProjectHistory: () => Promise<string[]>
+      clearProjectHistory: () => Promise<void>
+      extractProjectName: (path: string) => Promise<string>
       
       // Session APIs
       getSessions: (projectId: string) => Promise<Session[]>
-      createSession: (projectId: string, name: string) => Promise<Session>
+      createSession: (projectId: string, name?: string) => Promise<Session>
+      activateSession: (sessionId: string) => Promise<void>
       deleteSession: (id: string) => Promise<void>
       
       // Settings APIs
@@ -38,6 +49,7 @@ declare global {
 export interface Project {
   id: string
   name: string
+  path: string
   createdAt: string
 }
 

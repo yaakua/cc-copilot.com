@@ -235,12 +235,13 @@ For corporate networks:
 ### Common Issues
 
 #### "Electron uninstall" Error
-If you see this error when running `npm run dev`:
+If you see this error when running `yarn dev`:
 ```bash
 # Clean and rebuild
 rm -rf node_modules package-lock.json
-npm install
-npm rebuild electron
+yarn config set registry https://registry.npmmirror.com/   
+yarn 
+yarn rebuild electron
 ```
 
 #### Terminal Not Connecting
@@ -252,16 +253,17 @@ npm rebuild electron
 #### Build Failures
 ```bash
 # Clean build cache
-npm run clean
-npm install
-npm run build
+yarn clean
+yarn config set registry https://registry.npmmirror.com/   
+ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/ yarn install
+yarn build
 ```
 
 ### Browser Demo Mode
 
 If Electron issues persist, use browser mode:
 ```bash
-npm run dev
+yarn dev
 # Open http://localhost:5173
 ```
 
@@ -285,8 +287,8 @@ We welcome contributions! Please see our [Contributing Guidelines](CONTRIBUTING.
 ```bash
 git clone https://github.com/yangkui/cc-copilot.git
 cd cc-copilot
-npm install
-npm run dev
+ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/ yarn
+yarn dev
 ```
 
 ## 📄 License

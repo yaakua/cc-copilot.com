@@ -1,15 +1,23 @@
-import { app, shell, BrowserWindow, ipcMain } from 'electron'
-import { join } from 'path'
+import { app, shell, BrowserWindow, ipcMain, dialog } from 'electron'
+import { join, basename } from 'path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import { ProxyServer } from './proxy'
-import { ClaudeCodeManager } from './claude-code'
+import { PtyManager } from './pty-manager'
 import { DataStore } from './store'
 // import icon from '../../resources/icon.png?asset'
 
+// Declare global for mainWindow
+declare global {
+  var mainWindow: BrowserWindow | undefined
+}
+
 // Global instances
 let proxyServer: ProxyServer
-let claudeCodeManager: ClaudeCodeManager
 let dataStore: DataStore
+
+// Session-specific PtyManager cache
+const ptyManagers = new Map<string, PtyManager>()
+let currentActiveSessionId: string | null = null
 
 function createWindow(): void {
   // Create the browser window.
@@ -32,8 +40,10 @@ function createWindow(): void {
 
   // Initialize services
   proxyServer = new ProxyServer()
-  claudeCodeManager = new ClaudeCodeManager(mainWindow)
   dataStore = new DataStore()
+  
+  // Store mainWindow reference for creating PtyManagers later
+  global.mainWindow = mainWindow
 
   // Setup IPC handlers
   setupIpcHandlers()
@@ -58,19 +68,123 @@ function createWindow(): void {
   }
 }
 
+function getOrCreatePtyManager(sessionId: string): PtyManager {
+  if (!ptyManagers.has(sessionId)) {
+    const mainWindow = global.mainWindow
+    if (!mainWindow) {
+      throw new Error('Main window not available')
+    }
+    
+    console.log(`[Session] Creating new PtyManager for session: ${sessionId}`)
+    const manager = new PtyManager(mainWindow)
+    ptyManagers.set(sessionId, manager)
+    
+    // Auto-start PTY for new sessions
+    const projects = dataStore.getProjects()
+    for (const project of projects) {
+      const sessions = dataStore.getSessions(project.id)
+      const session = sessions.find(s => s.id === sessionId)
+      if (session) {
+        manager.start({ workingDirectory: project.path }).catch(console.error)
+        break
+      }
+    }
+  }
+  
+  return ptyManagers.get(sessionId)!
+}
+
+function getCurrentPtyManager(): PtyManager | null {
+  if (!currentActiveSessionId) {
+    return null
+  }
+  return ptyManagers.get(currentActiveSessionId) || null
+}
+
 function setupIpcHandlers(): void {
   // Terminal IPC handlers
   ipcMain.handle('terminal:input', async (_, data: string) => {
-    claudeCodeManager.sendInput(data)
+    const manager = getCurrentPtyManager()
+    if (manager) {
+      manager.sendInput(data)
+    } else {
+      console.warn('[Terminal] No active session, cannot send input')
+    }
   })
 
-  // Claude Code IPC handlers
-  ipcMain.handle('claude-code:start', async () => {
-    await claudeCodeManager.start()
+  ipcMain.handle('terminal:resize', async (_, cols: number, rows: number) => {
+    const manager = getCurrentPtyManager()
+    if (manager) {
+      manager.resize(cols, rows)
+    } else {
+      console.warn('[Terminal] No active session, cannot resize')
+    }
   })
 
-  ipcMain.handle('claude-code:stop', async () => {
-    await claudeCodeManager.stop()
+  // PTY IPC handlers
+  ipcMain.handle('pty:start', async (_, options: any) => {
+    const manager = getCurrentPtyManager()
+    if (manager) {
+      await manager.start(options)
+    } else {
+      console.warn('[PTY] No active session, cannot start')
+    }
+  })
+
+  ipcMain.handle('pty:stop', async () => {
+    const manager = getCurrentPtyManager()
+    if (manager) {
+      await manager.stop()
+    } else {
+      console.warn('[PTY] No active session, cannot stop')
+    }
+  })
+
+  ipcMain.handle('pty:change-directory', async (_, path: string) => {
+    const manager = getCurrentPtyManager()
+    if (manager) {
+      manager.changeDirectory(path)
+    } else {
+      console.warn('[PTY] No active session, cannot change directory')
+    }
+  })
+
+  ipcMain.handle('pty:set-env', async (_, key: string, value: string) => {
+    const manager = getCurrentPtyManager()
+    if (manager) {
+      manager.setEnvironmentVariable(key, value)
+    } else {
+      console.warn('[PTY] No active session, cannot set environment variable')
+    }
+  })
+
+  ipcMain.handle('pty:get-env', async (_, key: string) => {
+    const manager = getCurrentPtyManager()
+    if (manager) {
+      return manager.getEnvironmentVariable(key)
+    } else {
+      console.warn('[PTY] No active session, cannot get environment variable')
+      return undefined
+    }
+  })
+
+  ipcMain.handle('pty:get-all-env', async () => {
+    const manager = getCurrentPtyManager()
+    if (manager) {
+      return manager.getAllEnvironmentVariables()
+    } else {
+      console.warn('[PTY] No active session, cannot get environment variables')
+      return {}
+    }
+  })
+
+  ipcMain.handle('pty:start-claude-code', async (_, workingDirectory?: string) => {
+    const manager = getCurrentPtyManager()
+    if (manager) {
+      manager.startClaudeCode(workingDirectory)
+    } else {
+      console.warn('[PTY] No active session, cannot start claude-code')
+    }
   })
 
   // Project IPC handlers
@@ -78,12 +192,37 @@ function setupIpcHandlers(): void {
     return dataStore.getProjects()
   })
 
-  ipcMain.handle('projects:create', (_, name: string) => {
-    return dataStore.createProject(name)
+  ipcMain.handle('projects:create', (_, name: string, path: string) => {
+    return dataStore.createProject(name, path)
   })
 
   ipcMain.handle('projects:delete', (_, id: string) => {
     dataStore.deleteProject(id)
+  })
+
+  ipcMain.handle('projects:select-directory', async () => {
+    const result = await dialog.showOpenDialog({
+      properties: ['openDirectory'],
+      title: 'Select Project Directory'
+    })
+    
+    if (result.canceled) {
+      return null
+    }
+    
+    return result.filePaths[0]
+  })
+
+  ipcMain.handle('projects:get-history', () => {
+    return dataStore.getProjectHistory()
+  })
+
+  ipcMain.handle('projects:clear-history', () => {
+    dataStore.clearProjectHistory()
+  })
+
+  ipcMain.handle('projects:extract-name', (_, path: string) => {
+    return basename(path)
   })
 
   // Session IPC handlers
@@ -91,11 +230,36 @@ function setupIpcHandlers(): void {
     return dataStore.getSessions(projectId)
   })
 
-  ipcMain.handle('sessions:create', (_, projectId: string, name: string) => {
-    return dataStore.createSession(projectId, name)
+  ipcMain.handle('sessions:create', (_, projectId: string, name?: string) => {
+    const session = dataStore.createSession(projectId, name)
+    // Auto-activate newly created session
+    currentActiveSessionId = session.id
+    // Create and start PtyManager for the new session
+    getOrCreatePtyManager(session.id)
+    return session
+  })
+
+  ipcMain.handle('sessions:activate', (_, sessionId: string) => {
+    console.log(`[Session] Activating session: ${sessionId}`)
+    currentActiveSessionId = sessionId
+    // Create PtyManager if it doesn't exist
+    getOrCreatePtyManager(sessionId)
+    return true
   })
 
   ipcMain.handle('sessions:delete', (_, id: string) => {
+    // Stop and cleanup PtyManager if it exists
+    const manager = ptyManagers.get(id)
+    if (manager) {
+      manager.stop().catch(console.error)
+      ptyManagers.delete(id)
+    }
+    
+    // Clear current active session if it's being deleted
+    if (currentActiveSessionId === id) {
+      currentActiveSessionId = null
+    }
+    
     dataStore.deleteSession(id)
   })
 
@@ -152,22 +316,35 @@ app.whenReady().then(() => {
 // explicitly with Cmd + Q.
 app.on('window-all-closed', async () => {
   // Clean up services before quitting
-  if (claudeCodeManager) {
-    await claudeCodeManager.stop()
-  }
-  if (proxyServer) {
-    await proxyServer.stop()
-  }
+  await cleanupAllServices()
   
   if (process.platform !== 'darwin') app.quit()
 })
 
 // Handle app quit
 app.on('before-quit', async () => {
-  if (claudeCodeManager) {
-    await claudeCodeManager.stop()
-  }
-  if (proxyServer) {
-    await proxyServer.stop()
-  }
+  await cleanupAllServices()
 })
+
+async function cleanupAllServices(): Promise<void> {
+  // Stop all PtyManager instances
+  for (const [sessionId, manager] of ptyManagers) {
+    console.log(`[Cleanup] Stopping PtyManager for session: ${sessionId}`)
+    try {
+      await manager.stop()
+    } catch (error) {
+      console.error(`[Cleanup] Error stopping PtyManager for session ${sessionId}:`, error)
+    }
+  }
+  ptyManagers.clear()
+  currentActiveSessionId = null
+  
+  // Stop proxy server
+  if (proxyServer) {
+    try {
+      await proxyServer.stop()
+    } catch (error) {
+      console.error('[Cleanup] Error stopping proxy server:', error)
+    }
+  }
+}

@@ -23,8 +23,8 @@ interface AppState {
 
 interface AppActions {
   // UI Actions
-  setActiveProject: (projectId: string | null) => void
-  setActiveSession: (sessionId: string | null) => void
+  setActiveProject: (projectId: string | null) => Promise<void>
+  setActiveSession: (sessionId: string | null) => Promise<void>
   setSettingsOpen: (open: boolean) => void
   setStatsScope: (scope: 'session' | 'project' | 'global') => void
   
@@ -32,8 +32,12 @@ interface AppActions {
   loadProjects: () => Promise<void>
   loadSessions: (projectId: string) => Promise<void>
   loadSettings: () => Promise<void>
-  createProject: (name: string) => Promise<Project>
-  createSession: (projectId: string, name: string) => Promise<Session>
+  createProject: (name: string, path: string) => Promise<Project>
+  selectProjectDirectory: () => Promise<string | null>
+  getProjectHistory: () => Promise<string[]>
+  clearProjectHistory: () => Promise<void>
+  extractProjectName: (path: string) => Promise<string>
+  createSession: (projectId: string) => Promise<Session>
   deleteProject: (id: string) => Promise<void>
   deleteSession: (id: string) => Promise<void>
   updateSettings: (settings: Partial<Settings>) => Promise<void>
@@ -44,7 +48,7 @@ interface AppActions {
   // Terminal Actions
   setClaudeCodeRunning: (running: boolean) => void
   setTerminalConnected: (connected: boolean) => void
-  startClaudeCode: () => Promise<void>
+  startClaudeCode: (workingDirectory?: string) => Promise<void>
   stopClaudeCode: () => Promise<void>
   setActiveModel: (modelId: string) => Promise<void>
 }
@@ -68,16 +72,56 @@ export const useAppStore = create<AppStore>((set, get) => ({
   terminalConnected: false,
 
   // UI Actions
-  setActiveProject: (projectId) => {
+  setActiveProject: async (projectId) => {
     set({ activeProjectId: projectId, activeSessionId: null })
     if (projectId) {
       get().loadSessions(projectId)
+      
+      // Auto-start claude-code when a project is selected
+      const project = get().projects.find(p => p.id === projectId)
+      if (project && !get().isClaudeCodeRunning) {
+        try {
+          await get().startClaudeCode(project.path)
+        } catch (error) {
+          console.error('Failed to auto-start claude-code:', error)
+        }
+      }
     }
   },
 
-  setActiveSession: (sessionId) => {
+  setActiveSession: async (sessionId) => {
     set({ activeSessionId: sessionId })
     get().loadStats()
+    
+    // Notify main process about session activation
+    if (sessionId) {
+      try {
+        await window.api.activateSession(sessionId)
+      } catch (error) {
+        console.error('Failed to activate session:', error)
+      }
+    }
+    
+    // Auto-start claude-code and change directory when a session is selected
+    const { activeProjectId, projects, isClaudeCodeRunning } = get()
+    const project = projects.find(p => p.id === activeProjectId)
+    
+    if (project && sessionId) {
+      if (!isClaudeCodeRunning) {
+        try {
+          await get().startClaudeCode(project.path)
+        } catch (error) {
+          console.error('Failed to auto-start claude-code:', error)
+        }
+      } else {
+        // Always change to project directory when selecting a session
+        try {
+          await window.api.changeDirectory(project.path)
+        } catch (error) {
+          console.error('Failed to change directory:', error)
+        }
+      }
+    }
   },
 
   setSettingsOpen: (open) => set({ isSettingsOpen: open }),
@@ -95,7 +139,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
       
       // Set active project if none selected
       if (!get().activeProjectId && projects.length > 0) {
-        get().setActiveProject(projects[0].id)
+        await get().setActiveProject(projects[0].id)
       }
     } catch (error) {
       console.error('Failed to load projects:', error)
@@ -120,12 +164,12 @@ export const useAppStore = create<AppStore>((set, get) => ({
     }
   },
 
-  createProject: async (name: string) => {
+  createProject: async (name: string, path: string) => {
     try {
-      const project = await window.api.createProject(name)
+      const project = await window.api.createProject(name, path)
       const projects = [...get().projects, project]
       set({ projects })
-      get().setActiveProject(project.id)
+      await get().setActiveProject(project.id)
       return project
     } catch (error) {
       console.error('Failed to create project:', error)
@@ -133,11 +177,60 @@ export const useAppStore = create<AppStore>((set, get) => ({
     }
   },
 
-  createSession: async (projectId: string, name: string) => {
+  selectProjectDirectory: async () => {
     try {
-      const session = await window.api.createSession(projectId, name)
+      return await window.api.selectProjectDirectory()
+    } catch (error) {
+      console.error('Failed to select project directory:', error)
+      throw error
+    }
+  },
+
+  getProjectHistory: async () => {
+    try {
+      return await window.api.getProjectHistory()
+    } catch (error) {
+      console.error('Failed to get project history:', error)
+      throw error
+    }
+  },
+
+  clearProjectHistory: async () => {
+    try {
+      await window.api.clearProjectHistory()
+    } catch (error) {
+      console.error('Failed to clear project history:', error)
+      throw error
+    }
+  },
+
+  extractProjectName: async (path: string) => {
+    try {
+      return await window.api.extractProjectName(path)
+    } catch (error) {
+      console.error('Failed to extract project name:', error)
+      throw error
+    }
+  },
+
+  createSession: async (projectId: string) => {
+    try {
+      const session = await window.api.createSession(projectId)
       await get().loadSessions(projectId)
-      get().setActiveSession(session.id)
+      
+      // Auto-start claude-code when creating a new session
+      const project = get().projects.find(p => p.id === projectId)
+      if (project && !get().isClaudeCodeRunning) {
+        try {
+          console.log("Auto-start claude-code when creating session")
+          await window.api.changeDirectory(project.path)
+          await get().startClaudeCode(project.path)
+        } catch (error) {
+          console.error('Failed to auto-start claude-code when creating session:', error)
+        }
+      }
+      
+      await get().setActiveSession(session.id)
       return session
     } catch (error) {
       console.error('Failed to create session:', error)
@@ -154,7 +247,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
       // Clear active project if it was deleted
       if (get().activeProjectId === id) {
         const newActiveProject = projects.length > 0 ? projects[0].id : null
-        get().setActiveProject(newActiveProject)
+        await get().setActiveProject(newActiveProject)
       }
     } catch (error) {
       console.error('Failed to delete project:', error)
@@ -213,9 +306,9 @@ export const useAppStore = create<AppStore>((set, get) => ({
   setClaudeCodeRunning: (running) => set({ isClaudeCodeRunning: running }),
   setTerminalConnected: (connected) => set({ terminalConnected: connected }),
 
-  startClaudeCode: async () => {
+  startClaudeCode: async (workingDirectory?: string) => {
     try {
-      await window.api.startClaudeCode()
+      await window.api.startClaudeCode(workingDirectory)
       set({ isClaudeCodeRunning: true })
     } catch (error) {
       console.error('Failed to start claude-code:', error)
