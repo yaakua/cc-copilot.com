@@ -76,16 +76,19 @@ function getOrCreatePtyManager(sessionId: string): PtyManager {
     }
     
     console.log(`[Session] Creating new PtyManager for session: ${sessionId}`)
-    const manager = new PtyManager(mainWindow)
+    const manager = new PtyManager(mainWindow, sessionId)
     ptyManagers.set(sessionId, manager)
     
-    // Auto-start PTY for new sessions
+    // Auto-start PTY for new sessions with claude-code
     const projects = dataStore.getProjects()
     for (const project of projects) {
       const sessions = dataStore.getSessions(project.id)
       const session = sessions.find(s => s.id === sessionId)
       if (session) {
-        manager.start({ workingDirectory: project.path }).catch(console.error)
+        manager.start({ 
+          workingDirectory: project.path,
+          autoStartClaude: true
+        }).catch(console.error)
         break
       }
     }
@@ -101,10 +104,14 @@ function getCurrentPtyManager(): PtyManager | null {
   return ptyManagers.get(currentActiveSessionId) || null
 }
 
+function getPtyManagerForSession(sessionId: string): PtyManager | null {
+  return ptyManagers.get(sessionId) || null
+}
+
 function setupIpcHandlers(): void {
   // Terminal IPC handlers
-  ipcMain.handle('terminal:input', async (_, data: string) => {
-    const manager = getCurrentPtyManager()
+  ipcMain.handle('terminal:input', async (_, data: string, sessionId?: string) => {
+    const manager = sessionId ? getPtyManagerForSession(sessionId) : getCurrentPtyManager()
     if (manager) {
       manager.sendInput(data)
     } else {
@@ -112,8 +119,8 @@ function setupIpcHandlers(): void {
     }
   })
 
-  ipcMain.handle('terminal:resize', async (_, cols: number, rows: number) => {
-    const manager = getCurrentPtyManager()
+  ipcMain.handle('terminal:resize', async (_, cols: number, rows: number, sessionId?: string) => {
+    const manager = sessionId ? getPtyManagerForSession(sessionId) : getCurrentPtyManager()
     if (manager) {
       manager.resize(cols, rows)
     } else {
@@ -122,8 +129,8 @@ function setupIpcHandlers(): void {
   })
 
   // PTY IPC handlers
-  ipcMain.handle('pty:start', async (_, options: any) => {
-    const manager = getCurrentPtyManager()
+  ipcMain.handle('pty:start', async (_, options: any, sessionId?: string) => {
+    const manager = sessionId ? getPtyManagerForSession(sessionId) : getCurrentPtyManager()
     if (manager) {
       await manager.start(options)
     } else {
@@ -131,8 +138,8 @@ function setupIpcHandlers(): void {
     }
   })
 
-  ipcMain.handle('pty:stop', async () => {
-    const manager = getCurrentPtyManager()
+  ipcMain.handle('pty:stop', async (_, sessionId?: string) => {
+    const manager = sessionId ? getPtyManagerForSession(sessionId) : getCurrentPtyManager()
     if (manager) {
       await manager.stop()
     } else {
@@ -140,8 +147,8 @@ function setupIpcHandlers(): void {
     }
   })
 
-  ipcMain.handle('pty:change-directory', async (_, path: string) => {
-    const manager = getCurrentPtyManager()
+  ipcMain.handle('pty:change-directory', async (_, path: string, sessionId?: string) => {
+    const manager = sessionId ? getPtyManagerForSession(sessionId) : getCurrentPtyManager()
     if (manager) {
       manager.changeDirectory(path)
     } else {
@@ -149,8 +156,8 @@ function setupIpcHandlers(): void {
     }
   })
 
-  ipcMain.handle('pty:set-env', async (_, key: string, value: string) => {
-    const manager = getCurrentPtyManager()
+  ipcMain.handle('pty:set-env', async (_, key: string, value: string, sessionId?: string) => {
+    const manager = sessionId ? getPtyManagerForSession(sessionId) : getCurrentPtyManager()
     if (manager) {
       manager.setEnvironmentVariable(key, value)
     } else {
@@ -158,8 +165,8 @@ function setupIpcHandlers(): void {
     }
   })
 
-  ipcMain.handle('pty:get-env', async (_, key: string) => {
-    const manager = getCurrentPtyManager()
+  ipcMain.handle('pty:get-env', async (_, key: string, sessionId?: string) => {
+    const manager = sessionId ? getPtyManagerForSession(sessionId) : getCurrentPtyManager()
     if (manager) {
       return manager.getEnvironmentVariable(key)
     } else {
@@ -168,8 +175,8 @@ function setupIpcHandlers(): void {
     }
   })
 
-  ipcMain.handle('pty:get-all-env', async () => {
-    const manager = getCurrentPtyManager()
+  ipcMain.handle('pty:get-all-env', async (_, sessionId?: string) => {
+    const manager = sessionId ? getPtyManagerForSession(sessionId) : getCurrentPtyManager()
     if (manager) {
       return manager.getAllEnvironmentVariables()
     } else {
@@ -178,8 +185,8 @@ function setupIpcHandlers(): void {
     }
   })
 
-  ipcMain.handle('pty:start-claude-code', async (_, workingDirectory?: string) => {
-    const manager = getCurrentPtyManager()
+  ipcMain.handle('pty:start-claude-code', async (_, workingDirectory?: string, sessionId?: string) => {
+    const manager = sessionId ? getPtyManagerForSession(sessionId) : getCurrentPtyManager()
     if (manager) {
       manager.startClaudeCode(workingDirectory)
     } else {
@@ -242,8 +249,11 @@ function setupIpcHandlers(): void {
   ipcMain.handle('sessions:activate', (_, sessionId: string) => {
     console.log(`[Session] Activating session: ${sessionId}`)
     currentActiveSessionId = sessionId
-    // Create PtyManager if it doesn't exist
-    getOrCreatePtyManager(sessionId)
+    // Only create PtyManager if it doesn't exist (new session)
+    // If it exists, just activate it without disrupting the terminal
+    if (!ptyManagers.has(sessionId)) {
+      getOrCreatePtyManager(sessionId)
+    }
     return true
   })
 

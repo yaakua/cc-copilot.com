@@ -5,18 +5,18 @@ declare global {
     electron: ElectronAPI
     api: {
       // Terminal APIs
-      sendTerminalInput: (data: string) => Promise<void>
-      resizeTerminal: (cols: number, rows: number) => Promise<void>
-      onTerminalData: (callback: (data: string) => void) => void
+      sendTerminalInput: (data: string, sessionId?: string) => Promise<void>
+      resizeTerminal: (cols: number, rows: number, sessionId?: string) => Promise<void>
+      onTerminalData: (callback: (data: { sessionId: string; data: string } | string) => void) => void
       
       // PTY APIs
-      startPty: (options?: any) => Promise<void>
-      stopPty: () => Promise<void>
-      changeDirectory: (path: string) => Promise<void>
-      setEnvironmentVariable: (key: string, value: string) => Promise<void>
-      getEnvironmentVariable: (key: string) => Promise<string | undefined>
-      getAllEnvironmentVariables: () => Promise<Record<string, string>>
-      startClaudeCode: (workingDirectory?: string) => Promise<void>
+      startPty: (options?: any, sessionId?: string) => Promise<void>
+      stopPty: (sessionId?: string) => Promise<void>
+      changeDirectory: (path: string, sessionId?: string) => Promise<void>
+      setEnvironmentVariable: (key: string, value: string, sessionId?: string) => Promise<void>
+      getEnvironmentVariable: (key: string, sessionId?: string) => Promise<string | undefined>
+      getAllEnvironmentVariables: (sessionId?: string) => Promise<Record<string, string>>
+      startClaudeCode: (workingDirectory?: string, sessionId?: string) => Promise<void>
       
       // Project APIs
       getProjects: () => Promise<Project[]>

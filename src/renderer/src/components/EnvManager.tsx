@@ -22,11 +22,11 @@ const EnvManager: React.FC<EnvManagerProps> = ({ isOpen, onClose }) => {
   }, [isOpen, activeSessionId])
 
   const loadEnvironmentVariables = async () => {
-    if (!window.api?.getAllEnvironmentVariables) return
+    if (!window.api?.getAllEnvironmentVariables || !activeSessionId) return
     
     try {
       setLoading(true)
-      const vars = await window.api.getAllEnvironmentVariables()
+      const vars = await window.api.getAllEnvironmentVariables(activeSessionId)
       setEnvVars(vars)
     } catch (err) {
       setError('Failed to load environment variables')
@@ -49,7 +49,7 @@ const EnvManager: React.FC<EnvManagerProps> = ({ isOpen, onClose }) => {
 
     try {
       setLoading(true)
-      await window.api.setEnvironmentVariable(newKey, newValue)
+      await window.api.setEnvironmentVariable(newKey, newValue, activeSessionId)
       setEnvVars(prev => ({ ...prev, [newKey]: newValue }))
       setNewKey('')
       setNewValue('')
@@ -68,7 +68,7 @@ const EnvManager: React.FC<EnvManagerProps> = ({ isOpen, onClose }) => {
 
     try {
       setLoading(true)
-      await window.api?.setEnvironmentVariable('ANTHROPIC_BASE_URL', baseUrl)
+      await window.api?.setEnvironmentVariable('ANTHROPIC_BASE_URL', baseUrl, activeSessionId)
       setEnvVars(prev => ({ ...prev, 'ANTHROPIC_BASE_URL': baseUrl }))
       setError('')
     } catch (err) {
@@ -85,7 +85,7 @@ const EnvManager: React.FC<EnvManagerProps> = ({ isOpen, onClose }) => {
 
     try {
       setLoading(true)
-      await window.api?.setEnvironmentVariable('ANTHROPIC_API_KEY', apiKey)
+      await window.api?.setEnvironmentVariable('ANTHROPIC_API_KEY', apiKey, activeSessionId)
       setEnvVars(prev => ({ ...prev, 'ANTHROPIC_API_KEY': apiKey }))
       setError('')
     } catch (err) {
@@ -99,7 +99,7 @@ const EnvManager: React.FC<EnvManagerProps> = ({ isOpen, onClose }) => {
   const handleStartClaudeCode = async () => {
     try {
       setLoading(true)
-      await window.api?.startClaudeCode()
+      await window.api?.startClaudeCode(undefined, activeSessionId)
       setError('')
     } catch (err) {
       setError('Failed to start Claude Code')

@@ -113,14 +113,9 @@ export const useAppStore = create<AppStore>((set, get) => ({
         } catch (error) {
           console.error('Failed to auto-start claude-code:', error)
         }
-      } else {
-        // Always change to project directory when selecting a session
-        try {
-          await window.api.changeDirectory(project.path)
-        } catch (error) {
-          console.error('Failed to change directory:', error)
-        }
       }
+      // No need to change directory when activating existing session
+      // PTY already starts in correct working directory
     }
   },
 
@@ -223,7 +218,6 @@ export const useAppStore = create<AppStore>((set, get) => ({
       if (project && !get().isClaudeCodeRunning) {
         try {
           console.log("Auto-start claude-code when creating session")
-          await window.api.changeDirectory(project.path)
           await get().startClaudeCode(project.path)
         } catch (error) {
           console.error('Failed to auto-start claude-code when creating session:', error)
@@ -308,7 +302,8 @@ export const useAppStore = create<AppStore>((set, get) => ({
 
   startClaudeCode: async (workingDirectory?: string) => {
     try {
-      await window.api.startClaudeCode(workingDirectory)
+      // Don't pass workingDirectory since PTY already starts in correct location
+      await window.api.startClaudeCode()
       set({ isClaudeCodeRunning: true })
     } catch (error) {
       console.error('Failed to start claude-code:', error)

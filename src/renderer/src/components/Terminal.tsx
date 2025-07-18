@@ -99,10 +99,10 @@ const Terminal = forwardRef<TerminalRef>((_, ref) => {
 
     // Handle terminal input
     terminal.onData((data) => {
-      // Send input to main process
+      // Send input to main process with session ID
       console.log('[Terminal] Sending input:', data, 'Session:', activeSessionId)
-      if (window.api?.sendTerminalInput) {
-        window.api.sendTerminalInput(data)
+      if (window.api?.sendTerminalInput && activeSessionId) {
+        window.api.sendTerminalInput(data, activeSessionId)
       } else {
         // Fallback for browser testing
         console.log('Terminal input:', data)
@@ -110,11 +110,16 @@ const Terminal = forwardRef<TerminalRef>((_, ref) => {
     })
 
     // Listen for data from PTY process
-    let dataListener: ((data: string) => void) | null = null
+    let dataListener: ((data: { sessionId: string; data: string } | string) => void) | null = null
     if (window.api?.onTerminalData) {
-      dataListener = (data: string) => {
+      dataListener = (data: { sessionId: string; data: string } | string) => {
         if (xtermRef.current === terminal) {
-          terminal.write(data)
+          // Handle both old format (string) and new format (with sessionId)
+          if (typeof data === 'string') {
+            terminal.write(data)
+          } else if (data.sessionId === activeSessionId) {
+            terminal.write(data.data)
+          }
         }
       }
       window.api.onTerminalData(dataListener)
@@ -124,8 +129,8 @@ const Terminal = forwardRef<TerminalRef>((_, ref) => {
     const handleResize = () => {
       fitAddon.fit()
       // Notify PTY about terminal resize
-      if (window.api?.resizeTerminal) {
-        window.api.resizeTerminal(terminal.cols, terminal.rows)
+      if (window.api?.resizeTerminal && activeSessionId) {
+        window.api.resizeTerminal(terminal.cols, terminal.rows, activeSessionId)
       }
     }
     window.addEventListener('resize', handleResize)
@@ -139,8 +144,8 @@ const Terminal = forwardRef<TerminalRef>((_, ref) => {
       setTimeout(() => {
         terminal.focus()
         // Initial resize to match terminal size
-        if (window.api?.resizeTerminal) {
-          window.api.resizeTerminal(terminal.cols, terminal.rows)
+        if (window.api?.resizeTerminal && activeSessionId) {
+          window.api.resizeTerminal(terminal.cols, terminal.rows, activeSessionId)
         }
       }, 100)
     } else {

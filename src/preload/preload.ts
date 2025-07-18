@@ -4,19 +4,19 @@ import { electronAPI } from '@electron-toolkit/preload'
 // Custom APIs for renderer
 const api = {
   // Terminal APIs
-  sendTerminalInput: (data: string) => ipcRenderer.invoke('terminal:input', data),
-  resizeTerminal: (cols: number, rows: number) => ipcRenderer.invoke('terminal:resize', cols, rows),
-  onTerminalData: (callback: (data: string) => void) => 
+  sendTerminalInput: (data: string, sessionId?: string) => ipcRenderer.invoke('terminal:input', data, sessionId),
+  resizeTerminal: (cols: number, rows: number, sessionId?: string) => ipcRenderer.invoke('terminal:resize', cols, rows, sessionId),
+  onTerminalData: (callback: (data: { sessionId: string; data: string } | string) => void) => 
     ipcRenderer.on('terminal:data', (_event, data) => callback(data)),
   
   // PTY APIs
-  startPty: (options?: any) => ipcRenderer.invoke('pty:start', options),
-  stopPty: () => ipcRenderer.invoke('pty:stop'),
-  changeDirectory: (path: string) => ipcRenderer.invoke('pty:change-directory', path),
-  setEnvironmentVariable: (key: string, value: string) => ipcRenderer.invoke('pty:set-env', key, value),
-  getEnvironmentVariable: (key: string) => ipcRenderer.invoke('pty:get-env', key),
-  getAllEnvironmentVariables: () => ipcRenderer.invoke('pty:get-all-env'),
-  startClaudeCode: (workingDirectory?: string) => ipcRenderer.invoke('pty:start-claude-code', workingDirectory),
+  startPty: (options?: any, sessionId?: string) => ipcRenderer.invoke('pty:start', options, sessionId),
+  stopPty: (sessionId?: string) => ipcRenderer.invoke('pty:stop', sessionId),
+  changeDirectory: (path: string, sessionId?: string) => ipcRenderer.invoke('pty:change-directory', path, sessionId),
+  setEnvironmentVariable: (key: string, value: string, sessionId?: string) => ipcRenderer.invoke('pty:set-env', key, value, sessionId),
+  getEnvironmentVariable: (key: string, sessionId?: string) => ipcRenderer.invoke('pty:get-env', key, sessionId),
+  getAllEnvironmentVariables: (sessionId?: string) => ipcRenderer.invoke('pty:get-all-env', sessionId),
+  startClaudeCode: (workingDirectory?: string, sessionId?: string) => ipcRenderer.invoke('pty:start-claude-code', workingDirectory, sessionId),
   
   // Project APIs
   getProjects: () => ipcRenderer.invoke('projects:get'),
