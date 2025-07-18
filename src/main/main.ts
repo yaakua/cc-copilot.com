@@ -4,6 +4,7 @@ import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import { ProxyServer } from './proxy'
 import { PtyManager } from './pty-manager'
 import { DataStore } from './store'
+import { ApiProxyManager } from './api-proxy-manager'
 // import icon from '../../resources/icon.png?asset'
 
 // Declare global for mainWindow
@@ -14,6 +15,7 @@ declare global {
 // Global instances
 let proxyServer: ProxyServer
 let dataStore: DataStore
+let apiProxyManager: ApiProxyManager
 
 // Session-specific PtyManager cache
 const ptyManagers = new Map<string, PtyManager>()
@@ -41,6 +43,7 @@ function createWindow(): void {
   // Initialize services
   proxyServer = new ProxyServer()
   dataStore = new DataStore()
+  apiProxyManager = new ApiProxyManager(dataStore)
   
   // Store mainWindow reference for creating PtyManagers later
   global.mainWindow = mainWindow
@@ -48,10 +51,14 @@ function createWindow(): void {
   // Setup IPC handlers
   setupIpcHandlers()
 
-  mainWindow.on('ready-to-show', () => {
+  mainWindow.on('ready-to-show', async () => {
     mainWindow.show()
     // Start proxy server when window is ready
-    proxyServer.start().catch(console.error)
+    await proxyServer.start().catch(console.error)
+    
+    // Initialize API proxy manager with Claude auth if enabled
+    await apiProxyManager.initializeWithClaudeAuth()
+    await apiProxyManager.startProxy()
   })
 
   mainWindow.webContents.setWindowOpenHandler((details) => {
@@ -296,6 +303,68 @@ function setupIpcHandlers(): void {
       dataStore.updateSettings({ activeModelId: modelId })
     }
   })
+
+  // API Proxy Manager IPC handlers
+  ipcMain.handle('api-proxy:switch-channel', async (_, providerId: string) => {
+    return await apiProxyManager.switchChannel(providerId)
+  })
+
+  ipcMain.handle('api-proxy:get-current-channel', () => {
+    return apiProxyManager.getCurrentChannel()
+  })
+
+  ipcMain.handle('api-proxy:get-providers', () => {
+    return apiProxyManager.getAvailableProviders()
+  })
+
+  ipcMain.handle('api-proxy:test-connection', async (_, providerId: string) => {
+    return await apiProxyManager.testConnection(providerId)
+  })
+
+  // User Auth IPC handlers
+  ipcMain.handle('auth:get-user-auth', () => {
+    return dataStore.getUserAuth()
+  })
+
+  ipcMain.handle('auth:get-active-auth', () => {
+    return dataStore.getActiveUserAuth()
+  })
+
+  ipcMain.handle('auth:save-auth', (_, auth: any) => {
+    dataStore.saveUserAuth(auth)
+  })
+
+  ipcMain.handle('auth:remove-auth', (_, id: string) => {
+    dataStore.removeUserAuth(id)
+  })
+
+  ipcMain.handle('auth:get-claude-official', () => {
+    return dataStore.getClaudeOfficialAuth()
+  })
+
+  ipcMain.handle('auth:is-claude-valid', () => {
+    return dataStore.isClaudeOfficialAuthValid()
+  })
+
+  ipcMain.handle('auth:setup-claude-official', () => {
+    apiProxyManager.setupClaudeOfficialAuth()
+  })
+
+  ipcMain.handle('auth:get-auto-login', () => {
+    return dataStore.getAutoLoginSetting()
+  })
+
+  ipcMain.handle('auth:set-auto-login', (_, enabled: boolean) => {
+    dataStore.setAutoLogin(enabled)
+  })
+
+  ipcMain.handle('auth:get-config-status', () => {
+    return apiProxyManager.getClaudeConfigStatus()
+  })
+
+  ipcMain.handle('auth:get-search-paths', () => {
+    return apiProxyManager.getClaudeConfigSearchPaths()
+  })
 }
 
 // This method will be called when Electron has finished
@@ -355,6 +424,15 @@ async function cleanupAllServices(): Promise<void> {
       await proxyServer.stop()
     } catch (error) {
       console.error('[Cleanup] Error stopping proxy server:', error)
+    }
+  }
+
+  // Stop API proxy manager
+  if (apiProxyManager) {
+    try {
+      await apiProxyManager.stopProxy()
+    } catch (error) {
+      console.error('[Cleanup] Error stopping API proxy manager:', error)
     }
   }
 }

@@ -6,41 +6,24 @@ const StatusBar: React.FC = () => {
     isClaudeCodeRunning,
     terminalConnected,
     currentStats,
-    statsScope,
-    setStatsScope,
-    activeProjectId,
-    activeSessionId,
-    projects,
+    settings,
     stopClaudeCode,
     startClaudeCode
   } = useAppStore()
 
-  const activeProject = projects.find(p => p.id === activeProjectId)
+  const activeProvider = settings.apiProviders.find(p => p.id === settings.activeModelId)
 
   const getStatusInfo = () => {
     if (!terminalConnected) {
       return { color: 'text-gray-400', bgColor: 'bg-gray-400', text: 'Disconnected', animate: false }
     }
     if (isClaudeCodeRunning) {
-      return { color: 'text-green-400', bgColor: 'bg-green-500', text: 'Running', animate: true }
+      return { color: 'text-green-400', bgColor: 'bg-green-500', text: 'Connected', animate: false }
     }
     return { color: 'text-yellow-400', bgColor: 'bg-yellow-500', text: 'Ready', animate: false }
   }
 
   const status = getStatusInfo()
-
-  const getScopeDisplayName = () => {
-    switch (statsScope) {
-      case 'session':
-        return 'Current Session'
-      case 'project':
-        return activeProject ? `Project '${activeProject.name}'` : 'Project'
-      case 'global':
-        return 'Global'
-      default:
-        return 'Current Session'
-    }
-  }
 
   const formatNumber = (num: number) => {
     if (num >= 1000000) return `${(num / 1000000).toFixed(1)}M`
@@ -72,95 +55,49 @@ const StatusBar: React.FC = () => {
   }
 
   return (
-    <div className="flex-shrink-0 h-20 bg-gray-800 border-t border-gray-700 px-6 flex items-center justify-between">
-      {/* Left: Status */}
-      <div className="flex items-center gap-3">
-        <span className={`w-3 h-3 ${status.bgColor} rounded-full ${status.animate ? 'animate-pulse' : ''}`}></span>
-        <span className={`font-medium ${status.color}`}>{status.text}</span>
-      </div>
-
-      {/* Center: Usage Stats with Scope Selector */}
-      <div className="flex items-center gap-8">
-        {/* Scope Selector */}
+    <footer className="flex-shrink-0 flex items-center justify-between h-8 px-4 bg-claude-sidebar border-t border-claude-border text-xs">
+      <div className="flex items-center space-x-4">
+        <div className="flex items-center space-x-1.5 text-green-400">
+          <div className={`w-2 h-2 ${status.bgColor} rounded-full`}></div>
+          <span>{status.text}</span>
+        </div>
         <div className="relative group">
-          <button className="text-xs uppercase font-bold text-gray-400 hover:text-white flex items-center gap-1">
-            {getScopeDisplayName()}
-            <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <button className="flex items-center space-x-2 text-claude-text-secondary hover:bg-claude-border/40 px-2 py-0.5 rounded-md transition-colors">
+            <span>接口渠道: <span className="text-claude-accent font-semibold">{activeProvider?.name || 'Anthropic Claude'}</span></span>
+            <svg xmlns="http://www.w3.org/2000/svg" className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7" />
             </svg>
           </button>
-          <div className="absolute bottom-full mb-2 w-48 bg-gray-700 rounded-md shadow-lg hidden group-hover:block z-10">
-            {activeSessionId && (
-              <button
-                onClick={() => setStatsScope('session')}
-                className={`block w-full text-left px-3 py-2 text-sm hover:bg-gray-600 ${
-                  statsScope === 'session' ? 'text-white bg-gray-800' : 'text-gray-300'
-                }`}
-              >
-                Current Session
-              </button>
-            )}
-            {activeProjectId && (
-              <button
-                onClick={() => setStatsScope('project')}
-                className={`block w-full text-left px-3 py-2 text-sm hover:bg-gray-600 ${
-                  statsScope === 'project' ? 'text-white bg-gray-800' : 'text-gray-300'
-                }`}
-              >
-                {activeProject ? `Project '${activeProject.name}'` : 'Current Project'}
-              </button>
-            )}
-            <button
-              onClick={() => setStatsScope('global')}
-              className={`block w-full text-left px-3 py-2 text-sm hover:bg-gray-600 ${
-                statsScope === 'global' ? 'text-white bg-gray-800' : 'text-gray-300'
-              }`}
-            >
-              Global
-            </button>
+          
+          {/* Dropdown Menu */}
+          <div className="absolute bottom-full left-0 mb-2 w-48 bg-claude-sidebar border border-claude-border rounded-md shadow-lg opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200 z-10">
+            <div className="py-1">
+              {settings.apiProviders.map((provider) => (
+                <button
+                  key={provider.id}
+                  onClick={() => {
+                    // TODO: 实现渠道切换功能
+                    console.log('Switch to provider:', provider.name)
+                  }}
+                  className={`w-full text-left px-3 py-2 text-sm transition-colors hover:bg-claude-border/40 flex items-center justify-between ${
+                    provider.id === settings.activeModelId 
+                      ? 'bg-claude-border/20 text-claude-text-primary' 
+                      : 'text-claude-text-secondary'
+                  }`}
+                >
+                  <span>{provider.name}</span>
+                  {provider.id === settings.activeModelId && (
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 text-green-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 13l4 4L19 7" />
+                    </svg>
+                  )}
+                </button>
+              ))}
+            </div>
           </div>
         </div>
-        
-        {/* Stats Display */}
-        <div className="text-center">
-          <div className="text-xl font-semibold text-cyan-400">{formatNumber(currentStats.prompt)}</div>
-          <div className="text-xs text-gray-400">PROMPT</div>
-        </div>
-        <div className="text-center">
-          <div className="text-xl font-semibold text-cyan-400">{formatNumber(currentStats.completion)}</div>
-          <div className="text-xs text-gray-400">COMPLETION</div>
-        </div>
-        <div className="text-center">
-          <div className="text-xl font-semibold text-cyan-400">{formatNumber(currentStats.total)}</div>
-          <div className="text-xs text-gray-400">TOTAL</div>
-        </div>
       </div>
-
-      {/* Right: Actions */}
-      <div className="flex items-center gap-3">
-        {isClaudeCodeRunning ? (
-          <button 
-            onClick={handleStopClaudeCode}
-            className="bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded-md transition-colors"
-          >
-            Stop
-          </button>
-        ) : (
-          <button 
-            onClick={handleStartClaudeCode}
-            className="bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded-md transition-colors"
-          >
-            Start
-          </button>
-        )}
-        <button 
-          onClick={handleClearTerminal}
-          className="bg-gray-600 hover:bg-gray-700 text-white font-bold py-2 px-4 rounded-md transition-colors"
-        >
-          Clear
-        </button>
-      </div>
-    </div>
+    </footer>
   )
 }
 

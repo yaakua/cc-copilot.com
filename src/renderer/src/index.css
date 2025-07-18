@@ -1,23 +1,34 @@
+@import url('https://rsms.me/inter/inter.css');
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
-/* Custom scrollbar styles matching the prototype */
+/* Claude-style color scheme */
+:root {
+  --claude-bg: #343130;
+  --claude-sidebar: #2C2A29;
+  --claude-accent: #D96D53;
+  --claude-text-primary: #E5E3E1;
+  --claude-text-secondary: #8F8C8A;
+  --claude-border: #4A4746;
+}
+
+/* Custom scrollbar styles matching Claude design */
 ::-webkit-scrollbar {
   width: 8px;
 }
 
 ::-webkit-scrollbar-track {
-  background: #1f2937;
+  background: var(--claude-sidebar);
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #4b5563;
+  background: var(--claude-border);
   border-radius: 4px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: #6b7280;
+  background: #5A5653;
 }
 
 /* Terminal styles */
@@ -55,11 +66,11 @@
   resize: none;
 }
 
-/* Dark theme for the app */
+/* Claude theme for the app */
 body {
-  background-color: #111827;
-  color: #d1d5db;
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen', 'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue', sans-serif;
+  background-color: var(--claude-bg);
+  color: var(--claude-text-primary);
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen', 'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue', sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   margin: 0;
@@ -69,4 +80,27 @@ body {
 #root {
   height: 100vh;
   overflow: hidden;
+}
+
+/* Utility class to hide scrollbar */
+.scrollbar-hide {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;
+}
+
+/* Blinking cursor effect */
+.blinking-cursor {
+  width: 8px;
+  height: 1.2em;
+  background-color: var(--claude-text-primary);
+  animation: blink 1s step-end infinite;
+}
+
+@keyframes blink {
+  from, to { background-color: transparent }
+  50% { background-color: var(--claude-text-primary); }
 }

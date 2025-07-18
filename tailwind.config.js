@@ -8,6 +8,7 @@ module.exports = {
   theme: {
     extend: {
       fontFamily: {
+        inter: ['Inter', 'sans-serif'],
         mono: [
           'SF Mono',
           'Monaco',
@@ -19,7 +20,14 @@ module.exports = {
         ]
       },
       colors: {
-        // Custom colors matching the prototype
+        // Claude color scheme
+        'claude-bg': '#343130',
+        'claude-sidebar': '#2C2A29',
+        'claude-accent': '#D96D53',
+        'claude-text-primary': '#E5E3E1',
+        'claude-text-secondary': '#8F8C8A',
+        'claude-border': '#4A4746',
+        // Keep terminal colors for compatibility
         'terminal-bg': '#000000',
         'terminal-text': '#ffffff',
         'terminal-green': '#00ff00',

@@ -10,7 +10,11 @@ export interface TerminalRef {
   write: (data: string) => void
 }
 
-const Terminal = forwardRef<TerminalRef>((_, ref) => {
+interface TerminalProps {
+  sessionId?: string
+}
+
+const Terminal = forwardRef<TerminalRef, TerminalProps>(({ sessionId }, ref) => {
   const terminalRef = useRef<HTMLDivElement>(null)
   const xtermRef = useRef<XTerm | null>(null)
   const fitAddonRef = useRef<FitAddon | null>(null)
@@ -20,6 +24,9 @@ const Terminal = forwardRef<TerminalRef>((_, ref) => {
     setClaudeCodeRunning,
     activeSessionId 
   } = useAppStore()
+  
+  // Use prop sessionId if provided, otherwise fall back to store activeSessionId
+  const currentSessionId = sessionId || activeSessionId
 
   // Expose methods via ref
   useImperativeHandle(ref, () => ({
@@ -100,9 +107,9 @@ const Terminal = forwardRef<TerminalRef>((_, ref) => {
     // Handle terminal input
     terminal.onData((data) => {
       // Send input to main process with session ID
-      console.log('[Terminal] Sending input:', data, 'Session:', activeSessionId)
-      if (window.api?.sendTerminalInput && activeSessionId) {
-        window.api.sendTerminalInput(data, activeSessionId)
+      console.log('[Terminal] Sending input:', data, 'Session:', currentSessionId)
+      if (window.api?.sendTerminalInput && currentSessionId) {
+        window.api.sendTerminalInput(data, currentSessionId)
       } else {
         // Fallback for browser testing
         console.log('Terminal input:', data)
@@ -117,7 +124,7 @@ const Terminal = forwardRef<TerminalRef>((_, ref) => {
           // Handle both old format (string) and new format (with sessionId)
           if (typeof data === 'string') {
             terminal.write(data)
-          } else if (data.sessionId === activeSessionId) {
+          } else if (data.sessionId === currentSessionId) {
             terminal.write(data.data)
           }
         }
@@ -129,8 +136,8 @@ const Terminal = forwardRef<TerminalRef>((_, ref) => {
     const handleResize = () => {
       fitAddon.fit()
       // Notify PTY about terminal resize
-      if (window.api?.resizeTerminal && activeSessionId) {
-        window.api.resizeTerminal(terminal.cols, terminal.rows, activeSessionId)
+      if (window.api?.resizeTerminal && currentSessionId) {
+        window.api.resizeTerminal(terminal.cols, terminal.rows, currentSessionId)
       }
     }
     window.addEventListener('resize', handleResize)
@@ -144,8 +151,8 @@ const Terminal = forwardRef<TerminalRef>((_, ref) => {
       setTimeout(() => {
         terminal.focus()
         // Initial resize to match terminal size
-        if (window.api?.resizeTerminal && activeSessionId) {
-          window.api.resizeTerminal(terminal.cols, terminal.rows, activeSessionId)
+        if (window.api?.resizeTerminal && currentSessionId) {
+          window.api.resizeTerminal(terminal.cols, terminal.rows, currentSessionId)
         }
       }, 100)
     } else {
@@ -190,7 +197,7 @@ const Terminal = forwardRef<TerminalRef>((_, ref) => {
       setTerminalConnected(false)
       terminal.dispose()
     }
-  }, [activeSessionId]) // Re-initialize when session changes
+  }, [currentSessionId]) // Re-initialize when session changes
 
   return (
     <div 

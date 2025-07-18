@@ -17,6 +17,7 @@ const Sidebar: React.FC = () => {
   } = useAppStore()
 
   const [expandedProjects, setExpandedProjects] = useState<Set<string>>(new Set())
+  const [isCollapsed, setIsCollapsed] = useState(false)
 
   // Load sessions when projects change
   useEffect(() => {
@@ -89,160 +90,150 @@ const Sidebar: React.FC = () => {
       .slice(0, 2)
   }
 
+  // Generate consistent colors for projects
+  const getProjectColor = (projectName: string) => {
+    const colors = [
+      'bg-blue-600',
+      'bg-green-600', 
+      'bg-purple-600',
+      'bg-red-600',
+      'bg-yellow-600',
+      'bg-indigo-600',
+      'bg-pink-600',
+      'bg-cyan-600'
+    ]
+    let hash = 0
+    for (let i = 0; i < projectName.length; i++) {
+      hash = ((hash << 5) - hash) + projectName.charCodeAt(i)
+      hash = hash & hash
+    }
+    return colors[Math.abs(hash) % colors.length]
+  }
+
+  const getProjectTextColor = (projectName: string) => {
+    const colors = [
+      'text-blue-100',
+      'text-green-100',
+      'text-purple-100', 
+      'text-red-100',
+      'text-yellow-100',
+      'text-indigo-100',
+      'text-pink-100',
+      'text-cyan-100'
+    ]
+    let hash = 0
+    for (let i = 0; i < projectName.length; i++) {
+      hash = ((hash << 5) - hash) + projectName.charCodeAt(i)
+      hash = hash & hash
+    }
+    return colors[Math.abs(hash) % colors.length]
+  }
+
+  // Group sessions by project
+  const getAllSessions = () => {
+    const allSessions = []
+    for (const project of projects) {
+      const projectSessions = sessions.filter(s => s.projectId === project.id)
+      for (const session of projectSessions) {
+        allSessions.push({
+          ...session,
+          projectName: project.name,
+          projectColor: getProjectColor(project.name),
+          projectTextColor: getProjectTextColor(project.name)
+        })
+      }
+    }
+    return allSessions
+  }
+
+  const activeProject = projects.find(p => p.id === activeProjectId)
+
+  // Group sessions by project
+  const sessionsByProject = projects.reduce((acc, project) => {
+    acc[project.id] = sessions.filter(s => s.projectId === project.id)
+    return acc
+  }, {} as Record<string, typeof sessions>)
+
   return (
-    <aside className="w-80 flex-shrink-0 bg-gray-800 flex flex-col border-r border-gray-700">
-      {/* Header */}
-      <div className="p-4 border-b border-gray-700">
-        <h1 className="text-lg font-bold text-white">Projects & Sessions</h1>
+    <aside className="w-72 bg-claude-sidebar flex flex-col flex-shrink-0">
+      {/* Sidebar Header */}
+      <div className="flex items-center space-x-2 h-16 px-4 flex-shrink-0">
+        <div className="w-7 h-7 bg-claude-accent rounded-md flex items-center justify-center font-bold text-white text-sm">
+          C
+        </div>
+        <span className="font-semibold text-lg text-white">CC Copilot</span>
       </div>
 
-      {/* Projects List */}
-      <div className="flex-1 overflow-y-auto">
+      {/* New Session Button & Session List */}
+      <div className="flex-1 overflow-y-auto px-3 space-y-4">
+        <button 
+          onClick={() => activeProjectId && handleCreateSession(activeProjectId)}
+          disabled={!activeProjectId}
+          className="w-full flex items-center justify-start space-x-2 mt-2 px-3 py-2 border border-claude-border text-claude-text-primary rounded-lg hover:bg-claude-border/20 transition-colors disabled:border-claude-border/30 disabled:text-claude-text-secondary disabled:cursor-not-allowed"
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+          </svg>
+          <span>New Session</span>
+        </button>
+
+        {/* Project Groups */}
         {projects.length === 0 ? (
-          <div className="text-center text-gray-400 mt-8 px-4">
-            <svg xmlns="http://www.w3.org/2000/svg" className="h-12 w-12 mx-auto mb-3 opacity-50" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <div className="text-center text-claude-text-secondary mt-8">
+            <svg xmlns="http://www.w3.org/2000/svg" className="h-8 w-8 mx-auto mb-2 opacity-50" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
             </svg>
-            <p className="text-sm">No projects yet</p>
-            <p className="text-xs mt-1">Create your first project</p>
+            <p className="text-xs">No projects yet</p>
           </div>
         ) : (
-          <div className="p-2">
-            {projects.map((project) => {
-              const projectSessions = getProjectSessions(project.id)
-              const isExpanded = expandedProjects.has(project.id)
-              const isActive = activeProjectId === project.id
-
-              return (
-                <div key={project.id} className="mb-2">
-                  {/* Project Header */}
-                  <div 
-                    className={`group flex items-center p-2 rounded-md cursor-pointer transition-colors ${
-                      isActive 
-                        ? 'bg-blue-900/50 text-white' 
-                        : 'hover:bg-gray-700 text-gray-300'
-                    }`}
-                    onClick={() => {
-                      setActiveProject(project.id).catch(console.error)
-                      toggleProject(project.id)
-                    }}
-                  >
-                    {/* Expand/Collapse Icon */}
-                    <svg 
-                      xmlns="http://www.w3.org/2000/svg" 
-                      className={`h-4 w-4 mr-2 transition-transform ${isExpanded ? 'rotate-90' : ''}`}
-                      fill="none" 
-                      viewBox="0 0 24 24" 
-                      stroke="currentColor"
+          projects.map((project) => {
+            const projectSessions = sessionsByProject[project.id] || []
+            return (
+              <div key={project.id} className="space-y-2 pt-4">
+                <h3 className="px-2 text-sm font-medium text-claude-text-secondary/70 uppercase tracking-wider">
+                  {project.name}
+                </h3>
+                <nav className="space-y-1">
+                  {projectSessions.map((session) => (
+                    <a
+                      key={session.id}
+                      href="#"
+                      onClick={(e) => {
+                        e.preventDefault()
+                        setActiveSession(session.id).catch(console.error)
+                      }}
+                      className={`block px-2 py-1.5 text-sm rounded-md truncate transition-colors ${
+                        session.id === activeSessionId
+                          ? 'bg-claude-border/60 text-white'
+                          : 'text-claude-text-secondary hover:bg-claude-border/40'
+                      }`}
                     >
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 5l7 7-7 7" />
-                    </svg>
-
-                    {/* Project Icon */}
-                    <div className="w-6 h-6 rounded bg-blue-600 flex items-center justify-center text-white text-xs font-bold mr-3">
-                      {getProjectInitials(project.name)}
-                    </div>
-
-                    {/* Project Name */}
-                    <div className="flex-1 min-w-0">
-                      <h3 className="text-sm font-medium truncate">{project.name}</h3>
-                      <p className="text-xs text-gray-400 truncate" title={project.path}>
-                        {project.path.split('/').pop()}
-                      </p>
-                    </div>
-
-                    {/* Session Count */}
-                    <div className="text-xs text-gray-400 ml-2">
-                      {projectSessions.length}
-                    </div>
-                  </div>
-
-                  {/* Sessions List */}
-                  {isExpanded && (
-                    <div className="ml-6 mt-2 space-y-1">
-                      {/* New Session Button */}
-                      <div className="mb-2">
-                        <button
-                          onClick={() => handleCreateSession(project.id)}
-                          className="w-full flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 text-white text-xs py-1 px-2 rounded transition-colors"
-                        >
-                          <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3" viewBox="0 0 20 20" fill="currentColor">
-                            <path fillRule="evenodd" d="M10 3a1 1 0 011 1v5h5a1 1 0 110 2h-5v5a1 1 0 11-2 0v-5H4a1 1 0 110-2h5V4a1 1 0 011-1z" clipRule="evenodd" />
-                          </svg>
-                          New Session
-                        </button>
-                      </div>
-
-                      {/* Sessions */}
-                      {projectSessions.length === 0 ? (
-                        <div className="text-center text-gray-400 py-4">
-                          <p className="text-xs">No sessions yet</p>
-                        </div>
-                      ) : (
-                        projectSessions.map((session) => (
-                          <div
-                            key={session.id}
-                            className={`group flex items-center p-2 rounded-md cursor-pointer transition-colors ${
-                              session.id === activeSessionId
-                                ? 'bg-blue-900/30 text-blue-300'
-                                : 'hover:bg-gray-700 text-gray-300'
-                            }`}
-                            onClick={() => {
-                              setActiveSession(session.id).catch(console.error)
-                            }}
-                          >
-                            {/* Session Icon */}
-                            <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-3.582 8-8 8a8.013 8.013 0 01-7.93-7M3 12a9 9 0 1118 0z" />
-                            </svg>
-
-                            {/* Session Info */}
-                            <div className="flex-1 min-w-0">
-                              <h4 className="text-sm font-medium truncate">{session.name}</h4>
-                              <p className="text-xs text-gray-400">
-                                {formatDate(session.createdAt)}
-                                {session.history.length > 0 && (
-                                  <span className="ml-2">
-                                    {session.history.length} msg{session.history.length !== 1 ? 's' : ''}
-                                  </span>
-                                )}
-                              </p>
-                            </div>
-
-                            {/* Delete Button */}
-                            <button
-                              onClick={(e) => handleDeleteSession(session.id, e)}
-                              className="opacity-0 group-hover:opacity-100 ml-2 p-1 text-gray-400 hover:text-red-400 transition-all"
-                              title="Delete session"
-                            >
-                              <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                              </svg>
-                            </button>
-                          </div>
-                        ))
-                      )}
-                    </div>
-                  )}
-                </div>
-              )
-            })}
-          </div>
+                      {session.name}
+                    </a>
+                  ))}
+                </nav>
+              </div>
+            )
+          })
         )}
       </div>
 
-      {/* Footer */}
-      <div className="p-4 border-t border-gray-700">
-        <button
-          onClick={() => setSettingsOpen(true)}
-          className="w-full flex items-center justify-center gap-2 bg-gray-700 hover:bg-gray-600 text-gray-300 text-sm py-2 px-3 rounded transition-colors"
+      {/* Sidebar Footer */}
+      <div className="flex-shrink-0 border-t border-claude-border h-8 px-4 flex items-center">
+        <a
+          href="#"
+          onClick={(e) => {
+            e.preventDefault()
+            setSettingsOpen(true)
+          }}
+          className="flex items-center space-x-2 text-xs text-claude-text-secondary hover:bg-claude-border/40 px-2 py-0.5 rounded-md transition-colors"
         >
-          <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+          <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
           </svg>
-          Settings
-        </button>
+          <span>Settings</span>
+        </a>
       </div>
     </aside>
   )

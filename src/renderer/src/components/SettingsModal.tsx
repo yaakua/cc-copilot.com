@@ -19,14 +19,33 @@ const SettingsModal: React.FC = () => {
     apiKey: '',
     adapter: 'anthropic'
   })
+  const [autoLogin, setAutoLogin] = useState(false)
+  const [claudeAuth, setClaudeAuth] = useState<any>(null)
+  const [configStatus, setConfigStatus] = useState<any>(null)
+  const [showConfigDebug, setShowConfigDebug] = useState(false)
 
   useEffect(() => {
     setLocalSettings(settings)
+    loadAuthSettings()
   }, [settings])
+
+  const loadAuthSettings = async () => {
+    try {
+      const autoLoginSetting = await window.electron.ipcRenderer.invoke('auth:get-auto-login')
+      const claudeAuthData = await window.electron.ipcRenderer.invoke('auth:get-claude-official')
+      const configStatusData = await window.electron.ipcRenderer.invoke('auth:get-config-status')
+      setAutoLogin(autoLoginSetting)
+      setClaudeAuth(claudeAuthData)
+      setConfigStatus(configStatusData)
+    } catch (error) {
+      console.error('Failed to load auth settings:', error)
+    }
+  }
 
   const handleSave = async () => {
     try {
       await updateSettings(localSettings)
+      await window.electron.ipcRenderer.invoke('auth:set-auto-login', autoLogin)
       setSettingsOpen(false)
     } catch (error) {
       console.error('Failed to save settings:', error)
@@ -37,6 +56,7 @@ const SettingsModal: React.FC = () => {
     setLocalSettings(settings) // Reset to original settings
     setIsAddingProvider(false)
     setNewProvider({ name: '', baseUrl: '', apiKey: '', adapter: 'anthropic' })
+    loadAuthSettings() // Reset auth settings
     setSettingsOpen(false)
   }
 
@@ -94,6 +114,26 @@ const SettingsModal: React.FC = () => {
       await setActiveModel(providerId)
     } catch (error) {
       console.error('Failed to set active provider:', error)
+    }
+  }
+
+  const handleSetupClaudeAuth = async () => {
+    try {
+      await window.electron.ipcRenderer.invoke('auth:setup-claude-official')
+      await loadAuthSettings()
+    } catch (error) {
+      console.error('Failed to setup Claude auth:', error)
+    }
+  }
+
+  const handleRemoveClaudeAuth = async () => {
+    if (claudeAuth && window.confirm('Are you sure you want to remove Claude official authentication?')) {
+      try {
+        await window.electron.ipcRenderer.invoke('auth:remove-auth', claudeAuth.id)
+        await loadAuthSettings()
+      } catch (error) {
+        console.error('Failed to remove Claude auth:', error)
+      }
     }
   }
 
@@ -272,6 +312,134 @@ const SettingsModal: React.FC = () => {
                     + Add New Provider
                   </button>
                 )}
+              </div>
+            </div>
+            
+            {/* Authentication Settings */}
+            <div>
+              <h3 className="text-lg font-semibold text-white mb-4">Authentication</h3>
+              <div className="space-y-4">
+                <div>
+                  <label className="flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      checked={autoLogin}
+                      onChange={(e) => setAutoLogin(e.target.checked)}
+                      className="w-4 h-4 text-blue-600 bg-gray-700 border-gray-600 rounded"
+                    />
+                    <span className="text-sm text-gray-300">Auto-login with Claude official account</span>
+                  </label>
+                  <p className="text-xs text-gray-400 mt-1">
+                    Automatically use Claude official authentication when available
+                  </p>
+                </div>
+                
+                <div className="bg-gray-700/50 p-4 rounded-lg">
+                  <div className="flex items-center justify-between mb-2">
+                    <h4 className="text-sm font-medium text-white">Claude Official Authentication</h4>
+                    {claudeAuth && (
+                      <span className="text-xs text-green-400 bg-green-900 px-2 py-1 rounded">
+                        Connected
+                      </span>
+                    )}
+                  </div>
+                  
+                  {claudeAuth ? (
+                    <div className="space-y-2">
+                      <div className="text-sm text-gray-300">
+                        <span className="font-medium">User:</span> {claudeAuth.username || claudeAuth.email || 'Unknown'}
+                      </div>
+                      <div className="text-sm text-gray-300">
+                        <span className="font-medium">Last Login:</span> {
+                          claudeAuth.lastLoginAt ? new Date(claudeAuth.lastLoginAt).toLocaleDateString() : 'Unknown'
+                        }
+                      </div>
+                      <div className="flex gap-2 mt-3">
+                        <button
+                          onClick={handleSetupClaudeAuth}
+                          className="px-3 py-1 bg-blue-600 hover:bg-blue-700 text-white text-xs rounded transition-colors"
+                        >
+                          Refresh
+                        </button>
+                        <button
+                          onClick={handleRemoveClaudeAuth}
+                          className="px-3 py-1 bg-red-600 hover:bg-red-700 text-white text-xs rounded transition-colors"
+                        >
+                          Remove
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="space-y-2">
+                      <p className="text-sm text-gray-400">
+                        No Claude official authentication found. Make sure you have logged in with claude-code CLI.
+                      </p>
+                      <button
+                        onClick={handleSetupClaudeAuth}
+                        className="px-3 py-1 bg-blue-600 hover:bg-blue-700 text-white text-xs rounded transition-colors"
+                      >
+                        Detect Authentication
+                      </button>
+                    </div>
+                  )}
+                </div>
+                
+                {/* Config Debug Info */}
+                <div className="bg-gray-700/50 p-4 rounded-lg">
+                  <div className="flex items-center justify-between mb-2">
+                    <h4 className="text-sm font-medium text-white">Configuration Detection</h4>
+                    <button
+                      onClick={() => setShowConfigDebug(!showConfigDebug)}
+                      className="text-xs text-blue-400 hover:underline"
+                    >
+                      {showConfigDebug ? 'Hide Details' : 'Show Details'}
+                    </button>
+                  </div>
+                  
+                  {configStatus && (
+                    <div className="space-y-2">
+                      <div className="text-sm text-gray-300">
+                        <span className="font-medium">Found configs:</span> {configStatus.foundPaths?.length || 0}
+                      </div>
+                      <div className="text-sm text-gray-300">
+                        <span className="font-medium">Valid auth configs:</span> {configStatus.validConfigs?.length || 0}
+                      </div>
+                      
+                      {showConfigDebug && (
+                        <div className="mt-3 space-y-2">
+                          <div className="text-xs text-gray-400">
+                            <div className="font-medium mb-1">Search paths:</div>
+                            <div className="max-h-32 overflow-y-auto text-xs font-mono bg-gray-800 p-2 rounded">
+                              {configStatus.searchedPaths?.map((path: string, index: number) => (
+                                <div key={index} className={configStatus.foundPaths?.includes(path) ? 'text-green-400' : 'text-gray-500'}>
+                                  {configStatus.foundPaths?.includes(path) ? '✓' : '✗'} {path}
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                          
+                          {configStatus.validConfigs?.length > 0 && (
+                            <div className="text-xs text-gray-400">
+                              <div className="font-medium mb-1">Valid configurations:</div>
+                              <div className="space-y-1">
+                                {configStatus.validConfigs.map((config: any, index: number) => (
+                                  <div key={index} className="text-xs bg-gray-800 p-2 rounded">
+                                    <div className="text-green-400">{config.path}</div>
+                                    <div className="text-gray-300">
+                                      Auth: {config.hasAuth ? 'Yes' : 'No'}
+                                      {config.username && ` | User: ${config.username}`}
+                                      {config.email && ` | Email: ${config.email}`}
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
               </div>
             </div>
             
