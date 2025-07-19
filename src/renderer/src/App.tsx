@@ -4,37 +4,51 @@ import MainContent from './components/MainContent'
 import SettingsModal from './components/SettingsModal'
 import ErrorBoundary from './components/ErrorBoundary'
 import LoadingSpinner from './components/LoadingSpinner'
-import { initializeStore } from './stores/appStore'
+import StatusBar from './components/StatusBar'
+import { ClaudeInstallationGuide } from './components/ClaudeInstallationGuide'
+import { initializeStore, useAppStore } from './stores/appStore'
+import { logger } from './utils/logger'
 
 const App: React.FC = () => {
   const [isInitializing, setIsInitializing] = useState(true)
   const [initError, setInitError] = useState<string | null>(null)
+  const [showInstallationGuide, setShowInstallationGuide] = useState(false)
+  
+  // Use Claude detection from store
+  const { claudeDetection, detectClaude } = useAppStore()
 
   useEffect(() => {
-    // Initialize store data when app starts
-    initializeStore()
-      .then(() => {
+    // Initialize store data and detect Claude Code when app starts
+    const initializeApp = async () => {
+      try {
+        logger.info('App initializing...')
+        // Initialize store (this includes Claude detection)
+        await initializeStore()
+        logger.info('App initialized successfully')
+        
         setIsInitializing(false)
-      })
-      .catch((error) => {
-        console.error('Failed to initialize app:', error)
+      } catch (error) {
+        logger.error('Failed to initialize app', error)
         setInitError(error.message || 'Failed to initialize application')
         setIsInitializing(false)
-      })
+      }
+    }
+    
+    initializeApp()
 
     // Add keyboard shortcuts
     const handleKeyDown = (event: KeyboardEvent) => {
       // Ctrl/Cmd + , for settings
       if ((event.ctrlKey || event.metaKey) && event.key === ',') {
         event.preventDefault()
+        logger.debug('Settings shortcut pressed')
         // This would open settings modal
-        console.log('Settings shortcut pressed')
       }
       
       // Ctrl/Cmd + N for new session
       if ((event.ctrlKey || event.metaKey) && event.key === 'n') {
         event.preventDefault()
-        console.log('New session shortcut pressed')
+        logger.debug('New session shortcut pressed')
       }
 
       // Ctrl/Cmd + K for clear terminal
@@ -52,6 +66,28 @@ const App: React.FC = () => {
       document.removeEventListener('keydown', handleKeyDown)
     }
   }, [])
+
+  // Watch for Claude detection changes and show installation guide if needed
+  useEffect(() => {
+    if (claudeDetection && !claudeDetection.isInstalled) {
+      setShowInstallationGuide(true)
+    }
+  }, [claudeDetection])
+
+  const handleClaudeRecheck = async () => {
+    try {
+      // Clear cache and re-detect using store
+      await window.api.clearClaudeCache()
+      await detectClaude()
+      
+      // Hide installation guide if Claude Code is now detected
+      if (claudeDetection?.isInstalled) {
+        setShowInstallationGuide(false)
+      }
+    } catch (error) {
+      console.error('Failed to recheck Claude Code:', error)
+    }
+  }
 
   if (isInitializing) {
     return (
@@ -92,25 +128,41 @@ const App: React.FC = () => {
 
   return (
     <ErrorBoundary>
-      <div className="flex h-screen bg-claude-bg text-claude-text-primary font-inter antialiased">
-        {/* Session List Sidebar */}
-        <ErrorBoundary fallback={
-          <div className="w-72 bg-claude-sidebar flex items-center justify-center">
-            <div className="text-red-400 text-sm">Sidebar error</div>
-          </div>
-        }>
-          <Sidebar />
-        </ErrorBoundary>
+      <div className="flex flex-col h-screen bg-claude-bg text-claude-text-primary font-inter antialiased">
+        {/* Main Content Area - Reserve space for status bar */}
+        <div className="flex" style={{ height: 'calc(100vh - 32px)' }}>
+          {/* Session List Sidebar */}
+          <ErrorBoundary fallback={
+            <div className="w-72 bg-claude-sidebar flex items-center justify-center">
+              <div className="text-red-400 text-sm">Sidebar error</div>
+            </div>
+          }>
+            <Sidebar />
+          </ErrorBoundary>
+          
+          {/* Main Content Area */}
+          <ErrorBoundary>
+            <MainContent />
+          </ErrorBoundary>
+        </div>
         
-        {/* Main Content Area */}
+        {/* Status Bar - Fixed at bottom */}
         <ErrorBoundary>
-          <MainContent />
+          <StatusBar />
         </ErrorBoundary>
         
         {/* Settings Modal (Hidden by default) */}
         <ErrorBoundary>
           <SettingsModal />
         </ErrorBoundary>
+        
+        {/* Claude Installation Guide */}
+        {showInstallationGuide && (
+          <ClaudeInstallationGuide
+            onClose={() => setShowInstallationGuide(false)}
+            onRecheck={handleClaudeRecheck}
+          />
+        )}
       </div>
     </ErrorBoundary>
   )

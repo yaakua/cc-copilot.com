@@ -202,8 +202,8 @@ const Terminal = forwardRef<TerminalRef, TerminalProps>(({ sessionId }, ref) => 
   return (
     <div 
       ref={terminalRef}
-      className="h-full bg-black"
-      style={{ padding: 0 }}
+      className="h-full bg-black p-4"
+      style={{ padding: '16px' }}
     />
   )
 })

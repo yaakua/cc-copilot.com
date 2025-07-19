@@ -3,6 +3,9 @@ import { ElectronAPI } from '@electron-toolkit/preload'
 declare global {
   interface Window {
     electron: ElectronAPI
+    electronAPI: {
+      sendLog: (logEntry: LogEntry) => void
+    }
     api: {
       // Terminal APIs
       sendTerminalInput: (data: string, sessionId?: string) => Promise<void>
@@ -42,6 +45,16 @@ declare global {
       
       // Proxy APIs
       setActiveModel: (modelId: string) => Promise<void>
+      
+      // Claude Detection APIs
+      detectClaude: () => Promise<ClaudeDetectionResult>
+      testClaudeInstallation: (claudePath: string) => Promise<boolean>
+      clearClaudeCache: () => Promise<void>
+
+      // Claude Code Integration APIs
+      getClaudeProjects: () => Promise<ClaudeProject[]>
+      resumeClaudeSession: (sessionPath: string, workingDirectory: string) => Promise<void>
+      createNewClaudeSession: (workingDirectory: string) => Promise<string>
     }
   }
 }
@@ -82,8 +95,61 @@ export interface TokenUsage {
   total: number
 }
 
+export interface ProxyConfig {
+  enabled: boolean
+  host: string
+  port: number
+  username?: string
+  password?: string
+  protocol: 'http' | 'https'
+}
+
 export interface Settings {
   apiProviders: ApiProvider[]
   proxy?: string
+  proxyConfig?: ProxyConfig
   activeModelId?: string
+  defaultClaudePath?: string
+}
+
+export interface ClaudeDetectionResult {
+  isInstalled: boolean
+  installations: ClaudeInstallation[]
+  defaultPath?: string
+  error?: string
+}
+
+export interface ClaudeInstallation {
+  id: string
+  name: string
+  path: string
+  version?: string
+  type: 'global' | 'local' | 'binary'
+  valid: boolean
+}
+
+export interface ClaudeProject {
+  id: string
+  name: string
+  path: string
+  sessionsDir: string
+  sessions: ClaudeSession[]
+}
+
+export interface ClaudeSession {
+  id: string
+  name: string
+  filePath: string
+  createdAt: string
+  firstMessage?: string
+}
+
+export interface LogEntry {
+  timestamp: string
+  level: string
+  message: string
+  filename?: string
+  line?: number
+  error?: string
+  meta?: any
 }

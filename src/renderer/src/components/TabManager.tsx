@@ -17,45 +17,55 @@ const TabManager: React.FC = () => {
   const tabsContainerRef = useRef<HTMLDivElement>(null)
   
   const { 
-    sessions, 
-    activeSessionId, 
-    projects,
-    setActiveSession 
+    claudeProjects,
+    activeClaudeSessionId,
+    activeClaudeProjectId,
+    setActiveClaudeSession,
+    setActiveClaudeProject
   } = useAppStore()
 
-  // Create or switch to tab when active session changes
+  // Create or switch to tab when active Claude session changes
   useEffect(() => {
-    if (activeSessionId) {
-      const session = sessions.find(s => s.id === activeSessionId)
-      const project = projects.find(p => p.id === session?.projectId)
+    if (activeClaudeSessionId) {
+      // Check if tab already exists
+      const existingTab = tabs.find(t => t.sessionId === activeClaudeSessionId)
       
-      if (session && project) {
-        // Check if tab already exists
-        const existingTab = tabs.find(t => t.sessionId === activeSessionId)
-        
-        if (existingTab) {
-          // Switch to existing tab
-          setActiveTabId(existingTab.id)
-        } else {
-          // Create new tab
-          const newTab: Tab = {
-            id: `tab-${Date.now()}`,
-            sessionId: activeSessionId,
-            sessionName: session.name,
-            projectName: project.name,
-            terminalRef: React.createRef<TerminalRef>(),
-            isActive: true
-          }
-          
-          setTabs(prev => {
-            const updated = prev.map(t => ({ ...t, isActive: false }))
-            return [...updated, newTab]
-          })
-          setActiveTabId(newTab.id)
+      if (existingTab) {
+        // Switch to existing tab
+        setActiveTabId(existingTab.id)
+        return
+      }
+      
+      // Find the session and project for the active Claude session
+      let session = null
+      let project = null
+      
+      for (const proj of claudeProjects) {
+        const foundSession = proj.sessions.find(s => s.id === activeClaudeSessionId)
+        if (foundSession) {
+          session = foundSession
+          project = proj
+          break
         }
       }
+      
+      // Create new tab - either with found session/project or as temporary tab
+      const newTab: Tab = {
+        id: `tab-${Date.now()}`,
+        sessionId: activeClaudeSessionId,
+        sessionName: session ? session.name : `New Session`,
+        projectName: project ? project.name : 'Unknown Project',
+        terminalRef: React.createRef<TerminalRef>(),
+        isActive: true
+      }
+      
+      setTabs(prev => {
+        const updated = prev.map(t => ({ ...t, isActive: false }))
+        return [...updated, newTab]
+      })
+      setActiveTabId(newTab.id)
     }
-  }, [activeSessionId, sessions, projects, tabs])
+  }, [activeClaudeSessionId, claudeProjects, tabs])
 
   // Update active state when activeTabId changes
   useEffect(() => {
@@ -65,11 +75,29 @@ const TabManager: React.FC = () => {
     })))
   }, [activeTabId])
 
+  // Update tab information when claudeProjects changes (refresh session names)
+  useEffect(() => {
+    setTabs(prev => prev.map(tab => {
+      // Find updated session information
+      for (const proj of claudeProjects) {
+        const foundSession = proj.sessions.find(s => s.id === tab.sessionId)
+        if (foundSession) {
+          return {
+            ...tab,
+            sessionName: foundSession.name,
+            projectName: proj.name
+          }
+        }
+      }
+      return tab
+    }))
+  }, [claudeProjects])
+
   const handleTabClick = (tabId: string) => {
     const tab = tabs.find(t => t.id === tabId)
     if (tab) {
       setActiveTabId(tabId)
-      setActiveSession(tab.sessionId)
+      setActiveClaudeSession(tab.sessionId)
     }
   }
 
@@ -85,10 +113,10 @@ const TabManager: React.FC = () => {
         if (remainingTabs.length > 0) {
           const nextTab = remainingTabs[remainingTabs.length - 1]
           setActiveTabId(nextTab.id)
-          setActiveSession(nextTab.sessionId)
+          setActiveClaudeSession(nextTab.sessionId)
         } else {
           setActiveTabId(null)
-          setActiveSession(null)
+          setActiveClaudeSession(null)
         }
       }
       
@@ -138,7 +166,7 @@ const TabManager: React.FC = () => {
             <button
               key={tab.id}
               onClick={() => handleTabClick(tab.id)}
-              className={`flex-shrink-0 flex items-center space-x-2 px-4 py-3 text-sm font-medium border-b-2 transition-colors ${
+              className={`flex-shrink-0 flex items-center space-x-2 px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
                 tab.isActive 
                   ? 'text-white border-claude-accent' 
                   : 'text-claude-text-secondary hover:bg-claude-border/40 border-transparent'

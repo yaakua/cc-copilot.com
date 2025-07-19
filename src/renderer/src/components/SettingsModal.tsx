@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react'
 import { useAppStore } from '../stores/appStore'
-import { ApiProvider } from '../../../preload/index.d'
+import { ApiProvider, ClaudeDetectionResult, ClaudeInstallation } from '../../../preload/index.d'
 
 const SettingsModal: React.FC = () => {
   const {
@@ -23,10 +23,13 @@ const SettingsModal: React.FC = () => {
   const [claudeAuth, setClaudeAuth] = useState<any>(null)
   const [configStatus, setConfigStatus] = useState<any>(null)
   const [showConfigDebug, setShowConfigDebug] = useState(false)
+  const [claudeDetection, setClaudeDetection] = useState<ClaudeDetectionResult | null>(null)
+  const [isDetecting, setIsDetecting] = useState(false)
 
   useEffect(() => {
     setLocalSettings(settings)
     loadAuthSettings()
+    loadClaudeDetection()
   }, [settings])
 
   const loadAuthSettings = async () => {
@@ -42,13 +45,73 @@ const SettingsModal: React.FC = () => {
     }
   }
 
+  const loadClaudeDetection = async () => {
+    try {
+      const detection = await window.api.detectClaude()
+      setClaudeDetection(detection)
+    } catch (error) {
+      console.error('Failed to load Claude detection:', error)
+    }
+  }
+
+  const handleDetectClaude = async () => {
+    setIsDetecting(true)
+    try {
+      await window.api.clearClaudeCache()
+      const detection = await window.api.detectClaude()
+      setClaudeDetection(detection)
+    } catch (error) {
+      console.error('Failed to detect Claude:', error)
+    } finally {
+      setIsDetecting(false)
+    }
+  }
+
+  const handleSetDefaultClaude = async (claudePath: string) => {
+    try {
+      const updatedSettings = {
+        ...localSettings,
+        defaultClaudePath: claudePath
+      }
+      setLocalSettings(updatedSettings)
+    } catch (error) {
+      console.error('Failed to set default Claude path:', error)
+    }
+  }
+
+  const handleTestInstallation = async (claudePath: string) => {
+    try {
+      const isValid = await window.api.testClaudeInstallation(claudePath)
+      if (isValid) {
+        alert('Claude installation is working correctly!')
+      } else {
+        alert('Claude installation test failed. Please check the installation.')
+      }
+    } catch (error) {
+      console.error('Failed to test Claude installation:', error)
+      alert('Failed to test Claude installation')
+    }
+  }
+
   const handleSave = async () => {
     try {
+      console.log('[Settings] Saving settings with proxy config:', {
+        proxyEnabled: localSettings.proxyConfig?.enabled,
+        proxyHost: localSettings.proxyConfig?.host,
+        proxyPort: localSettings.proxyConfig?.port,
+        proxyProtocol: localSettings.proxyConfig?.protocol,
+        hasUsername: !!localSettings.proxyConfig?.username,
+        hasPassword: !!localSettings.proxyConfig?.password,
+        legacyProxy: localSettings.proxy
+      })
+      
       await updateSettings(localSettings)
       await window.electron.ipcRenderer.invoke('auth:set-auto-login', autoLogin)
+      
+      console.log('[Settings] Settings saved successfully')
       setSettingsOpen(false)
     } catch (error) {
-      console.error('Failed to save settings:', error)
+      console.error('[Settings] Failed to save settings:', error)
     }
   }
 
@@ -443,23 +506,250 @@ const SettingsModal: React.FC = () => {
               </div>
             </div>
             
-            {/* General Settings */}
+            {/* Claude Detection Settings */}
             <div>
-              <h3 className="text-lg font-semibold text-white mb-4">General</h3>
+              <h3 className="text-lg font-semibold text-white mb-4">Claude Code Detection</h3>
+              <div className="space-y-4">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h4 className="text-sm font-medium text-white">Installation Status</h4>
+                    <p className="text-xs text-gray-400 mt-1">
+                      Automatically detect Claude Code installations on your system
+                    </p>
+                  </div>
+                  <button
+                    onClick={handleDetectClaude}
+                    disabled={isDetecting}
+                    className="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-600 text-white text-sm rounded-md transition-colors flex items-center gap-2"
+                  >
+                    {isDetecting ? (
+                      <>
+                        <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                        Detecting...
+                      </>
+                    ) : (
+                      'Detect Claude Code'
+                    )}
+                  </button>
+                </div>
+
+                {claudeDetection && (
+                  <div className="bg-gray-700/50 p-4 rounded-lg">
+                    <div className="flex items-center gap-2 mb-3">
+                      <div className={`w-3 h-3 rounded-full ${claudeDetection.isInstalled ? 'bg-green-500' : 'bg-red-500'}`}></div>
+                      <span className="text-sm font-medium text-white">
+                        {claudeDetection.isInstalled ? 'Claude Code Detected' : 'Claude Code Not Found'}
+                      </span>
+                    </div>
+
+                    {claudeDetection.error && (
+                      <div className="bg-red-900/50 border border-red-600 p-3 rounded-md mb-3">
+                        <p className="text-sm text-red-300">Error: {claudeDetection.error}</p>
+                      </div>
+                    )}
+
+                    {claudeDetection.installations.length > 0 && (
+                      <div className="space-y-3">
+                        <h5 className="text-sm font-medium text-white">Available Installations</h5>
+                        <div className="space-y-2">
+                          {claudeDetection.installations.map((installation) => (
+                            <div
+                              key={installation.id}
+                              className="bg-gray-800/50 p-3 rounded-md border border-gray-600"
+                            >
+                              <div className="flex items-center justify-between mb-2">
+                                <div className="flex items-center gap-2">
+                                  <div className={`w-2 h-2 rounded-full ${installation.valid ? 'bg-green-500' : 'bg-red-500'}`}></div>
+                                  <span className="text-sm font-medium text-white">{installation.name}</span>
+                                  {installation.version && (
+                                    <span className="text-xs text-gray-400">v{installation.version}</span>
+                                  )}
+                                  <span className={`text-xs px-2 py-1 rounded ${
+                                    installation.type === 'global' ? 'bg-blue-600' :
+                                    installation.type === 'local' ? 'bg-green-600' :
+                                    'bg-purple-600'
+                                  } text-white`}>
+                                    {installation.type}
+                                  </span>
+                                </div>
+                                <div className="flex gap-2">
+                                  <button
+                                    onClick={() => handleTestInstallation(installation.path)}
+                                    className="text-xs text-blue-400 hover:underline"
+                                  >
+                                    Test
+                                  </button>
+                                  {installation.valid && (
+                                    <button
+                                      onClick={() => handleSetDefaultClaude(installation.path)}
+                                      className={`text-xs px-2 py-1 rounded ${
+                                        localSettings.defaultClaudePath === installation.path
+                                          ? 'bg-green-600 text-white'
+                                          : 'text-green-400 hover:underline'
+                                      }`}
+                                    >
+                                      {localSettings.defaultClaudePath === installation.path ? 'Default' : 'Set as Default'}
+                                    </button>
+                                  )}
+                                </div>
+                              </div>
+                              <div className="text-xs text-gray-400 font-mono bg-gray-900 p-2 rounded">
+                                {installation.path}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {claudeDetection.installations.length === 0 && !claudeDetection.error && (
+                      <div className="text-center py-4">
+                        <p className="text-sm text-gray-400">No Claude Code installations found on your system.</p>
+                        <p className="text-xs text-gray-500 mt-1">
+                          Please install Claude Code using npm or download it from the official website.
+                        </p>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Proxy Settings */}
+            <div>
+              <h3 className="text-lg font-semibold text-white mb-4">Proxy Configuration</h3>
+              <div className="bg-yellow-900/30 border border-yellow-600/50 p-3 rounded-md mb-4">
+                <p className="text-xs text-yellow-300">
+                  <strong>注意：</strong> 代理设置将应用于Claude Code的所有HTTP请求，包括与AI服务提供商的API调用。
+                  请确保您的代理服务器支持HTTPS流量以保证安全连接。
+                </p>
+              </div>
               <div className="space-y-4">
                 <div>
-                  <label htmlFor="proxy-url" className="block text-sm font-medium text-gray-300 mb-1">
-                    HTTP(S) Proxy (Optional)
+                  <label className="flex items-center gap-2 mb-4">
+                    <input
+                      type="checkbox"
+                      checked={localSettings.proxyConfig?.enabled || false}
+                      onChange={(e) => setLocalSettings({
+                        ...localSettings,
+                        proxyConfig: {
+                          ...localSettings.proxyConfig,
+                          enabled: e.target.checked,
+                          host: localSettings.proxyConfig?.host || '',
+                          port: localSettings.proxyConfig?.port || 8080,
+                          protocol: localSettings.proxyConfig?.protocol || 'http'
+                        }
+                      })}
+                      className="w-4 h-4 text-blue-600 bg-gray-700 border-gray-600 rounded"
+                    />
+                    <span className="text-sm text-gray-300 font-medium">启用HTTP/HTTPS代理</span>
                   </label>
-                  <input
-                    type="text"
-                    id="proxy-url"
-                    value={localSettings.proxy || ''}
-                    onChange={(e) => setLocalSettings({ ...localSettings, proxy: e.target.value })}
-                    className="w-full bg-gray-900 border border-gray-600 text-gray-200 rounded-md px-3 py-2 text-sm"
-                    placeholder="http://127.0.0.1:7890"
-                  />
                 </div>
+
+                {localSettings.proxyConfig?.enabled && (
+                  <div className="bg-gray-700/50 p-4 rounded-lg space-y-4">
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                      <div>
+                        <label className="block text-xs font-medium text-gray-400 mb-1">协议</label>
+                        <select
+                          value={localSettings.proxyConfig?.protocol || 'http'}
+                          onChange={(e) => setLocalSettings({
+                            ...localSettings,
+                            proxyConfig: {
+                              ...localSettings.proxyConfig!,
+                              protocol: e.target.value as 'http' | 'https'
+                            }
+                          })}
+                          className="w-full bg-gray-900 border border-gray-600 text-gray-200 rounded-md px-3 py-2 text-sm"
+                        >
+                          <option value="http">HTTP</option>
+                          <option value="https">HTTPS</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label className="block text-xs font-medium text-gray-400 mb-1">主机地址/IP</label>
+                        <input
+                          type="text"
+                          value={localSettings.proxyConfig?.host || ''}
+                          onChange={(e) => setLocalSettings({
+                            ...localSettings,
+                            proxyConfig: {
+                              ...localSettings.proxyConfig!,
+                              host: e.target.value
+                            }
+                          })}
+                          className="w-full bg-gray-900 border border-gray-600 text-gray-200 rounded-md px-3 py-2 text-sm"
+                          placeholder="127.0.0.1"
+                          required
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-medium text-gray-400 mb-1">端口</label>
+                        <input
+                          type="number"
+                          value={localSettings.proxyConfig?.port || 8080}
+                          onChange={(e) => setLocalSettings({
+                            ...localSettings,
+                            proxyConfig: {
+                              ...localSettings.proxyConfig!,
+                              port: parseInt(e.target.value) || 8080
+                            }
+                          })}
+                          className="w-full bg-gray-900 border border-gray-600 text-gray-200 rounded-md px-3 py-2 text-sm"
+                          placeholder="8080"
+                          min="1"
+                          max="65535"
+                          required
+                        />
+                      </div>
+                    </div>
+                    
+                    <div className="border-t border-gray-600 pt-4">
+                      <h4 className="text-sm font-medium text-gray-300 mb-3">身份验证（可选）</h4>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                        <div>
+                          <label className="block text-xs font-medium text-gray-400 mb-1">用户名</label>
+                          <input
+                            type="text"
+                            value={localSettings.proxyConfig?.username || ''}
+                            onChange={(e) => setLocalSettings({
+                              ...localSettings,
+                              proxyConfig: {
+                                ...localSettings.proxyConfig!,
+                                username: e.target.value || undefined
+                              }
+                            })}
+                            className="w-full bg-gray-900 border border-gray-600 text-gray-200 rounded-md px-3 py-2 text-sm"
+                            placeholder="可选"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-xs font-medium text-gray-400 mb-1">密码</label>
+                          <input
+                            type="password"
+                            value={localSettings.proxyConfig?.password || ''}
+                            onChange={(e) => setLocalSettings({
+                              ...localSettings,
+                              proxyConfig: {
+                                ...localSettings.proxyConfig!,
+                                password: e.target.value || undefined
+                              }
+                            })}
+                            className="w-full bg-gray-900 border border-gray-600 text-gray-200 rounded-md px-3 py-2 text-sm"
+                            placeholder="可选"
+                          />
+                        </div>
+                      </div>
+                    </div>
+                    
+                    <div className="bg-green-900/30 border border-green-600/50 p-3 rounded-md">
+                      <p className="text-xs text-green-300">
+                        <strong>提示：</strong> 启用代理后，Claude Code的所有网络请求（包括API调用、模型下载等）都将通过此代理服务器。
+                        请确保代理服务器稳定可靠，支持HTTPS协议。
+                      </p>
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
           </div>

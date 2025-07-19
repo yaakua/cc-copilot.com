@@ -2,6 +2,7 @@ import * as pty from 'node-pty'
 import { BrowserWindow } from 'electron'
 import * as os from 'os'
 import * as path from 'path'
+import { ClaudeDetector } from './claude-detector'
 
 export interface PtyOptions {
   workingDirectory?: string
@@ -18,6 +19,7 @@ export class PtyManager {
   private sessionId: string
   private isClaudeStarting: boolean = false
   private pendingOutput: string[] = []
+  private claudeInstalled: boolean = false
 
   constructor(mainWindow: BrowserWindow, sessionId: string) {
     this.mainWindow = mainWindow
@@ -54,15 +56,26 @@ export class PtyManager {
       let shellArgs: string[] = []
       
       if (options.autoStartClaude) {
-        // Start claude-code directly without showing the startup process
-        if (os.platform() === 'win32') {
-          shell = 'powershell.exe'
-          shellArgs = ['-Command', 'npx @anthropic-ai/claude-code']
+        // Check if Claude is installed before trying to start
+        const claudeDetector = new ClaudeDetector()
+        const detection = await claudeDetector.detectClaude()
+        this.claudeInstalled = detection.isInstalled
+        
+        // Always start a normal shell first, then run claude within it
+        shell = os.platform() === 'win32' ? 'powershell.exe' : 'bash'
+        shellArgs = []
+        
+        if (!detection.isInstalled) {
+          console.warn('[PTY] Claude not detected, starting normal shell instead')
         } else {
-          shell = 'bash'
-          shellArgs = ['-c', 'npx @anthropic-ai/claude-code']
+          console.log('[PTY] Claude detected, will start claude-code after shell initialization')
         }
       } else {
+        // Check Claude installation status for initial message customization
+        const claudeDetector = new ClaudeDetector()
+        const detection = await claudeDetector.detectClaude()
+        this.claudeInstalled = detection.isInstalled
+        
         // Start normal shell
         shell = os.platform() === 'win32' ? 'powershell.exe' : 'bash'
         shellArgs = []
@@ -83,13 +96,18 @@ export class PtyManager {
       this.setupEventHandlers()
       console.log('[PTY] Process started successfully')
       
-      // Send initial welcome message
+      // Send initial welcome message and start Claude if needed
       this.sendInitialMessage()
       
-      // Set flag if claude-code is starting directly
-      if (options.autoStartClaude) {
+      // Set flag if claude-code should be started
+      if (options.autoStartClaude && this.claudeInstalled) {
         this.isClaudeStarting = true
-        console.log('[PTY] Starting claude-code directly via PTY spawn')
+        console.log('[PTY] Will start claude-code after shell initialization')
+        
+        // Start Claude after a short delay to allow shell to initialize
+        setTimeout(() => {
+          this.startClaudeInShell()
+        }, 1000)
       }
     } catch (error) {
       console.error('[PTY] Failed to start:', error)
@@ -185,9 +203,36 @@ export class PtyManager {
     return { ...this.currentEnv }
   }
 
-  public startClaudeCode(workingDirectory?: string): void {
+  private startClaudeInShell(): void {
+    if (!this.ptyProcess) {
+      console.warn('[PTY] Cannot start claude - process not running')
+      return
+    }
+
+    console.log('[PTY] Starting claude command in shell...')
+    const command = os.platform() === 'win32' ? 'claude\r\n' : 'claude\n'
+    this.ptyProcess.write(command)
+  }
+
+  public async startClaudeCode(workingDirectory?: string): Promise<void> {
     if (!this.ptyProcess) {
       console.warn('[PTY] Cannot start claude-code - process not running')
+      return
+    }
+
+    // Check if Claude is installed before trying to start
+    const claudeDetector = new ClaudeDetector()
+    const detection = await claudeDetector.detectClaude()
+    
+    if (!detection.isInstalled) {
+      // Show error message instead of installation prompt
+      const errorMsg = '\x1b[31mError: Claude CLI not detected.\x1b[0m\r\n' +
+                      '\x1b[33mPlease install Claude CLI first. Check the status bar for installation instructions.\x1b[0m\r\n\r\n'
+      
+      this.mainWindow.webContents.send('terminal:data', {
+        sessionId: this.sessionId,
+        data: errorMsg
+      })
       return
     }
 
@@ -196,10 +241,24 @@ export class PtyManager {
       this.changeDirectory(workingDirectory)
     }
 
-    // Start claude-code with command write (for manual start)
-    const command = os.platform() === 'win32'
-      ? 'npx @anthropic-ai/claude-code\r\n'
-      : 'npx @anthropic-ai/claude-code\n'
+    // Determine the best command to use based on installation type
+    const validInstall = detection.installations.find(i => i.valid)
+    let command: string
+    
+    if (validInstall && (validInstall.type === 'global' || validInstall.path.includes('claude'))) {
+      // Use direct claude command for global installations
+      command = os.platform() === 'win32' ? 'claude\r\n' : 'claude\n'
+    } else {
+      // Show error instead of using npx
+      const errorMsg = '\x1b[31mError: No valid Claude CLI installation found.\x1b[0m\r\n' +
+                      '\x1b[33mPlease install Claude CLI first. Check the status bar for installation instructions.\x1b[0m\r\n\r\n'
+      
+      this.mainWindow.webContents.send('terminal:data', {
+        sessionId: this.sessionId,
+        data: errorMsg
+      })
+      return
+    }
     
     console.log('[PTY] Starting claude-code...')
     this.ptyProcess.write(command)
@@ -285,16 +344,36 @@ export class PtyManager {
     if (!this.isClaudeStarting) {
       setTimeout(() => {
         if (this.ptyProcess) {
+          let message = '\x1b[36mCC Copilot Terminal Ready\x1b[0m\r\n' +
+                       '\x1b[32m✓ Connected to real terminal\x1b[0m\r\n'
+          
+          if (this.claudeInstalled) {
+            message += '\x1b[90mType commands or start claude-code with: npx @anthropic-ai/claude-code\x1b[0m\r\n\r\n'
+          } else {
+            message += '\x1b[31m⚠️  Claude CLI not detected\x1b[0m\r\n' +
+                      '\x1b[33mPlease install Claude CLI first. Check the status bar for installation instructions.\x1b[0m\r\n\r\n'
+          }
+          
           this.mainWindow?.webContents.send('terminal:data', {
             sessionId: this.sessionId,
-            data: '\x1b[36mCC Copilot Terminal Ready\x1b[0m\r\n' +
-                  '\x1b[32m✓ Connected to real terminal\x1b[0m\r\n' +
-                  '\x1b[90mType commands or start claude-code with: npx @anthropic-ai/claude-code\x1b[0m\r\n\r\n'
+            data: message
           })
         }
       }, 100)
     } else {
-      // For auto-starting claude, don't send any initial message
+      if (!this.claudeInstalled) {
+        // Show error message instead of trying to start Claude
+        setTimeout(() => {
+          if (this.ptyProcess) {
+            this.mainWindow?.webContents.send('terminal:data', {
+              sessionId: this.sessionId,
+              data: '\x1b[31mError: Claude CLI not detected.\x1b[0m\r\n' +
+                    '\x1b[33mPlease install Claude CLI first. Check the status bar for installation instructions.\x1b[0m\r\n\r\n'
+            })
+          }
+        }, 100)
+      }
+      // For auto-starting claude when installed, don't send any initial message
       // We'll wait for claude-code to be ready
     }
   }

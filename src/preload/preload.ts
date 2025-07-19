@@ -1,5 +1,11 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import { electronAPI } from '@electron-toolkit/preload'
+import type { LogEntry } from './index'
+
+// Logger API for renderer
+const loggerAPI = {
+  sendLog: (logEntry: LogEntry) => ipcRenderer.send('logger:send', logEntry)
+}
 
 // Custom APIs for renderer
 const api = {
@@ -42,7 +48,19 @@ const api = {
     ipcRenderer.invoke('stats:get', scope, id),
   
   // Proxy APIs
-  setActiveModel: (modelId: string) => ipcRenderer.invoke('proxy:set-model', modelId)
+  setActiveModel: (modelId: string) => ipcRenderer.invoke('proxy:set-model', modelId),
+  
+  // Claude Detection APIs
+  detectClaude: () => ipcRenderer.invoke('claude:detect'),
+  testClaudeInstallation: (claudePath: string) => ipcRenderer.invoke('claude:test-installation', claudePath),
+  clearClaudeCache: () => ipcRenderer.invoke('claude:clear-cache'),
+
+  // Claude Code Integration APIs
+  getClaudeProjects: () => ipcRenderer.invoke('claude-code:get-projects'),
+  resumeClaudeSession: (sessionPath: string, workingDirectory: string) => 
+    ipcRenderer.invoke('claude-code:resume-session', sessionPath, workingDirectory),
+  createNewClaudeSession: (workingDirectory: string) => 
+    ipcRenderer.invoke('claude-code:create-new-session', workingDirectory)
 }
 
 // Use `contextBridge` APIs to expose Electron APIs to
@@ -51,6 +69,7 @@ const api = {
 if (process.contextIsolated) {
   try {
     contextBridge.exposeInMainWorld('electron', electronAPI)
+    contextBridge.exposeInMainWorld('electronAPI', loggerAPI)
     contextBridge.exposeInMainWorld('api', api)
   } catch (error) {
     console.error(error)
@@ -58,6 +77,8 @@ if (process.contextIsolated) {
 } else {
   // @ts-ignore (define in dts)
   window.electron = electronAPI
+  // @ts-ignore (define in dts)
+  window.electronAPI = loggerAPI
   // @ts-ignore (define in dts)
   window.api = api
 }

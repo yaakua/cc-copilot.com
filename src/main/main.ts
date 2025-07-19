@@ -5,6 +5,9 @@ import { ProxyServer } from './proxy'
 import { PtyManager } from './pty-manager'
 import { DataStore } from './store'
 import { ApiProxyManager } from './api-proxy-manager'
+import { ClaudeDetector } from './claude-detector'
+import { logger } from './logger'
+import { LogViewer } from './log-viewer'
 // import icon from '../../resources/icon.png?asset'
 
 // Declare global for mainWindow
@@ -16,6 +19,7 @@ declare global {
 let proxyServer: ProxyServer
 let dataStore: DataStore
 let apiProxyManager: ApiProxyManager
+let logViewer: LogViewer
 
 // Session-specific PtyManager cache
 const ptyManagers = new Map<string, PtyManager>()
@@ -44,6 +48,7 @@ function createWindow(): void {
   proxyServer = new ProxyServer()
   dataStore = new DataStore()
   apiProxyManager = new ApiProxyManager(dataStore)
+  logViewer = new LogViewer()
   
   // Store mainWindow reference for creating PtyManagers later
   global.mainWindow = mainWindow
@@ -52,13 +57,23 @@ function createWindow(): void {
   setupIpcHandlers()
 
   mainWindow.on('ready-to-show', async () => {
+    logger.info('Main window ready to show')
     mainWindow.show()
-    // Start proxy server when window is ready
-    await proxyServer.start().catch(console.error)
     
-    // Initialize API proxy manager with Claude auth if enabled
-    await apiProxyManager.initializeWithClaudeAuth()
-    await apiProxyManager.startProxy()
+    try {
+      // Start proxy server when window is ready
+      logger.info('Starting proxy server')
+      await proxyServer.start()
+      logger.info('Proxy server started successfully')
+      
+      // Initialize API proxy manager with Claude auth if enabled
+      logger.info('Initializing API proxy manager')
+      await apiProxyManager.initializeWithClaudeAuth()
+      await apiProxyManager.startProxy()
+      logger.info('API proxy manager initialized successfully')
+    } catch (error) {
+      logger.error('Failed to initialize services', error)
+    }
   })
 
   mainWindow.webContents.setWindowOpenHandler((details) => {
@@ -116,6 +131,28 @@ function getPtyManagerForSession(sessionId: string): PtyManager | null {
 }
 
 function setupIpcHandlers(): void {
+  // Logger IPC handlers
+  ipcMain.on('logger:send', (_, logEntry: any) => {
+    const { timestamp, level, message, filename, line, error, meta } = logEntry
+    const caller = filename && line ? `${filename}:${line}` : undefined
+    
+    switch (level) {
+      case 'debug':
+        logger.debug(`[RENDERER] ${message}`, { ...meta, caller })
+        break
+      case 'info':
+        logger.info(`[RENDERER] ${message}`, { ...meta, caller })
+        break
+      case 'warn':
+        logger.warn(`[RENDERER] ${message}`, { ...meta, caller })
+        break
+      case 'error':
+        logger.error(`[RENDERER] ${message}`, error, { ...meta, caller })
+        break
+      default:
+        logger.info(`[RENDERER] ${message}`, { ...meta, caller })
+    }
+  })
   // Terminal IPC handlers
   ipcMain.handle('terminal:input', async (_, data: string, sessionId?: string) => {
     const manager = sessionId ? getPtyManagerForSession(sessionId) : getCurrentPtyManager()
@@ -195,7 +232,7 @@ function setupIpcHandlers(): void {
   ipcMain.handle('pty:start-claude-code', async (_, workingDirectory?: string, sessionId?: string) => {
     const manager = sessionId ? getPtyManagerForSession(sessionId) : getCurrentPtyManager()
     if (manager) {
-      manager.startClaudeCode(workingDirectory)
+      await manager.startClaudeCode(workingDirectory)
     } else {
       console.warn('[PTY] No active session, cannot start claude-code')
     }
@@ -365,12 +402,71 @@ function setupIpcHandlers(): void {
   ipcMain.handle('auth:get-search-paths', () => {
     return apiProxyManager.getClaudeConfigSearchPaths()
   })
+
+  // Claude Detection IPC handlers
+  ipcMain.handle('claude:detect', async () => {
+    const detector = ClaudeDetector.getInstance()
+    return await detector.detectClaude()
+  })
+
+  ipcMain.handle('claude:test-installation', async (_, claudePath: string) => {
+    const detector = ClaudeDetector.getInstance()
+    return await detector.testClaudeInstallation(claudePath)
+  })
+
+  ipcMain.handle('claude:clear-cache', () => {
+    const detector = ClaudeDetector.getInstance()
+    detector.clearCache()
+  })
+
+  // Claude Code Integration IPC handlers
+  ipcMain.handle('claude-code:get-projects', () => {
+    return dataStore.getClaudeProjects()
+  })
+
+  ipcMain.handle('claude-code:resume-session', async (_, sessionPath: string, workingDirectory: string) => {
+    const manager = getCurrentPtyManager()
+    if (manager) {
+      // 切换到工作目录
+      manager.changeDirectory(workingDirectory)
+      // 启动Claude Code并恢复会话
+      manager.sendInput(`claude /resume "${sessionPath}"\n`)
+    } else {
+      console.warn('[Claude Code] No active session, cannot resume')
+    }
+  })
+
+  ipcMain.handle('claude-code:create-new-session', async (_, workingDirectory: string) => {
+    // 创建一个新的会话ID
+    const newSessionId = `session-${Date.now()}`
+    
+    // 设置为活跃会话
+    currentActiveSessionId = newSessionId
+    
+    // 创建新的PtyManager
+    const manager = getOrCreatePtyManager(newSessionId)
+    
+    // 启动终端并切换到指定目录，然后启动Claude Code
+    try {
+      await manager.start({ 
+        workingDirectory: workingDirectory,
+        autoStartClaude: true
+      })
+      console.log(`[Claude Code] Created new session ${newSessionId} in ${workingDirectory}`)
+      return newSessionId
+    } catch (error) {
+      console.error('[Claude Code] Failed to create new session:', error)
+      throw error
+    }
+  })
 }
 
 // This method will be called when Electron has finished
 // initialization and is ready to create browser windows.
 // Some APIs can only be used after this event occurs.
 app.whenReady().then(() => {
+  logger.info('App ready, initializing...')
+  
   // Set app user model id for windows
   electronApp.setAppUserModelId('com.cccopilot')
 
@@ -382,6 +478,7 @@ app.whenReady().then(() => {
   })
 
   createWindow()
+  logger.info('Main window created')
 
   app.on('activate', function () {
     // On macOS it's common to re-create a window in the app when the

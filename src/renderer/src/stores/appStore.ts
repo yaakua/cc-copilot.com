@@ -1,16 +1,17 @@
 import { create } from 'zustand'
-import { Project, Session, ApiProvider, TokenUsage, Settings } from '../../../preload/index.d'
+import { Project, Session, ApiProvider, TokenUsage, Settings, ClaudeProject, ClaudeSession, ClaudeDetectionResult } from '../../../preload/index.d'
 
 interface AppState {
   // UI State
-  activeProjectId: string | null
-  activeSessionId: string | null
   isSettingsOpen: boolean
   
   // Data
-  projects: Project[]
-  sessions: Session[]
   settings: Settings
+  
+  // Claude Code Integration
+  claudeProjects: ClaudeProject[]
+  activeClaudeProjectId: string | null
+  activeClaudeSessionId: string | null
   
   // Statistics
   currentStats: TokenUsage
@@ -19,28 +20,31 @@ interface AppState {
   // Terminal state
   isClaudeCodeRunning: boolean
   terminalConnected: boolean
+  
+  // Claude Detection
+  claudeDetection: ClaudeDetectionResult | null
 }
 
 interface AppActions {
   // UI Actions
-  setActiveProject: (projectId: string | null) => Promise<void>
-  setActiveSession: (sessionId: string | null) => Promise<void>
   setSettingsOpen: (open: boolean) => void
   setStatsScope: (scope: 'session' | 'project' | 'global') => void
   
   // Data Actions
-  loadProjects: () => Promise<void>
-  loadSessions: (projectId: string) => Promise<void>
   loadSettings: () => Promise<void>
-  createProject: (name: string, path: string) => Promise<Project>
-  selectProjectDirectory: () => Promise<string | null>
-  getProjectHistory: () => Promise<string[]>
-  clearProjectHistory: () => Promise<void>
-  extractProjectName: (path: string) => Promise<string>
-  createSession: (projectId: string) => Promise<Session>
-  deleteProject: (id: string) => Promise<void>
-  deleteSession: (id: string) => Promise<void>
   updateSettings: (settings: Partial<Settings>) => Promise<void>
+  
+  // Project Actions (for creating new projects)
+  selectProjectDirectory: () => Promise<string | null>
+  extractProjectName: (path: string) => Promise<string>
+  
+  // Claude Code Actions
+  loadClaudeProjects: () => Promise<void>
+  setActiveClaudeProject: (projectId: string | null) => void
+  setActiveClaudeSession: (sessionId: string | null) => void
+  resumeClaudeSession: (session: ClaudeSession, project: ClaudeProject) => Promise<void>
+  createNewProject: (path: string) => Promise<void>
+  createNewSession: (projectPath: string) => Promise<void>
   
   // Statistics Actions
   loadStats: () => Promise<void>
@@ -51,74 +55,31 @@ interface AppActions {
   startClaudeCode: (workingDirectory?: string) => Promise<void>
   stopClaudeCode: () => Promise<void>
   setActiveModel: (modelId: string) => Promise<void>
+  
+  // Claude Detection Actions
+  detectClaude: () => Promise<void>
 }
 
 type AppStore = AppState & AppActions
 
 export const useAppStore = create<AppStore>((set, get) => ({
   // Initial State
-  activeProjectId: null,
-  activeSessionId: null,
   isSettingsOpen: false,
-  projects: [],
-  sessions: [],
   settings: {
     apiProviders: [],
     theme: 'dark'
   },
+  // Claude Code Integration
+  claudeProjects: [],
+  activeClaudeProjectId: null,
+  activeClaudeSessionId: null,
   currentStats: { prompt: 0, completion: 0, total: 0 },
   statsScope: 'session',
   isClaudeCodeRunning: false,
   terminalConnected: false,
+  claudeDetection: null,
 
   // UI Actions
-  setActiveProject: async (projectId) => {
-    set({ activeProjectId: projectId, activeSessionId: null })
-    if (projectId) {
-      get().loadSessions(projectId)
-      
-      // Auto-start claude-code when a project is selected
-      const project = get().projects.find(p => p.id === projectId)
-      if (project && !get().isClaudeCodeRunning) {
-        try {
-          await get().startClaudeCode(project.path)
-        } catch (error) {
-          console.error('Failed to auto-start claude-code:', error)
-        }
-      }
-    }
-  },
-
-  setActiveSession: async (sessionId) => {
-    set({ activeSessionId: sessionId })
-    get().loadStats()
-    
-    // Notify main process about session activation
-    if (sessionId) {
-      try {
-        await window.api.activateSession(sessionId)
-      } catch (error) {
-        console.error('Failed to activate session:', error)
-      }
-    }
-    
-    // Auto-start claude-code and change directory when a session is selected
-    const { activeProjectId, projects, isClaudeCodeRunning } = get()
-    const project = projects.find(p => p.id === activeProjectId)
-    
-    if (project && sessionId) {
-      if (!isClaudeCodeRunning) {
-        try {
-          await get().startClaudeCode(project.path)
-        } catch (error) {
-          console.error('Failed to auto-start claude-code:', error)
-        }
-      }
-      // No need to change directory when activating existing session
-      // PTY already starts in correct working directory
-    }
-  },
-
   setSettingsOpen: (open) => set({ isSettingsOpen: open }),
 
   setStatsScope: (scope) => {
@@ -127,142 +88,12 @@ export const useAppStore = create<AppStore>((set, get) => ({
   },
 
   // Data Actions
-  loadProjects: async () => {
-    try {
-      const projects = await window.api.getProjects()
-      set({ projects })
-      
-      // Set active project if none selected
-      if (!get().activeProjectId && projects.length > 0) {
-        await get().setActiveProject(projects[0].id)
-      }
-    } catch (error) {
-      console.error('Failed to load projects:', error)
-    }
-  },
-
-  loadSessions: async (projectId: string) => {
-    try {
-      const sessions = await window.api.getSessions(projectId)
-      set({ sessions })
-    } catch (error) {
-      console.error('Failed to load sessions:', error)
-    }
-  },
-
   loadSettings: async () => {
     try {
       const settings = await window.api.getSettings()
       set({ settings })
     } catch (error) {
       console.error('Failed to load settings:', error)
-    }
-  },
-
-  createProject: async (name: string, path: string) => {
-    try {
-      const project = await window.api.createProject(name, path)
-      const projects = [...get().projects, project]
-      set({ projects })
-      await get().setActiveProject(project.id)
-      return project
-    } catch (error) {
-      console.error('Failed to create project:', error)
-      throw error
-    }
-  },
-
-  selectProjectDirectory: async () => {
-    try {
-      return await window.api.selectProjectDirectory()
-    } catch (error) {
-      console.error('Failed to select project directory:', error)
-      throw error
-    }
-  },
-
-  getProjectHistory: async () => {
-    try {
-      return await window.api.getProjectHistory()
-    } catch (error) {
-      console.error('Failed to get project history:', error)
-      throw error
-    }
-  },
-
-  clearProjectHistory: async () => {
-    try {
-      await window.api.clearProjectHistory()
-    } catch (error) {
-      console.error('Failed to clear project history:', error)
-      throw error
-    }
-  },
-
-  extractProjectName: async (path: string) => {
-    try {
-      return await window.api.extractProjectName(path)
-    } catch (error) {
-      console.error('Failed to extract project name:', error)
-      throw error
-    }
-  },
-
-  createSession: async (projectId: string) => {
-    try {
-      const session = await window.api.createSession(projectId)
-      await get().loadSessions(projectId)
-      
-      // Auto-start claude-code when creating a new session
-      const project = get().projects.find(p => p.id === projectId)
-      if (project && !get().isClaudeCodeRunning) {
-        try {
-          console.log("Auto-start claude-code when creating session")
-          await get().startClaudeCode(project.path)
-        } catch (error) {
-          console.error('Failed to auto-start claude-code when creating session:', error)
-        }
-      }
-      
-      await get().setActiveSession(session.id)
-      return session
-    } catch (error) {
-      console.error('Failed to create session:', error)
-      throw error
-    }
-  },
-
-  deleteProject: async (id: string) => {
-    try {
-      await window.api.deleteProject(id)
-      const projects = get().projects.filter(p => p.id !== id)
-      set({ projects })
-      
-      // Clear active project if it was deleted
-      if (get().activeProjectId === id) {
-        const newActiveProject = projects.length > 0 ? projects[0].id : null
-        await get().setActiveProject(newActiveProject)
-      }
-    } catch (error) {
-      console.error('Failed to delete project:', error)
-      throw error
-    }
-  },
-
-  deleteSession: async (id: string) => {
-    try {
-      await window.api.deleteSession(id)
-      const sessions = get().sessions.filter(s => s.id !== id)
-      set({ sessions })
-      
-      // Clear active session if it was deleted
-      if (get().activeSessionId === id) {
-        const newActiveSession = sessions.length > 0 ? sessions[0].id : null
-        get().setActiveSession(newActiveSession)
-      }
-    } catch (error) {
-      console.error('Failed to delete session:', error)
-      throw error
     }
   },
 
@@ -277,16 +108,35 @@ export const useAppStore = create<AppStore>((set, get) => ({
     }
   },
 
+  // Project Actions
+  selectProjectDirectory: async () => {
+    try {
+      return await window.api.selectProjectDirectory()
+    } catch (error) {
+      console.error('Failed to select project directory:', error)
+      throw error
+    }
+  },
+
+  extractProjectName: async (path: string) => {
+    try {
+      return await window.api.extractProjectName(path)
+    } catch (error) {
+      console.error('Failed to extract project name:', error)
+      throw error
+    }
+  },
+
   // Statistics Actions
   loadStats: async () => {
     try {
-      const { statsScope, activeSessionId, activeProjectId } = get()
+      const { statsScope, activeClaudeSessionId, activeClaudeProjectId } = get()
       let id: string | undefined
       
-      if (statsScope === 'session' && activeSessionId) {
-        id = activeSessionId
-      } else if (statsScope === 'project' && activeProjectId) {
-        id = activeProjectId
+      if (statsScope === 'session' && activeClaudeSessionId) {
+        id = activeClaudeSessionId
+      } else if (statsScope === 'project' && activeClaudeProjectId) {
+        id = activeClaudeProjectId
       }
       
       const stats = await window.api.getStats(statsScope, id)
@@ -329,6 +179,96 @@ export const useAppStore = create<AppStore>((set, get) => ({
       console.error('Failed to set active model:', error)
       throw error
     }
+  },
+
+  // Claude Code Actions
+  loadClaudeProjects: async () => {
+    try {
+      const claudeProjects = await window.api.getClaudeProjects()
+      set({ claudeProjects })
+      
+      // Set active Claude project if none selected
+      if (!get().activeClaudeProjectId && claudeProjects.length > 0) {
+        get().setActiveClaudeProject(claudeProjects[0].id)
+      }
+    } catch (error) {
+      console.error('Failed to load Claude projects:', error)
+    }
+  },
+
+  setActiveClaudeProject: (projectId) => {
+    set({ 
+      activeClaudeProjectId: projectId, 
+      activeClaudeSessionId: null 
+    })
+  },
+
+  setActiveClaudeSession: (sessionId) => {
+    set({ activeClaudeSessionId: sessionId })
+  },
+
+  resumeClaudeSession: async (session: ClaudeSession, project: ClaudeProject) => {
+    try {
+      // Set active Claude session
+      get().setActiveClaudeSession(session.id)
+      
+      // Resume the session using the API
+      await window.api.resumeClaudeSession(session.filePath, project.path)
+      
+      console.log(`Resumed Claude session: ${session.name} in project: ${project.name}`)
+    } catch (error) {
+      console.error('Failed to resume Claude session:', error)
+      throw error
+    }
+  },
+
+  createNewProject: async (path: string) => {
+    try {
+      // 启动claude code在指定目录，这将自动创建新的项目
+      await get().startClaudeCode(path)
+      
+      // 稍微延迟后刷新项目列表
+      setTimeout(() => {
+        get().loadClaudeProjects()
+      }, 2000)
+      
+      console.log(`Created new Claude Code project in: ${path}`)
+    } catch (error) {
+      console.error('Failed to create new project:', error)
+      throw error
+    }
+  },
+
+  createNewSession: async (projectPath: string) => {
+    try {
+      // 使用新的API创建新的Claude Code会话
+      const sessionId = await window.api.createNewClaudeSession(projectPath)
+      
+      // 立即设置活跃会话
+      get().setActiveClaudeSession(sessionId)
+      
+      // 稍微延迟后刷新项目列表
+      setTimeout(() => {
+        get().loadClaudeProjects()
+      }, 2000)
+      
+      console.log(`Created new Claude Code session ${sessionId} in: ${projectPath}`)
+      return sessionId
+    } catch (error) {
+      console.error('Failed to create new session:', error)
+      throw error
+    }
+  },
+
+  // Claude Detection Actions
+  detectClaude: async () => {
+    try {
+      const detection = await window.api.detectClaude()
+      set({ claudeDetection: detection })
+    } catch (error) {
+      console.error('Failed to detect Claude:', error)
+      set({ claudeDetection: { isInstalled: false, installations: [], error: 'Detection failed' } })
+    }
   }
 }))
 
@@ -336,6 +276,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
 export const initializeStore = async () => {
   const store = useAppStore.getState()
   await store.loadSettings()
-  await store.loadProjects()
+  await store.loadClaudeProjects()
   await store.loadStats()
+  await store.detectClaude()
 }

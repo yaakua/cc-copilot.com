@@ -124,6 +124,18 @@ export class ApiProxyManager {
     this.dataStore = dataStore
     this.adapters = new Map()
     this.initializeAdapters()
+    this.checkProxyDependencies()
+  }
+
+  private checkProxyDependencies(): void {
+    try {
+      require('http-proxy-agent')
+      require('https-proxy-agent')
+      console.log('[API Proxy Manager] Proxy agent dependencies loaded successfully')
+    } catch (error) {
+      console.error('[API Proxy Manager] Failed to load proxy agent dependencies:', error)
+      console.error('[API Proxy Manager] Please run: npm install http-proxy-agent https-proxy-agent')
+    }
   }
 
   private initializeAdapters(): void {
@@ -133,31 +145,62 @@ export class ApiProxyManager {
   }
 
   async startProxy(port: number = 31299): Promise<void> {
+    const settings = this.dataStore.getSettings()
+    const proxyConfig = settings.proxyConfig
+    
+    console.log('[API Proxy Manager] Starting proxy on port:', port)
+    console.log('[API Proxy Manager] System proxy configuration:', {
+      enabled: proxyConfig?.enabled || false,
+      host: proxyConfig?.host || 'none',
+      port: proxyConfig?.port || 'none',
+      protocol: proxyConfig?.protocol || 'none',
+      hasAuth: !!(proxyConfig?.username && proxyConfig?.password)
+    })
+    
     if (this.proxyProcess) {
+      console.log('[API Proxy Manager] Stopping existing proxy process')
       await this.stopProxy()
     }
 
     const proxyScript = this.createProxyScript(port)
     const scriptPath = path.join(os.tmpdir(), 'cc-copilot-proxy.js')
     
+    console.log('[API Proxy Manager] Writing proxy script to:', scriptPath)
     fs.writeFileSync(scriptPath, proxyScript)
 
+    console.log('[API Proxy Manager] Spawning proxy process')
     this.proxyProcess = spawn('node', [scriptPath], {
       stdio: 'pipe',
       env: { ...process.env }
     })
 
+    this.proxyProcess.stdout?.on('data', (data) => {
+      const output = data.toString().trim()
+      if (output) {
+        console.log('[Proxy Process]', output)
+      }
+    })
+
+    this.proxyProcess.stderr?.on('data', (data) => {
+      const output = data.toString().trim()
+      if (output) {
+        console.error('[Proxy Process Error]', output)
+      }
+    })
+
     this.proxyProcess.on('error', (error) => {
-      console.error('Proxy process error:', error)
+      console.error('[API Proxy Manager] Proxy process error:', error)
     })
 
     this.proxyProcess.on('exit', (code) => {
-      console.log(`Proxy process exited with code ${code}`)
+      console.log(`[API Proxy Manager] Proxy process exited with code ${code}`)
     })
 
+    console.log('[API Proxy Manager] Waiting for proxy to start...')
     await new Promise((resolve) => {
       setTimeout(resolve, 1000)
     })
+    console.log('[API Proxy Manager] Proxy startup completed')
   }
 
   async stopProxy(): Promise<void> {
@@ -168,10 +211,50 @@ export class ApiProxyManager {
   }
 
   private createProxyScript(port: number): string {
+    const settings = this.dataStore.getSettings()
+    const proxyConfig = settings.proxyConfig
+    const channelStatus = this.dataStore.getChannelStatus()
+    const currentProvider = settings.apiProviders.find(p => p.id === channelStatus.currentProviderId)
+    
+    console.log('[API Proxy] Creating proxy script with config:', {
+      proxyEnabled: proxyConfig?.enabled,
+      proxyHost: proxyConfig?.host,
+      proxyPort: proxyConfig?.port,
+      proxyProtocol: proxyConfig?.protocol,
+      hasUsername: !!proxyConfig?.username,
+      hasPassword: !!proxyConfig?.password,
+      currentProviderId: channelStatus.currentProviderId,
+      providerFound: !!currentProvider
+    })
+    
     return `
 const http = require('http');
 const https = require('https');
 const url = require('url');
+const { HttpsProxyAgent } = require('https-proxy-agent');
+const { HttpProxyAgent } = require('http-proxy-agent');
+
+const proxyConfig = ${JSON.stringify(proxyConfig)};
+const channelStatus = ${JSON.stringify(channelStatus)};
+const currentProvider = ${JSON.stringify(currentProvider)};
+
+function logWithFlush(message, data) {
+  console.log(message, data);
+  if (process.stdout.write) {
+    process.stdout.write('');
+  }
+}
+
+logWithFlush('[Proxy Script] Starting with configuration:', {
+  proxyEnabled: proxyConfig?.enabled,
+  proxyHost: proxyConfig?.host,
+  proxyPort: proxyConfig?.port,
+  proxyProtocol: proxyConfig?.protocol,
+  hasUsername: !!proxyConfig?.username,
+  hasPassword: !!proxyConfig?.password,
+  currentProviderId: channelStatus?.currentProviderId,
+  providerName: currentProvider?.name
+});
 
 const server = http.createServer((req, res) => {
   // Enable CORS
@@ -203,11 +286,14 @@ const server = http.createServer((req, res) => {
 });
 
 async function handleRequest(req, body) {
-  // Get current channel status from electron main process
-  const channelStatus = await getCurrentChannelStatus();
-  const provider = await getProviderById(channelStatus.currentProviderId);
+  logWithFlush('[Proxy Script] Handling request:', {
+    url: req.url,
+    method: req.method,
+    currentProvider: currentProvider?.name || 'none'
+  });
   
-  if (!provider) {
+  if (!currentProvider) {
+    console.error('[Proxy Script] No active provider configured');
     return {
       status: 500,
       headers: { 'Content-Type': 'application/json' },
@@ -215,12 +301,13 @@ async function handleRequest(req, body) {
     };
   }
 
-  const adapter = getAdapter(provider.adapter);
+  const adapter = getAdapter(currentProvider.adapter);
   if (!adapter) {
+    console.error('[Proxy Script] Unknown adapter:', currentProvider.adapter);
     return {
       status: 500,
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ error: 'Unknown adapter: ' + provider.adapter })
+      body: JSON.stringify({ error: 'Unknown adapter: ' + currentProvider.adapter })
     };
   }
 
@@ -231,15 +318,29 @@ async function handleRequest(req, body) {
     body: body ? JSON.parse(body) : undefined
   };
 
-  const transformedRequest = adapter.transformRequest(request, provider);
+  logWithFlush('[Proxy Script] Transforming request with adapter:', currentProvider.adapter);
+  const transformedRequest = adapter.transformRequest(request, currentProvider);
   const response = await makeHttpRequest(transformedRequest);
-  const transformedResponse = adapter.transformResponse(response, provider);
+  const transformedResponse = adapter.transformResponse(response, currentProvider);
 
   return transformedResponse;
 }
 
 async function makeHttpRequest(request) {
   return new Promise((resolve, reject) => {
+    logWithFlush('[API Proxy] Making HTTP request:', {
+      url: request.url,
+      method: request.method,
+      proxyEnabled: proxyConfig?.enabled,
+      proxyConfig: proxyConfig ? {
+        enabled: proxyConfig.enabled,
+        host: proxyConfig.host,
+        port: proxyConfig.port,
+        protocol: proxyConfig.protocol,
+        hasAuth: !!(proxyConfig.username && proxyConfig.password)
+      } : null
+    });
+
     const parsedUrl = url.parse(request.url);
     const options = {
       hostname: parsedUrl.hostname,
@@ -249,13 +350,55 @@ async function makeHttpRequest(request) {
       headers: request.headers
     };
 
+    // Add proxy support if enabled
+    if (proxyConfig && proxyConfig.enabled && proxyConfig.host && proxyConfig.port) {
+      let proxyUrl = \`\${proxyConfig.protocol}://\${proxyConfig.host}:\${proxyConfig.port}\`;
+      
+      // Add authentication if provided
+      if (proxyConfig.username && proxyConfig.password) {
+        proxyUrl = \`\${proxyConfig.protocol}://\${encodeURIComponent(proxyConfig.username)}:\${encodeURIComponent(proxyConfig.password)}@\${proxyConfig.host}:\${proxyConfig.port}\`;
+        logWithFlush('[API Proxy] Using proxy with authentication:', {
+          proxyHost: proxyConfig.host,
+          proxyPort: proxyConfig.port,
+          proxyProtocol: proxyConfig.protocol,
+          username: proxyConfig.username
+        });
+      } else {
+        logWithFlush('[API Proxy] Using proxy without authentication:', {
+          proxyHost: proxyConfig.host,
+          proxyPort: proxyConfig.port,
+          proxyProtocol: proxyConfig.protocol
+        });
+      }
+      
+      // Use appropriate proxy agent based on target URL protocol
+      if (parsedUrl.protocol === 'https:') {
+        options.agent = new HttpsProxyAgent(proxyUrl);
+        logWithFlush('[API Proxy] Using HttpsProxyAgent for HTTPS request', {});
+      } else {
+        options.agent = new HttpProxyAgent(proxyUrl);
+        logWithFlush('[API Proxy] Using HttpProxyAgent for HTTP request', {});
+      }
+      
+      logWithFlush('[API Proxy] Final proxy URL (credentials masked):', 
+        proxyUrl.replace(/:([^:@]+)@/, ':***@'));
+    } else {
+      logWithFlush('[API Proxy] No proxy configured or proxy disabled', {});
+    }
+
     const httpModule = parsedUrl.protocol === 'https:' ? https : http;
     const req = httpModule.request(options, (res) => {
+      logWithFlush('[API Proxy] Response received:', {
+        statusCode: res.statusCode,
+        headers: Object.keys(res.headers)
+      });
+      
       let data = '';
       res.on('data', (chunk) => {
         data += chunk;
       });
       res.on('end', () => {
+        logWithFlush('[API Proxy] Request completed successfully', {});
         resolve({
           status: res.statusCode,
           headers: res.headers,
@@ -264,7 +407,15 @@ async function makeHttpRequest(request) {
       });
     });
 
-    req.on('error', reject);
+    req.on('error', (error) => {
+      logWithFlush('[API Proxy] Request error:', {
+        error: error.message,
+        code: error.code,
+        requestUrl: request.url,
+        proxyEnabled: proxyConfig?.enabled
+      });
+      reject(error);
+    });
     
     if (request.body) {
       req.write(JSON.stringify(request.body));
@@ -324,33 +475,9 @@ function getAdapter(adapterName) {
   return adapters[adapterName];
 }
 
-async function getCurrentChannelStatus() {
-  // This would communicate with electron main process to get current status
-  // For now, return a default
-  return {
-    currentProviderId: 'anthropic',
-    currentProviderName: 'Anthropic Claude',
-    isOfficial: true,
-    connectionStatus: 'connected'
-  };
-}
-
-async function getProviderById(id) {
-  // This would communicate with electron main process to get provider config
-  // For now, return a default anthropic provider
-  return {
-    id: 'anthropic',
-    name: 'Anthropic Claude',
-    baseUrl: 'https://api.anthropic.com',
-    apiKey: process.env.ANTHROPIC_API_KEY || '',
-    adapter: 'anthropic',
-    isOfficial: true,
-    authType: 'api_key'
-  };
-}
 
 server.listen(${port}, '127.0.0.1', () => {
-  console.log(\`API Proxy server running on http://127.0.0.1:${port}\`);
+  logWithFlush(\`API Proxy server running on http://127.0.0.1:${port}\`, {});
 });
 `;
   }

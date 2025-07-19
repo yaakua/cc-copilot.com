@@ -1,4 +1,7 @@
 import Store from 'electron-store'
+import * as fs from 'fs'
+import * as path from 'path'
+import * as os from 'os'
 
 export interface Project {
   id: string
@@ -60,9 +63,36 @@ export interface ChannelStatus {
   lastSwitchAt?: string
 }
 
+// Claude Code interfaces
+export interface ClaudeProject {
+  id: string
+  name: string
+  path: string
+  sessionsDir: string
+  sessions: ClaudeSession[]
+}
+
+export interface ClaudeSession {
+  id: string
+  name: string
+  filePath: string
+  createdAt: string
+  firstMessage?: string
+}
+
+export interface ProxyConfig {
+  enabled: boolean
+  host: string
+  port: number
+  username?: string
+  password?: string
+  protocol: 'http' | 'https'
+}
+
 export interface AppSettings {
   apiProviders: ApiProvider[]
   proxy?: string
+  proxyConfig?: ProxyConfig
   activeModelId?: string
   theme?: 'dark' | 'light'
   autoLogin?: boolean
@@ -109,6 +139,12 @@ const schema = {
       activeModelId: 'anthropic',
       theme: 'dark',
       autoLogin: true,
+      proxyConfig: {
+        enabled: false,
+        host: '',
+        port: 8080,
+        protocol: 'http'
+      },
       channelStatus: {
         currentProviderId: 'anthropic',
         currentProviderName: 'Anthropic Claude',
@@ -216,7 +252,16 @@ export class DataStore {
 
   updateSettings(settings: Partial<AppSettings>): void {
     const currentSettings = this.getSettings()
-    this.store.set('settings', { ...currentSettings, ...settings })
+    const newSettings = { ...currentSettings, ...settings }
+    
+    console.log('[DataStore] Updating settings:', {
+      oldProxyConfig: currentSettings.proxyConfig,
+      newProxyConfig: newSettings.proxyConfig,
+      proxyConfigChanged: JSON.stringify(currentSettings.proxyConfig) !== JSON.stringify(newSettings.proxyConfig)
+    })
+    
+    this.store.set('settings', newSettings)
+    console.log('[DataStore] Settings updated successfully')
   }
 
   // Statistics
@@ -420,5 +465,175 @@ export class DataStore {
     }
     
     return true
+  }
+
+  // Claude Code Integration
+  getClaudeProjects(): ClaudeProject[] {
+    try {
+      const claudeDir = path.join(os.homedir(), '.claude')
+      const projectsDir = path.join(claudeDir, 'projects')
+      
+      if (!fs.existsSync(projectsDir)) {
+        return []
+      }
+      
+      const projectDirs = fs.readdirSync(projectsDir, { withFileTypes: true })
+        .filter(dirent => dirent.isDirectory())
+        .map(dirent => dirent.name)
+      
+      const projects: ClaudeProject[] = []
+      
+      for (const projectDirName of projectDirs) {
+        const projectDirPath = path.join(projectsDir, projectDirName)
+        const sessions = this.getClaudeSessionsForProject(projectDirPath)
+        
+        // 从第一个会话文件中获取项目路径
+        let projectPath = projectDirName
+        if (sessions.length > 0) {
+          const firstSessionPath = sessions[0].filePath
+          const cwd = this.extractCwdFromSession(firstSessionPath)
+          if (cwd) {
+            projectPath = cwd
+          }
+        }
+        
+        const project: ClaudeProject = {
+          id: projectDirName,
+          name: path.basename(projectPath),
+          path: projectPath,
+          sessionsDir: projectDirPath,
+          sessions
+        }
+        
+        projects.push(project)
+      }
+      
+      return projects
+    } catch (error) {
+      console.error('Error reading Claude projects:', error)
+      return []
+    }
+  }
+
+  private getClaudeSessionsForProject(projectDir: string): ClaudeSession[] {
+    try {
+      const sessionFiles = fs.readdirSync(projectDir)
+        .filter(file => file.endsWith('.jsonl'))
+        .sort((a, b) => {
+          // 按文件修改时间排序，最新的在前
+          const aPath = path.join(projectDir, a)
+          const bPath = path.join(projectDir, b)
+          const aStat = fs.statSync(aPath)
+          const bStat = fs.statSync(bPath)
+          return bStat.mtime.getTime() - aStat.mtime.getTime()
+        })
+      
+      const sessions: ClaudeSession[] = []
+      
+      for (const sessionFile of sessionFiles) {
+        const sessionPath = path.join(projectDir, sessionFile)
+        const sessionId = path.basename(sessionFile, '.jsonl')
+        const stats = fs.statSync(sessionPath)
+        
+        // 读取第一行来获取会话的第一条消息
+        const firstMessage = this.getFirstMessageFromSession(sessionPath)
+        const sessionName = this.generateSessionName(firstMessage, sessions.length + 1)
+        
+        sessions.push({
+          id: sessionId,
+          name: sessionName,
+          filePath: sessionPath,
+          createdAt: stats.birthtime.toISOString(),
+          firstMessage
+        })
+      }
+      
+      return sessions
+    } catch (error) {
+      console.error('Error reading Claude sessions:', error)
+      return []
+    }
+  }
+
+  private extractCwdFromSession(sessionPath: string): string | null {
+    try {
+      const content = fs.readFileSync(sessionPath, 'utf-8')
+      const lines = content.split('\n').filter(line => line.trim())
+      
+      for (const line of lines) {
+        try {
+          const event = JSON.parse(line)
+          // Claude Code 会话文件中的 cwd 在 user 或 assistant 类型的消息中
+          if (event.cwd) {
+            return event.cwd
+          }
+        } catch (e) {
+          // 忽略解析错误的行
+          continue
+        }
+      }
+      
+      return null
+    } catch (error) {
+      console.error('Error extracting cwd from session:', error)
+      return null
+    }
+  }
+
+  private getFirstMessageFromSession(sessionPath: string): string | undefined {
+    try {
+      const content = fs.readFileSync(sessionPath, 'utf-8')
+      const lines = content.split('\n').filter(line => line.trim())
+      
+      for (const line of lines) {
+        try {
+          const event = JSON.parse(line)
+          // 查找用户类型的消息
+          if (event.type === 'user' && event.message && event.message.content) {
+            const content = event.message.content
+            let text = ''
+            
+            // 处理 content 数组格式
+            if (Array.isArray(content)) {
+              const textContent = content.find(item => item.type === 'text')
+              if (textContent && textContent.text) {
+                text = textContent.text
+              }
+            } else if (typeof content === 'string') {
+              text = content
+            }
+            
+            if (text) {
+              // 返回前50个字符作为预览，去掉换行符
+              const preview = text.replace(/\n/g, ' ').trim()
+              return preview.slice(0, 50) + (preview.length > 50 ? '...' : '')
+            }
+          }
+        } catch (e) {
+          // 忽略解析错误的行
+          continue
+        }
+      }
+      
+      return undefined
+    } catch (error) {
+      console.error('Error reading first message from session:', error)
+      return undefined
+    }
+  }
+
+  private generateSessionName(firstMessage?: string, sessionNumber?: number): string {
+    if (firstMessage && firstMessage.trim()) {
+      // 使用第一条消息的前30个字符作为会话名称
+      return firstMessage.slice(0, 30) + (firstMessage.length > 30 ? '...' : '')
+    }
+    
+    return `会话 ${sessionNumber || 1}`
+  }
+
+  resumeClaudeSession(sessionPath: string, workingDirectory: string): void {
+    // 这个方法将由PTY管理器调用来恢复Claude会话
+    // 它会执行类似 "claude /resume <session-file>" 的命令
+    console.log(`Resuming Claude session: ${sessionPath} in ${workingDirectory}`)
   }
 }
