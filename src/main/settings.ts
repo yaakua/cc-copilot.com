@@ -1,6 +1,5 @@
 import Store from 'electron-store'
 import { app } from 'electron'
-import { join } from 'path'
 
 export interface AppSettings {
   proxyConfig: {

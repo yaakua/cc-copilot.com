@@ -15,7 +15,23 @@ class RendererLogger {
   private async log(level: LogLevel, message: string, error?: Error, meta?: Record<string, any>): Promise<void> {
     try {
       if (window.api?.log) {
-        await window.api.log(level, message, this.component, error, meta)
+        // Completely serialize error as string for IPC transmission
+        let errorString: string | undefined = undefined
+        if (error) {
+          try {
+            // Create a comprehensive error string
+            errorString = JSON.stringify({
+              message: error.message || 'Unknown error',
+              stack: error.stack || 'No stack trace available',
+              name: error.name || 'Error',
+              toString: error.toString()
+            }, null, 2)
+          } catch (serializationError) {
+            // Fallback if JSON.stringify fails
+            errorString = `Error: ${error.message || error.toString() || 'Unknown error'}`
+          }
+        }
+        await window.api.log(level, message, this.component, errorString, meta)
       } else {
         // Fallback to console if API not available
         const logMethod = console[level] || console.log

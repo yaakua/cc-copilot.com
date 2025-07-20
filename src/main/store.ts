@@ -1,5 +1,3 @@
-import Store from 'electron-store'
-import { app } from 'electron'
 import * as fs from 'fs'
 import * as path from 'path'
 import * as os from 'os'
@@ -11,8 +9,9 @@ export interface Session {
   projectPath: string
   createdAt: string
   lastActiveAt: string
-  isClaudeSession?: boolean
-  filePath?: string
+  filePath: string
+  claudeProjectId: string
+  claudeProjectDir: string
 }
 
 export interface Project {
@@ -37,92 +36,61 @@ export interface ClaudeSession {
   firstMessage?: string
 }
 
-interface StoreSchema {
-  projects: Project[]
-  sessions: Session[]
-}
-
 export class DataStore {
-  private store: Store<StoreSchema>
-
   constructor() {
-    this.store = new Store<StoreSchema>({
-      defaults: {
-        projects: [],
-        sessions: []
-      },
-      cwd: app.getPath('userData'),
-      name: 'data'
-    })
+    // No local store needed - we only work with Claude sessions
   }
 
-  // Session management
-  createSession(projectPath: string, name: string, id?: string): Session {
-    const session: Session = {
-      id: id || `session-${Date.now()}`,
-      name,
-      projectPath,
-      createdAt: new Date().toISOString(),
-      lastActiveAt: new Date().toISOString()
-    }
-
-    const sessions = this.store.get('sessions', [])
-    sessions.push(session)
-    this.store.set('sessions', sessions)
-
-    return session
-  }
-
-  getSessions(projectPath: string): Session[] {
-    const sessions = this.store.get('sessions', [])
-    return sessions.filter(s => s.projectPath === projectPath)
-  }
-
-  getSessionById(id: string): Session | undefined {
-    const sessions = this.store.get('sessions', [])
-    return sessions.find(s => s.id === id)
-  }
-
-  updateSessionActivity(id: string): void {
-    const sessions = this.store.get('sessions', [])
-    const session = sessions.find(s => s.id === id)
-    if (session) {
-      session.lastActiveAt = new Date().toISOString()
-      this.store.set('sessions', sessions)
-    }
-  }
-
-  deleteSession(id: string): void {
-    const sessions = this.store.get('sessions', [])
-    const filtered = sessions.filter(s => s.id !== id)
-    this.store.set('sessions', filtered)
-  }
-
-  // Project management
-  getProjects(): Project[] {
-    const sessions = this.store.get('sessions', [])
-    const projectMap = new Map<string, Project>()
-
-    // Group sessions by project path
-    sessions.forEach(session => {
-      const existing = projectMap.get(session.projectPath)
-      if (existing) {
-        existing.sessions.push(session)
-      } else {
-        projectMap.set(session.projectPath, {
-          path: session.projectPath,
-          name: this.extractProjectName(session.projectPath),
-          sessions: [session]
-        })
+  deleteSession(id: string): { success: boolean; error?: string; details?: string } {
+    logger.info(`Starting deleteSession for id: ${id}`, 'store')
+    
+    // Find session in Claude projects
+    const allProjects = this.getAllProjects()
+    let targetSession: Session | undefined
+    
+    for (const project of allProjects) {
+      targetSession = project.sessions.find(s => s.id === id)
+      if (targetSession) {
+        logger.info(`Found Claude session ${id} in project: ${project.name}`, 'store')
+        break
       }
-    })
-
-    return Array.from(projectMap.values())
+    }
+    
+    if (!targetSession) {
+      const message = `Claude session not found: ${id}`
+      logger.warn(message, 'store')
+      return { success: false, error: 'Session not found', details: message }
+    }
+    
+    // Delete the Claude session file
+    try {
+      if (fs.existsSync(targetSession.filePath)) {
+        fs.unlinkSync(targetSession.filePath)
+        logger.info(`Deleted Claude session file: ${targetSession.filePath}`, 'store')
+        return { 
+          success: true, 
+          details: `Claude session file deleted: ${targetSession.filePath}` 
+        }
+      } else {
+        logger.warn(`Claude session file not found: ${targetSession.filePath}`, 'store')
+        return { 
+          success: false, 
+          error: 'Session file not found', 
+          details: `Claude session file not found: ${targetSession.filePath}` 
+        }
+      }
+    } catch (error) {
+      const err = error as Error
+      logger.error(`Failed to delete Claude session file: ${targetSession.filePath}`, 'store', err)
+      return { 
+        success: false, 
+        error: `File deletion failed: ${err.message}`, 
+        details: `Failed to delete ${targetSession.filePath}: ${err.message}` 
+      }
+    }
   }
 
-  private extractProjectName(path: string): string {
-    return path.split('/').pop() || path
-  }
+  // Only Claude projects are supported
 
   // Claude Code Integration
   getClaudeProjects(): ClaudeProject[] {
@@ -192,6 +160,9 @@ export class DataStore {
         const sessionPath = path.join(projectDir, sessionFile)
         const sessionId = path.basename(sessionFile, '.jsonl')
         const stats = fs.statSync(sessionPath)
+        
+        // Log session creation for debugging
+        logger.debug(`Creating Claude session: id=${sessionId}, file=${sessionFile}, path=${sessionPath}`, 'store')
         
         // 读取第一行来获取会话的第一条消息
         const firstMessage = this.getFirstMessageFromSession(sessionPath)
@@ -289,41 +260,32 @@ export class DataStore {
     return `Session ${sessionNumber || 1}`
   }
 
-  // 获取所有项目（包括Claude项目和本地项目）
+  // 获取所有项目（只有Claude项目）
   getAllProjects(): Project[] {
-    const localProjects = this.getProjects()
     const claudeProjects = this.getClaudeProjects()
     
+    logger.info(`Found ${claudeProjects.length} Claude projects`, 'store')
+    
     // 将Claude项目转换为统一的Project格式
-    const claudeProjectsAsProjects: Project[] = claudeProjects.map(claudeProject => ({
-      path: claudeProject.path,
-      name: claudeProject.name,
-      sessions: claudeProject.sessions.map(claudeSession => ({
-        id: claudeSession.id,
-        name: claudeSession.name,
-        projectPath: claudeProject.path,
-        createdAt: claudeSession.createdAt,
-        lastActiveAt: claudeSession.createdAt,
-        isClaudeSession: true,
-        filePath: claudeSession.filePath
-      }))
-    }))
-    
-    // 合并本地项目和Claude项目，去重
-    const allProjects = [...localProjects]
-    
-    for (const claudeProject of claudeProjectsAsProjects) {
-      const existingProject = allProjects.find(p => p.path === claudeProject.path)
-      if (existingProject) {
-        // 合并会话，Claude会话优先
-        const claudeSessions = claudeProject.sessions
-        const localSessions = existingProject.sessions.filter(s => !s.isClaudeSession)
-        existingProject.sessions = [...claudeSessions, ...localSessions]
-      } else {
-        allProjects.push(claudeProject)
+    const projects: Project[] = claudeProjects.map(claudeProject => {
+      logger.debug(`Converting Claude project: ${claudeProject.name} with ${claudeProject.sessions.length} sessions`, 'store')
+      
+      return {
+        path: claudeProject.path,
+        name: claudeProject.name,
+        sessions: claudeProject.sessions.map(claudeSession => ({
+          id: claudeSession.id,
+          name: claudeSession.name,
+          projectPath: claudeProject.path,
+          createdAt: claudeSession.createdAt,
+          lastActiveAt: claudeSession.createdAt,
+          filePath: claudeSession.filePath,
+          claudeProjectId: claudeProject.id,
+          claudeProjectDir: claudeProject.sessionsDir
+        }))
       }
-    }
+    })
     
-    return allProjects
+    return projects
   }
 }

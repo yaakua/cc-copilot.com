@@ -1,9 +1,9 @@
 import { app, shell, BrowserWindow, ipcMain, dialog } from 'electron'
-import { join, basename } from 'path'
+import { join } from 'path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import { ProxyServer } from './proxy'
 import { PtyManager } from './pty-manager'
-import { DataStore } from './store'
+import { DataStore, Session } from './store'
 import { SettingsManager } from './settings'
 import { logger } from './logger'
 
@@ -110,15 +110,17 @@ function setupIpcHandlers(mainWindow: BrowserWindow): void {
 
   // Session management
   ipcMain.handle('session:create', async (_, projectPath: string, name?: string) => {
-    const sessionId = `session-${Date.now()}`
-    const session = dataStore.createSession(projectPath, name || 'New Session', sessionId)
+    // For Claude sessions, we don't create sessions manually
+    // Instead, we start a new Claude CLI session which will create its own session file
+    const sessionId = `temp-${Date.now()}`
     currentActiveSessionId = sessionId
     
     // Create PtyManager and start claude
     const manager = getOrCreatePtyManager(sessionId, mainWindow)
     await manager.start({ workingDirectory: projectPath, autoStartClaude: true })
     
-    return session
+    logger.info(`Started new Claude session in directory: ${projectPath}`, 'main')
+    return { id: sessionId, projectPath, name: name || 'New Claude Session' }
   })
 
   ipcMain.handle('session:activate', async (_, sessionId: string) => {
@@ -157,6 +159,8 @@ function setupIpcHandlers(mainWindow: BrowserWindow): void {
   })
 
   ipcMain.handle('session:delete', async (_, sessionId: string) => {
+    logger.info(`Deleting session: ${sessionId}`, 'main')
+    
     const manager = ptyManagers.get(sessionId)
     if (manager) {
       await manager.stop()
@@ -165,7 +169,19 @@ function setupIpcHandlers(mainWindow: BrowserWindow): void {
     if (currentActiveSessionId === sessionId) {
       currentActiveSessionId = null
     }
-    dataStore.deleteSession(sessionId)
+    
+    const deletionResult = dataStore.deleteSession(sessionId)
+    
+    if (deletionResult.success) {
+      logger.info(`Session deletion completed successfully: ${sessionId}`, 'main', { details: deletionResult.details })
+    } else {
+      logger.warn(`Session deletion completed with warnings: ${sessionId}`, 'main', { 
+        error: deletionResult.error, 
+        details: deletionResult.details 
+      })
+    }
+    
+    return deletionResult
   })
 
   // Project management
@@ -177,9 +193,6 @@ function setupIpcHandlers(mainWindow: BrowserWindow): void {
     return result.canceled ? null : result.filePaths[0]
   })
 
-  ipcMain.handle('project:get-sessions', (_, projectPath: string) => {
-    return dataStore.getSessions(projectPath)
-  })
 
   ipcMain.handle('project:get-all', () => {
     return dataStore.getAllProjects()
@@ -202,7 +215,14 @@ function setupIpcHandlers(mainWindow: BrowserWindow): void {
   ipcMain.handle('status:get-current', () => {
     if (!currentActiveSessionId) return null
     
-    const session = dataStore.getSessionById(currentActiveSessionId)
+    // Find session in all projects
+    let session: Session | undefined
+    const allProjects = dataStore.getAllProjects()
+    for (const project of allProjects) {
+      session = project.sessions.find(s => s.id === currentActiveSessionId)
+      if (session) break
+    }
+    
     const activeProvider = settingsManager.getActiveProvider()
     const proxyConfig = settingsManager.getProxyConfig()
     

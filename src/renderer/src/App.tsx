@@ -130,14 +130,31 @@ const App: React.FC = () => {
   const handleDeleteSession = async (sessionId: string) => {
     try {
       logger.info('Deleting session', { sessionId })
-      await window.api.deleteSession(sessionId)
+      const deletionResult = await window.api.deleteSession(sessionId)
+      
       if (activeSessionId === sessionId) {
         setActiveSessionId(null)
       }
-      logger.info('Session deleted successfully', { sessionId })
+      
+      if (deletionResult.success) {
+        logger.info('Session and associated files deleted successfully', { 
+          sessionId, 
+          details: deletionResult.details 
+        })
+      } else {
+        logger.warn('Session deletion failed or incomplete', { 
+          sessionId,
+          error: deletionResult.error,
+          details: deletionResult.details
+        })
+      }
+      
+      // Always reload projects after deletion to refresh the session list
       await loadProjects()
     } catch (error) {
       logger.error('Failed to delete session', error as Error, { sessionId })
+      // Still try to reload projects in case of partial deletion
+      await loadProjects()
     }
   }
 

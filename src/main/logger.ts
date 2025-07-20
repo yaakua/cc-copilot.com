@@ -186,11 +186,49 @@ export class Logger {
     level: string
     message: string
     component?: string
-    error?: any
+    error?: string | any
     meta?: Record<string, any>
   }): void {
     const level = LogLevel[logEntry.level.toUpperCase() as keyof typeof LogLevel] ?? LogLevel.INFO
-    const error = logEntry.error ? new Error(logEntry.error.message || logEntry.error) : undefined
+    
+    // Handle error string from renderer
+    let error: Error | undefined = undefined
+    if (logEntry.error) {
+      try {
+        if (typeof logEntry.error === 'string') {
+          // Try to parse as JSON first (structured error)
+          try {
+            const errorData = JSON.parse(logEntry.error)
+            error = new Error(errorData.message || 'Unknown error')
+            if (errorData.stack) {
+              error.stack = errorData.stack
+            }
+            if (errorData.name) {
+              error.name = errorData.name
+            }
+          } catch (jsonError) {
+            // If not JSON, treat as plain error message
+            error = new Error(logEntry.error)
+          }
+        } else if (logEntry.error instanceof Error) {
+          error = logEntry.error
+        } else if (typeof logEntry.error === 'object' && logEntry.error.message) {
+          error = new Error(logEntry.error.message)
+          if (logEntry.error.stack) {
+            error.stack = logEntry.error.stack
+          }
+          if (logEntry.error.name) {
+            error.name = logEntry.error.name
+          }
+        } else {
+          // Fallback: convert any other type to string
+          error = new Error(String(logEntry.error))
+        }
+      } catch (e) {
+        // If all else fails, create a generic error
+        error = new Error('Error object could not be processed from renderer')
+      }
+    }
     
     this.log(level, `[RENDERER] ${logEntry.message}`, logEntry.component, error, logEntry.meta)
   }
