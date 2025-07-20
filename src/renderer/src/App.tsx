@@ -1,168 +1,188 @@
-import React, { useEffect, useState } from 'react'
-import Sidebar from './components/Sidebar'
-import MainContent from './components/MainContent'
-import SettingsModal from './components/SettingsModal'
-import ErrorBoundary from './components/ErrorBoundary'
-import LoadingSpinner from './components/LoadingSpinner'
+import React, { useState, useEffect } from 'react'
+import SessionList from './components/SessionList'
+import Terminal from './components/Terminal'
 import StatusBar from './components/StatusBar'
-import { ClaudeInstallationGuide } from './components/ClaudeInstallationGuide'
-import { initializeStore, useAppStore } from './stores/appStore'
+import ErrorBoundary from './components/ErrorBoundary'
 import { logger } from './utils/logger'
 
+interface Session {
+  id: string
+  name: string
+  projectPath: string
+  createdAt: string
+  lastActiveAt: string
+}
+
+interface Project {
+  path: string
+  name: string
+  sessions: Session[]
+}
+
 const App: React.FC = () => {
-  const [isInitializing, setIsInitializing] = useState(true)
-  const [initError, setInitError] = useState<string | null>(null)
-  const [showInstallationGuide, setShowInstallationGuide] = useState(false)
-  
-  // Use Claude detection from store
-  const { claudeDetection, detectClaude } = useAppStore()
+  const [projects, setProjects] = useState<Project[]>([])
+  const [activeSessionId, setActiveSessionId] = useState<string | null>(null)
+  const [loading, setLoading] = useState(true)
 
+  // Load initial data
   useEffect(() => {
-    // Initialize store data and detect Claude Code when app starts
-    const initializeApp = async () => {
-      try {
-        logger.info('App initializing...')
-        // Initialize store (this includes Claude detection)
-        await initializeStore()
-        logger.info('App initialized successfully')
-        
-        setIsInitializing(false)
-      } catch (error) {
-        logger.error('Failed to initialize app', error)
-        setInitError(error.message || 'Failed to initialize application')
-        setIsInitializing(false)
-      }
-    }
-    
-    initializeApp()
-
-    // Add keyboard shortcuts
-    const handleKeyDown = (event: KeyboardEvent) => {
-      // Ctrl/Cmd + , for settings
-      if ((event.ctrlKey || event.metaKey) && event.key === ',') {
-        event.preventDefault()
-        logger.debug('Settings shortcut pressed')
-        // This would open settings modal
-      }
-      
-      // Ctrl/Cmd + N for new session
-      if ((event.ctrlKey || event.metaKey) && event.key === 'n') {
-        event.preventDefault()
-        logger.debug('New session shortcut pressed')
-      }
-
-      // Ctrl/Cmd + K for clear terminal
-      if ((event.ctrlKey || event.metaKey) && event.key === 'k') {
-        event.preventDefault()
-        if ((window as any).terminalRef?.current) {
-          (window as any).terminalRef.current.clear()
-        }
-      }
-    }
-
-    document.addEventListener('keydown', handleKeyDown)
-
-    return () => {
-      document.removeEventListener('keydown', handleKeyDown)
-    }
+    logger.setComponent('App')
+    logger.info('App component mounted')
+    loadProjects()
   }, [])
 
-  // Watch for Claude detection changes and show installation guide if needed
-  useEffect(() => {
-    if (claudeDetection && !claudeDetection.isInstalled) {
-      setShowInstallationGuide(true)
-    }
-  }, [claudeDetection])
-
-  const handleClaudeRecheck = async () => {
+  const loadProjects = async () => {
     try {
-      // Clear cache and re-detect using store
-      await window.api.clearClaudeCache()
-      await detectClaude()
+      logger.info('Loading projects from main process')
+      // Load projects directly from main process (includes Claude projects)
+      const allProjects = await window.api.getAllProjects()
+      setProjects(allProjects)
       
-      // Hide installation guide if Claude Code is now detected
-      if (claudeDetection?.isInstalled) {
-        setShowInstallationGuide(false)
-      }
+      logger.info('Projects loaded successfully', { 
+        projectCount: allProjects.length,
+        sessionCount: allProjects.reduce((acc, p) => acc + p.sessions.length, 0)
+      })
     } catch (error) {
-      console.error('Failed to recheck Claude Code:', error)
+      logger.error('Failed to load projects', error as Error)
+    } finally {
+      setLoading(false)
     }
   }
 
-  if (isInitializing) {
-    return (
-      <div className="flex h-screen bg-claude-bg text-claude-text-primary">
-        <div className="flex-1 flex items-center justify-center">
-          <LoadingSpinner 
-            size="lg" 
-            text="Initializing CC Copilot..." 
-          />
-        </div>
-      </div>
-    )
+  const extractProjectName = (path: string): string => {
+    return path.split('/').pop() || path
   }
 
-  if (initError) {
+  const handleCreateProject = async () => {
+    try {
+      logger.info('Creating new project')
+      const projectPath = await window.api.selectProjectDirectory()
+      if (!projectPath) {
+        logger.info('Project creation cancelled by user')
+        return
+      }
+
+      logger.info('Selected project directory', { projectPath })
+
+      // Store project path in localStorage
+      const storedProjects = JSON.parse(localStorage.getItem('cc-copilot-projects') || '[]')
+      if (!storedProjects.includes(projectPath)) {
+        storedProjects.push(projectPath)
+        localStorage.setItem('cc-copilot-projects', JSON.stringify(storedProjects))
+      }
+
+      // Create a new session for this project
+      const session = await window.api.createSession(projectPath, 'New Session')
+      setActiveSessionId(session.id)
+      
+      logger.info('Project and session created successfully', { sessionId: session.id })
+      
+      // Reload projects
+      await loadProjects()
+    } catch (error) {
+      logger.error('Failed to create project', error as Error)
+    }
+  }
+
+  const handleCreateSession = async (projectPath: string) => {
+    try {
+      logger.info('Creating new session', { projectPath })
+      const session = await window.api.createSession(projectPath)
+      setActiveSessionId(session.id)
+      logger.info('Session created successfully', { sessionId: session.id })
+      await loadProjects()
+    } catch (error) {
+      logger.error('Failed to create session', error as Error)
+    }
+  }
+
+  const handleActivateSession = async (sessionId: string) => {
+    try {
+      // Find the session to check if it's a Claude session
+      let session: Session | undefined
+      for (const project of projects) {
+        session = project.sessions.find(s => s.id === sessionId)
+        if (session) break
+      }
+
+      logger.info('Activating session', { 
+        sessionId, 
+        isClaudeSession: session?.isClaudeSession,
+        projectPath: session?.projectPath
+      })
+
+      if (session?.isClaudeSession && session.filePath) {
+        // For Claude sessions, use resume with the file path
+        await window.api.resumeSession(sessionId, session.projectPath)
+        logger.info('Claude session resumed', { sessionId, filePath: session.filePath })
+      } else {
+        // For local sessions, use normal activate
+        await window.api.activateSession(sessionId)
+        logger.info('Local session activated', { sessionId })
+      }
+      
+      setActiveSessionId(sessionId)
+    } catch (error) {
+      logger.error('Failed to activate session', error as Error, { sessionId })
+    }
+  }
+
+  const handleDeleteSession = async (sessionId: string) => {
+    try {
+      logger.info('Deleting session', { sessionId })
+      await window.api.deleteSession(sessionId)
+      if (activeSessionId === sessionId) {
+        setActiveSessionId(null)
+      }
+      logger.info('Session deleted successfully', { sessionId })
+      await loadProjects()
+    } catch (error) {
+      logger.error('Failed to delete session', error as Error, { sessionId })
+    }
+  }
+
+  if (loading) {
     return (
-      <div className="flex h-screen bg-claude-bg text-claude-text-primary">
-        <div className="flex-1 flex items-center justify-center">
-          <div className="text-center">
-            <div className="text-red-400 mb-4">
-              <svg xmlns="http://www.w3.org/2000/svg" className="h-16 w-16 mx-auto mb-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L3.732 16.5c-.77.833.192 2.5 1.732 2.5z" />
-              </svg>
-            </div>
-            <h2 className="text-xl font-bold text-red-400 mb-2">Initialization Failed</h2>
-            <p className="text-claude-text-secondary mb-4">{initError}</p>
-            <button
-              onClick={() => window.location.reload()}
-              className="px-4 py-2 bg-claude-accent hover:bg-opacity-80 text-white font-medium rounded-md transition-colors"
-            >
-              Reload Application
-            </button>
-          </div>
-        </div>
+      <div className="flex h-screen bg-gray-900 text-white items-center justify-center">
+        <div>Loading...</div>
       </div>
     )
   }
 
   return (
     <ErrorBoundary>
-      <div className="flex flex-col h-screen bg-claude-bg text-claude-text-primary font-inter antialiased">
-        {/* Main Content Area - Reserve space for status bar */}
-        <div className="flex" style={{ height: 'calc(100vh - 32px)' }}>
-          {/* Session List Sidebar */}
-          <ErrorBoundary fallback={
-            <div className="w-72 bg-claude-sidebar flex items-center justify-center">
-              <div className="text-red-400 text-sm">Sidebar error</div>
-            </div>
-          }>
-            <Sidebar />
-          </ErrorBoundary>
+      <div className="flex flex-col h-screen bg-gray-900 text-white">
+        {/* Main Content Area */}
+        <div className="flex flex-1 overflow-hidden">
+          {/* Left Sidebar - Session List */}
+          <div className="w-80 bg-gray-800 border-r border-gray-700">
+            <SessionList
+              projects={projects}
+              activeSessionId={activeSessionId}
+              onCreateProject={handleCreateProject}
+              onCreateSession={handleCreateSession}
+              onActivateSession={handleActivateSession}
+              onDeleteSession={handleDeleteSession}
+            />
+          </div>
           
-          {/* Main Content Area */}
-          <ErrorBoundary>
-            <MainContent />
-          </ErrorBoundary>
+          {/* Right Content - Terminal */}
+          <div className="flex-1 flex flex-col">
+            {activeSessionId ? (
+              <Terminal sessionId={activeSessionId} />
+            ) : (
+              <div className="flex-1 flex items-center justify-center text-gray-400">
+                <div className="text-center">
+                  <h2 className="text-xl mb-2">No Active Session</h2>
+                  <p>Select a session from the sidebar or create a new project</p>
+                </div>
+              </div>
+            )}
+          </div>
         </div>
         
-        {/* Status Bar - Fixed at bottom */}
-        <ErrorBoundary>
-          <StatusBar />
-        </ErrorBoundary>
-        
-        {/* Settings Modal (Hidden by default) */}
-        <ErrorBoundary>
-          <SettingsModal />
-        </ErrorBoundary>
-        
-        {/* Claude Installation Guide */}
-        {showInstallationGuide && (
-          <ClaudeInstallationGuide
-            onClose={() => setShowInstallationGuide(false)}
-            onRecheck={handleClaudeRecheck}
-          />
-        )}
+        {/* Bottom Status Bar */}
+        <StatusBar activeSessionId={activeSessionId} />
       </div>
     </ErrorBoundary>
   )

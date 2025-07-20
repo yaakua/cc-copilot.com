@@ -1,307 +1,142 @@
-# CC-Copilot
+# CC Copilot
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
-[![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-lightgrey)](https://github.com/yangkui/cc-copilot)
-[![Built with](https://img.shields.io/badge/built%20with-Electron%20%7C%20React%20%7C%20TypeScript-blue)](https://github.com/yangkui/cc-copilot)
+一个简化的 Claude Code 桌面GUI应用，提供项目管理和会话管理功能。
 
-**The ultimate desktop GUI for `@anthropic-ai/claude-code`. Break free from the terminal and unlock the full potential of AI-assisted coding.**
+## 功能特性
 
-`claude-code` is a fantastic tool, but its command-line interface and single-provider nature can be limiting. **CC-Copilot** is here to change that. It's an open-source, cross-platform desktop app that wraps `claude-code` in a powerful and intuitive interface, designed for a modern developer workflow.
+### 界面布局
+- **左侧会话列表**：按项目组织的会话管理
+- **右侧终端界面**：基于 xterm.js 的终端，支持会话切换
+- **底部状态栏**：显示当前渠道、代理状态、项目路径
 
-![CC-Copilot Screenshot](docs/index.html)
-*Professional desktop interface with project management, terminal integration, and multi-provider support*
+### 核心功能
+- 项目组织的会话管理
+- 支持新建/恢复会话
+- 终端会话管理
+- 本地HTTP代理服务器
+- 设置持久化存储
 
-## ✨ Features
+## 架构设计
 
-### 🎯 **Core Capabilities**
-- **Intuitive GUI**: Complete graphical interface for all `claude-code` interactions
-- **Project Management**: Organize your coding sessions into projects with color-coded icons
-- **Session Organization**: Create and manage multiple chat sessions within each project
-- **Integrated Terminal**: Real terminal with `xterm.js` for seamless `claude-code` interaction
+### Main Process (Electron主进程)
+- **main.ts**: 应用程序入口，IPC处理
+- **proxy.ts**: HTTP代理服务器 (端口: 31299)
+- **pty-manager.ts**: 终端进程管理
+- **store.ts**: 数据存储管理
+- **settings.ts**: 设置管理
 
-### 🔄 **Multi-Provider Support**
-- **Universal API Support**: Connect to Anthropic, OpenAI, Groq, Moonshot, and more
-- **Dynamic Model Switching**: Switch between AI models on-the-fly within the same session
-- **Built-in Adapters**: Automatic API format conversion for different providers
-- **Custom Providers**: Add your own API endpoints with custom configurations
+### Renderer Process (渲染进程)
+- **App.tsx**: 主应用组件
+- **SessionList.tsx**: 会话列表组件
+- **Terminal.tsx**: 终端组件
+- **StatusBar.tsx**: 状态栏组件
 
-### 📊 **Advanced Analytics**
-- **Token Tracking**: Monitor usage across session, project, and global scopes
-- **Real-time Statistics**: Live token consumption display with smart formatting
-- **Usage Insights**: Detailed analytics to optimize your AI coding workflow
+## 使用说明
 
-### 🛠️ **Developer Experience**
-- **Auto-installation**: Automatically manages `claude-code` installation and updates
-- **Keyboard Shortcuts**: Efficient workflow with customizable hotkeys
-- **Error Handling**: Robust error boundaries with user-friendly messages
-- **Dark Theme**: Professional dark interface optimized for long coding sessions
+1. **启动应用程序**
+   ```bash
+   npm install
+   npm run dev
+   ```
 
-## 🚀 Quick Start
+2. **创建项目**
+   - 点击左上角的 "+" 按钮
+   - 选择项目目录
+   - 自动创建新会话
 
-### Option 1: Download Pre-built App (Recommended)
+3. **管理会话**
+   - 在项目下点击绿色 "+" 创建新会话
+   - 点击会话项激活终端
+   - 点击红色 "×" 删除会话
 
-1. Go to the [**Releases**](https://github.com/yangkui/cc-copilot/releases) page
-2. Download the latest version for your platform:
-   - **macOS**: Download `.dmg` file
-   - **Windows**: Download `.exe` installer
-   - **Linux**: Download `.AppImage` or `.deb` package
-3. Install and launch the app
+4. **终端操作**
+   - 激活会话后会自动启动 `claude` 命令
+   - 支持所有标准终端操作
+   - 自动设置代理环境变量
 
-### Option 2: Try Browser Demo
+## 技术栈
 
-Experience the full interface without installation:
+- **Electron**: 桌面应用框架
+- **React + TypeScript**: 前端界面
+- **Tailwind CSS**: 样式框架
+- **xterm.js**: 终端模拟器
+- **node-pty**: 终端进程管理
+- **express**: HTTP代理服务器
+- **electron-store**: 本地数据存储
+
+## 代理配置
+
+应用程序会自动启动HTTP代理服务器 (http://127.0.0.1:31299)，并设置环境变量：
+- `ANTHROPIC_BASE_URL=http://127.0.0.1:31299`
+
+可在设置中配置上游代理：
+- 支持HTTP代理
+- 支持认证配置
+- 动态切换
+
+## 数据存储
+
+所有数据存储在用户数据目录：
+- **macOS**: `~/Library/Application Support/cc-copilot/`
+- **Windows**: `%APPDATA%/cc-copilot/`
+- **Linux**: `~/.config/cc-copilot/`
+
+存储文件：
+- `data.json`: 项目和会话数据
+- `settings.json`: 应用设置
+
+## 开发
 
 ```bash
-# Clone the repository
-git clone https://github.com/yangkui/cc-copilot.git
-cd cc-copilot
-
-# Install dependencies
+# 安装依赖
 npm install
 
-# Start development server
+# 开发模式
 npm run dev
 
-# Open http://localhost:5173 in your browser
-```
-
-The browser demo includes a fully interactive terminal simulator to test all features.
-
-## 🔧 Development & Compilation
-
-### Prerequisites
-
-- **Node.js**: v20.15.0 or higher
-- **npm**: v10.8.2 or higher
-- **Git**: For cloning the repository
-
-### 🛠️ Build from Source
-
-#### 1. Clone and Setup
-```bash
-# Clone the repository
-git clone https://github.com/yangkui/cc-copilot.git
-cd cc-copilot
-
-# Install all dependencies
-npm install
-```
-
-#### 2. Development
-```bash
-# Start development server (browser mode)
-npm run dev
-
-# Start development server (Electron mode)
-npm run dev:electron  # Note: May require Electron fixes
-
-# Build for development
-npm run build
-```
-
-#### 3. Production Build
-```bash
-# Build the application
+# 构建
 npm run build
 
-# Build for specific platforms
-npm run build:mac     # Build macOS .dmg
-npm run build:win     # Build Windows .exe  
-npm run build:linux   # Build Linux packages
-
-# Build for all platforms
-npm run build:all
+# 打包
+npm run build:mac   # macOS
+npm run build:win   # Windows
+npm run build:linux # Linux
 ```
 
-#### 4. Testing
-```bash
-# Preview built application
-npm run preview
+## 系统要求
 
-# Run in browser mode (recommended for testing)
-npm run dev
-# Then open http://localhost:5173
-```
+- Node.js 16+
+- Claude CLI (需单独安装)
 
-### 📦 Build Outputs
+## 许可证
 
-After building, you'll find the distributable files in:
-
-```
-dist/
-├── main/           # Electron main process
-├── preload/        # Electron preload scripts  
-├── renderer/       # React application
-└── packages/       # Final installers
-    ├── cc-copilot-1.0.0.dmg        # macOS
-    ├── cc-copilot-1.0.0.exe        # Windows
-    └── cc-copilot-1.0.0.AppImage   # Linux
-```
-
-### 🔧 Build Configuration
-
-The application uses:
-- **Electron**: v32.x for desktop app framework
-- **Vite**: For fast build and development
-- **Electron Builder**: For creating installers
-- **TypeScript**: For type safety
-- **React**: For the user interface
-- **Tailwind CSS**: For styling
-
-Configuration files:
-- `electron.vite.config.ts` - Vite configuration
-- `package.json` - Build scripts and dependencies
-- `tailwind.config.js` - Styling configuration
-
-## 📖 Usage Guide
-
-### 🚀 **First Launch**
-
-1. **Launch the Application**
-   - The app will automatically check for `claude-code` installation
-   - If not found, it will guide you through the setup process
-
-2. **Configure API Providers**
-   - Click the settings gear icon (⚙️) in the bottom left
-   - Add your API providers (Anthropic, OpenAI, Groq, etc.)
-   - Set API keys and base URLs
-   - Choose your default provider
-
-### 🎯 **Basic Workflow**
-
-#### Create a Project
-1. Click the **+** button in the project bar (left side)
-2. Enter a project name (e.g., "Web Development")
-3. The project icon will appear with auto-generated initials
-
-#### Start a Session
-1. Select a project from the left sidebar
-2. Click **"New Chat"** in the session list
-3. Enter a session name (e.g., "API Integration")
-4. The terminal will initialize and connect to `claude-code`
-
-#### Code with AI
-1. Type your questions or requests in the terminal
-2. Switch AI models using the dropdown in the top bar
-3. View real-time token usage in the bottom status bar
-4. Use the clear button or `Ctrl/Cmd+K` to clear the terminal
-
-### ⌨️ **Keyboard Shortcuts**
-
-| Shortcut | Action |
-|----------|--------|
-| `Ctrl/Cmd + K` | Clear terminal |
-| `Ctrl/Cmd + N` | New session |
-| `Ctrl/Cmd + ,` | Open settings |
-| `Ctrl/Cmd + W` | Close current session |
-| `F5` | Refresh/reconnect |
-
-### 📊 **Statistics & Monitoring**
-
-The bottom status bar shows:
-- **Connection Status**: Running/Stopped/Error
-- **Token Usage**: Prompt/Completion/Total tokens
-- **Scope Selector**: Switch between Session/Project/Global stats
-- **Controls**: Start/Stop/Clear buttons
-
-Click the scope dropdown to view different statistics:
-- **Current Session**: Tokens used in active session
-- **Project**: Total tokens across all project sessions  
-- **Global**: Lifetime token usage across all projects
-
-### ⚙️ **Advanced Configuration**
-
-#### API Provider Setup
-1. Open Settings (⚙️ icon)
-2. Add Provider with:
-   - **Name**: Display name (e.g., "My OpenAI")
-   - **Base URL**: API endpoint
-   - **API Key**: Your authentication key
-   - **Adapter**: Provider type (Anthropic/OpenAI/Groq/Moonshot)
-
-#### Proxy Configuration
-For corporate networks:
-1. Open Settings → General
-2. Set HTTP(S) Proxy URL
-3. Format: `http://proxy.company.com:8080`
-
-#### Model Switching
-- Use the dropdown in the main header to switch models
-- Changes apply immediately to new requests
-- Previous conversation history is preserved
-
-## 🔍 **Troubleshooting**
-
-### Common Issues
-
-#### "Electron uninstall" Error
-If you see this error when running `yarn dev`:
-```bash
-# Clean and rebuild
-rm -rf node_modules package-lock.json
-yarn config set registry https://registry.npmmirror.com/   
-yarn 
-yarn rebuild electron
-```
-
-#### Terminal Not Connecting
-1. Check if `claude-code` is properly installed
-2. Verify API keys in Settings
-3. Check network connectivity
-4. Try the browser demo mode for UI testing
-
-#### Build Failures
-```bash
-# Clean build cache
-yarn clean
-yarn config set registry https://registry.npmmirror.com/   
-ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/ yarn install
-yarn build
-```
-
-### Browser Demo Mode
-
-If Electron issues persist, use browser mode:
-```bash
-yarn dev
-# Open http://localhost:5173
-```
-
-The browser demo provides:
-- Full UI functionality
-- Interactive terminal simulator
-- All project/session management features
-- Settings configuration (stored in localStorage)
-
-### Getting Help
-
-1. **Check Issues**: [GitHub Issues](https://github.com/yangkui/cc-copilot/issues)
-2. **Documentation**: See `DEVELOPMENT_README.md` for technical details
-3. **Create Issue**: Report bugs or request features
-
-## 🤝 Contributing
-
-We welcome contributions! Please see our [Contributing Guidelines](CONTRIBUTING.md) for details.
-
-### Development Setup
-```bash
-git clone https://github.com/yangkui/cc-copilot.git
-cd cc-copilot
-ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/ yarn
-yarn dev
-```
-
-## 📄 License
-
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
-## 🙏 Acknowledgments
-
-- **Anthropic** for the amazing `claude-code` tool
-- **Electron** community for the desktop framework
-- **xterm.js** for terminal emulation
-- All contributors and testers
+MIT License
 
 ---
 
-**Built with ❤️ for the developer community**
+## 项目重构说明
+
+此版本已经过完全重构，实现了最简化的可用版本：
+
+### 已实现功能
+✅ 基础Electron应用架构  
+✅ 项目和会话管理  
+✅ 终端集成 (xterm.js)  
+✅ HTTP代理服务器  
+✅ 设置管理  
+✅ 数据持久化存储  
+
+### 已删除复杂功能
+❌ 复杂的状态管理 (zustand)  
+❌ 多余的认证系统  
+❌ Claude检测和安装向导  
+❌ 统计和分析功能  
+❌ 复杂的错误处理  
+
+### 核心工作流程
+1. 启动应用 → 启动HTTP代理服务器
+2. 选择项目目录 → 创建会话
+3. 激活会话 → 启动终端并执行 `claude` 命令
+4. 在终端中与Claude Code交互
+
+这是一个专注于核心功能的最小可行版本，可以作为后续功能扩展的基础。

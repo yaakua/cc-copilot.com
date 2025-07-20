@@ -1,147 +1,123 @@
-interface LogEntry {
-  timestamp: string
-  level: string
-  message: string
-  filename?: string
-  line?: number
-  error?: string
-  meta?: any
+export enum LogLevel {
+  DEBUG = 'debug',
+  INFO = 'info',
+  WARN = 'warn',
+  ERROR = 'error'
 }
 
-function getCallerInfo(): { filename?: string; line?: number } {
-  try {
-    const stack = new Error().stack
-    if (!stack) return {}
-    
-    const lines = stack.split('\n')
-    // Skip first 3 lines: Error, getCallerInfo, and the log function
-    const callerLine = lines[3]
-    
-    if (callerLine) {
-      const match = callerLine.match(/\((.*):(\d+):(\d+)\)/) || callerLine.match(/at (.*):(\d+):(\d+)/)
-      if (match) {
-        const fullPath = match[1]
-        const filename = fullPath.split('/').pop() || fullPath
-        const line = parseInt(match[2], 10)
-        return { filename, line }
+class RendererLogger {
+  private component: string = 'renderer'
+
+  public setComponent(component: string): void {
+    this.component = component
+  }
+
+  private async log(level: LogLevel, message: string, error?: Error, meta?: Record<string, any>): Promise<void> {
+    try {
+      if (window.api?.log) {
+        await window.api.log(level, message, this.component, error, meta)
+      } else {
+        // Fallback to console if API not available
+        const logMethod = console[level] || console.log
+        logMethod(`[${this.component}] ${message}`, meta || '', error || '')
       }
+    } catch (err) {
+      console.error('Failed to send log to main process:', err)
+      console[level](`[${this.component}] ${message}`, meta || '', error || '')
     }
-  } catch (e) {
-    // Ignore errors in stack trace parsing
   }
-  
-  return {}
-}
 
-function formatTimestamp(): string {
-  const now = new Date()
-  return now.toISOString().replace('T', ' ').replace('Z', '')
-}
-
-function sendLogToMain(entry: LogEntry): void {
-  if (window.electronAPI?.sendLog) {
-    window.electronAPI.sendLog(entry)
+  public debug(message: string, meta?: Record<string, any>): void {
+    this.log(LogLevel.DEBUG, message, undefined, meta)
   }
-}
 
-function logToConsole(level: string, message: string, meta?: any): void {
-  const timestamp = formatTimestamp()
-  const caller = getCallerInfo()
-  const location = caller.filename && caller.line ? ` [${caller.filename}:${caller.line}]` : ''
-  const formattedMessage = `${timestamp} [${level.toUpperCase()}]${location} ${message}`
-  
-  switch (level) {
-    case 'debug':
-      console.debug(formattedMessage, meta)
-      break
-    case 'info':
-      console.info(formattedMessage, meta)
-      break
-    case 'warn':
-      console.warn(formattedMessage, meta)
-      break
-    case 'error':
-      console.error(formattedMessage, meta)
-      break
-    default:
-      console.log(formattedMessage, meta)
+  public info(message: string, meta?: Record<string, any>): void {
+    this.log(LogLevel.INFO, message, undefined, meta)
   }
-}
 
-export const logger = {
-  debug: (message: string, meta?: any) => {
-    const caller = getCallerInfo()
-    const entry: LogEntry = {
-      timestamp: formatTimestamp(),
-      level: 'debug',
-      message,
-      filename: caller.filename,
-      line: caller.line,
-      meta
+  public warn(message: string, error?: Error, meta?: Record<string, any>): void {
+    this.log(LogLevel.WARN, message, error, meta)
+  }
+
+  public error(message: string, error?: Error, meta?: Record<string, any>): void {
+    this.log(LogLevel.ERROR, message, error, meta)
+  }
+
+  // Convenience methods for component-specific logging
+  public withComponent(component: string) {
+    return {
+      debug: (message: string, meta?: Record<string, any>) => 
+        this.log(LogLevel.DEBUG, message, undefined, { ...meta, originalComponent: this.component, component }),
+      info: (message: string, meta?: Record<string, any>) => 
+        this.log(LogLevel.INFO, message, undefined, { ...meta, originalComponent: this.component, component }),
+      warn: (message: string, error?: Error, meta?: Record<string, any>) => 
+        this.log(LogLevel.WARN, message, error, { ...meta, originalComponent: this.component, component }),
+      error: (message: string, error?: Error, meta?: Record<string, any>) => 
+        this.log(LogLevel.ERROR, message, error, { ...meta, originalComponent: this.component, component })
     }
-    
-    logToConsole('debug', message, meta)
-    sendLogToMain(entry)
-  },
-  
-  info: (message: string, meta?: any) => {
-    const caller = getCallerInfo()
-    const entry: LogEntry = {
-      timestamp: formatTimestamp(),
-      level: 'info',
-      message,
-      filename: caller.filename,
-      line: caller.line,
-      meta
+  }
+
+  // Get recent logs for debugging
+  public async getRecentLogs(lines?: number): Promise<string[]> {
+    try {
+      if (window.api?.getRecentLogs) {
+        return await window.api.getRecentLogs(lines)
+      }
+      return []
+    } catch (error) {
+      console.error('Failed to get recent logs:', error)
+      return []
     }
-    
-    logToConsole('info', message, meta)
-    sendLogToMain(entry)
-  },
-  
-  warn: (message: string, meta?: any) => {
-    const caller = getCallerInfo()
-    const entry: LogEntry = {
-      timestamp: formatTimestamp(),
-      level: 'warn',
-      message,
-      filename: caller.filename,
-      line: caller.line,
-      meta
+  }
+
+  // Get log directory
+  public async getLogDirectory(): Promise<string> {
+    try {
+      if (window.api?.getLogDirectory) {
+        return await window.api.getLogDirectory()
+      }
+      return ''
+    } catch (error) {
+      console.error('Failed to get log directory:', error)
+      return ''
     }
-    
-    logToConsole('warn', message, meta)
-    sendLogToMain(entry)
-  },
-  
-  error: (message: string, error?: Error | any, meta?: any) => {
-    const caller = getCallerInfo()
-    const entry: LogEntry = {
-      timestamp: formatTimestamp(),
-      level: 'error',
-      message,
-      filename: caller.filename,
-      line: caller.line,
-      error: error instanceof Error ? error.stack : String(error),
-      meta
-    }
-    
-    logToConsole('error', message, { error, ...meta })
-    sendLogToMain(entry)
   }
 }
 
-// 全局错误捕获
-window.addEventListener('error', (event) => {
-  logger.error('Uncaught error', event.error, {
-    filename: event.filename,
-    line: event.lineno,
-    column: event.colno
-  })
-})
+// Export singleton instance
+export const logger = new RendererLogger()
 
-window.addEventListener('unhandledrejection', (event) => {
-  logger.error('Unhandled promise rejection', event.reason)
-})
+// Replace console methods to redirect to our logger
+const originalConsole = {
+  log: console.log,
+  debug: console.debug,
+  info: console.info,
+  warn: console.warn,
+  error: console.error
+}
 
-export default logger
+// Override console methods to also log to file
+console.debug = (...args: any[]) => {
+  originalConsole.debug(...args)
+  logger.debug(args.join(' '))
+}
+
+console.info = (...args: any[]) => {
+  originalConsole.info(...args)
+  logger.info(args.join(' '))
+}
+
+console.warn = (...args: any[]) => {
+  originalConsole.warn(...args)
+  const error = args.find(arg => arg instanceof Error)
+  logger.warn(args.filter(arg => !(arg instanceof Error)).join(' '), error)
+}
+
+console.error = (...args: any[]) => {
+  originalConsole.error(...args)
+  const error = args.find(arg => arg instanceof Error)
+  logger.error(args.filter(arg => !(arg instanceof Error)).join(' '), error)
+}
+
+// Keep console.log unchanged for development debugging
+console.log = originalConsole.log

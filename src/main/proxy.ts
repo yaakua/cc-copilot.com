@@ -1,52 +1,117 @@
 import express from 'express'
-import { createProxyMiddleware } from 'http-proxy-middleware'
+import { createProxyMiddleware, Options } from 'http-proxy-middleware'
+import { HttpsProxyAgent } from 'https-proxy-agent'
+import { HttpProxyAgent } from 'http-proxy-agent'
+import { SettingsManager } from './settings'
+import { logger } from './logger'
+import http from 'http'
 
 export class ProxyServer {
   private app: express.Application
   private server: any
   private port: number = 31299
   private currentTarget: string = 'https://api.anthropic.com'
+  private settingsManager: SettingsManager
+  private proxyAgent: HttpsProxyAgent<any> | HttpProxyAgent<any> | null = null
 
-  constructor() {
+  constructor(settingsManager: SettingsManager) {
     this.app = express()
+    this.settingsManager = settingsManager
     this.setupRoutes()
   }
 
   private setupRoutes() {
-    // Basic logging middleware
-    this.app.use((req, res, next) => {
-      console.log(`[Proxy] ${req.method} ${req.url}`)
-      next()
-    })
+    // Initialize proxy agent based on current settings
+    this.initializeProxyAgent()
 
-    // Proxy all requests to the current target
-    this.app.use('/', createProxyMiddleware({
+    const proxyOptions: Options = {
       target: this.currentTarget,
       changeOrigin: true,
+      
+      // Use router to dynamically configure proxy for each request
+      router: (req: http.IncomingMessage): string | Options => {
+        const targetHost = req.headers.host || ''
+        const proxyConfig = this.settingsManager.getProxyConfig()
+        
+        if (!proxyConfig?.enabled || !this.proxyAgent) {
+          logger.debug(`Proxy disabled, direct routing for: ${targetHost}`, 'proxy')
+          return this.currentTarget
+        }
+
+        logger.debug(`Using upstream proxy for: ${targetHost}`, 'proxy')
+        return {
+          target: this.currentTarget,
+          agent: this.proxyAgent,
+          changeOrigin: true
+        } as Options
+      },
+
       pathRewrite: {
         '^/': '/'
       },
-      onProxyReq: (proxyReq, req, res) => {
-        console.log(`[Proxy] Forwarding to: ${this.currentTarget}${req.url}`)
-      },
-      onProxyRes: (proxyRes, req, res) => {
-        console.log(`[Proxy] Response from: ${this.currentTarget} - Status: ${proxyRes.statusCode}`)
-      },
-      onError: (err, req, res) => {
-        console.error(`[Proxy] Error:`, err.message)
+      
+      on: {
+        proxyReq: (proxyReq, req, res) => {
+          const proxyConfig = this.settingsManager.getProxyConfig()
+          const usingProxy = proxyConfig?.enabled ? ' via proxy' : ''
+          logger.debug(`Forwarding to: ${this.currentTarget}${req.url}${usingProxy}`, 'proxy')
+        },
+        proxyRes: (proxyRes, req, res) => {
+          logger.debug(`Response from: ${this.currentTarget} - Status: ${proxyRes.statusCode}`, 'proxy')
+        },
+        error: (err, req, res) => {
+          logger.error(`Proxy error: ${err.message}`, 'proxy', err as Error)
+        }
       }
-    }))
+    }
+
+    this.app.use('/', createProxyMiddleware(proxyOptions))
+  }
+
+  private initializeProxyAgent(): void {
+    const proxyConfig = this.settingsManager.getProxyConfig()
+
+    if (!proxyConfig?.enabled || !proxyConfig.host || !proxyConfig.port) {
+      this.proxyAgent = null
+      logger.info('No upstream proxy configured', 'proxy')
+      return
+    }
+
+    try {
+      // Construct proxy URL
+      let proxyUrl = `http://`
+      
+      if (proxyConfig.auth?.username && proxyConfig.auth?.password) {
+        proxyUrl += `${encodeURIComponent(proxyConfig.auth.username)}:${encodeURIComponent(proxyConfig.auth.password)}@`
+      }
+      
+      proxyUrl += `${proxyConfig.host}:${proxyConfig.port}`
+
+      // Create proxy agent
+      this.proxyAgent = new HttpProxyAgent(proxyUrl)
+
+      logger.info(`Upstream proxy agent initialized: ${proxyConfig.host}:${proxyConfig.port}`, 'proxy')
+    } catch (error) {
+      logger.error('Failed to initialize proxy agent', 'proxy', error as Error)
+      this.proxyAgent = null
+    }
+  }
+
+  public updateProxySettings(): void {
+    logger.info('Updating proxy settings', 'proxy')
+    this.initializeProxyAgent()
+    logger.info('Proxy settings updated successfully', 'proxy')
   }
 
   public start(): Promise<void> {
     return new Promise((resolve, reject) => {
       this.server = this.app.listen(this.port, '127.0.0.1', () => {
-        console.log(`[Proxy] Server started on http://127.0.0.1:${this.port}`)
+        logger.info(`Server started on http://127.0.0.1:${this.port}`, 'proxy')
         resolve()
       })
       
       this.server.on('error', (err: any) => {
-        console.error('[Proxy] Server error:', err)
+        logger.error('Server error', 'proxy', err)
         reject(err)
       })
     })
@@ -56,7 +121,7 @@ export class ProxyServer {
     return new Promise((resolve) => {
       if (this.server) {
         this.server.close(() => {
-          console.log('[Proxy] Server stopped')
+          logger.info('Server stopped', 'proxy')
           resolve()
         })
       } else {
@@ -67,7 +132,7 @@ export class ProxyServer {
 
   public setTarget(target: string) {
     this.currentTarget = target
-    console.log(`[Proxy] Target changed to: ${target}`)
+    logger.info(`Target changed to: ${target}`, 'proxy')
   }
 
   public getPort(): number {

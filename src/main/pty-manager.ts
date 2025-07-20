@@ -2,7 +2,7 @@ import * as pty from 'node-pty'
 import { BrowserWindow } from 'electron'
 import * as os from 'os'
 import * as path from 'path'
-import { ClaudeDetector } from './claude-detector'
+import { logger } from './logger'
 
 export interface PtyOptions {
   workingDirectory?: string
@@ -29,12 +29,12 @@ export class PtyManager {
 
   public async start(options: PtyOptions = {}): Promise<void> {
     if (this.ptyProcess) {
-      console.log('[PTY] Process already running')
+      logger.info('Process already running', 'pty-manager')
       return
     }
 
     try {
-      console.log('[PTY] Starting process...')
+      logger.info('Starting process...', 'pty-manager')
       
       const {
         workingDirectory = process.cwd(),
@@ -55,30 +55,13 @@ export class PtyManager {
       let shell: string
       let shellArgs: string[] = []
       
+      // Start shell - always use bash/powershell
+      shell = os.platform() === 'win32' ? 'powershell.exe' : 'bash'
+      shellArgs = []
+      
       if (options.autoStartClaude) {
-        // Check if Claude is installed before trying to start
-        const claudeDetector = new ClaudeDetector()
-        const detection = await claudeDetector.detectClaude()
-        this.claudeInstalled = detection.isInstalled
-        
-        // Always start a normal shell first, then run claude within it
-        shell = os.platform() === 'win32' ? 'powershell.exe' : 'bash'
-        shellArgs = []
-        
-        if (!detection.isInstalled) {
-          console.warn('[PTY] Claude not detected, starting normal shell instead')
-        } else {
-          console.log('[PTY] Claude detected, will start claude-code after shell initialization')
-        }
-      } else {
-        // Check Claude installation status for initial message customization
-        const claudeDetector = new ClaudeDetector()
-        const detection = await claudeDetector.detectClaude()
-        this.claudeInstalled = detection.isInstalled
-        
-        // Start normal shell
-        shell = os.platform() === 'win32' ? 'powershell.exe' : 'bash'
-        shellArgs = []
+        logger.info('Will start claude-code after shell initialization', 'pty-manager')
+        this.claudeInstalled = true  // Assume claude is available
       }
       
       // Create PTY process
@@ -94,7 +77,7 @@ export class PtyManager {
       })
 
       this.setupEventHandlers()
-      console.log('[PTY] Process started successfully')
+      logger.info('Process started successfully', 'pty-manager')
       
       // Send initial welcome message and start Claude if needed
       this.sendInitialMessage()
@@ -102,7 +85,7 @@ export class PtyManager {
       // Set flag if claude-code should be started
       if (options.autoStartClaude && this.claudeInstalled) {
         this.isClaudeStarting = true
-        console.log('[PTY] Will start claude-code after shell initialization')
+        logger.info('Will start claude-code after shell initialization', 'pty-manager')
         
         // Start Claude after a short delay to allow shell to initialize
         setTimeout(() => {
@@ -110,18 +93,18 @@ export class PtyManager {
         }, 1000)
       }
     } catch (error) {
-      console.error('[PTY] Failed to start:', error)
+      logger.error('Failed to start', 'pty-manager', error as Error)
       throw error
     }
   }
 
   public async stop(): Promise<void> {
     if (!this.ptyProcess) {
-      console.log('[PTY] No process to stop')
+      logger.info('No process to stop', 'pty-manager')
       return
     }
 
-    console.log('[PTY] Stopping process...')
+    logger.info('Stopping process...', 'pty-manager')
     
     try {
       // Send exit command based on platform
@@ -139,10 +122,10 @@ export class PtyManager {
         this.ptyProcess.kill()
       }
     } catch (error) {
-      console.error('[PTY] Error during stop:', error)
+      logger.error('Error during stop', 'pty-manager', error as Error)
     } finally {
       this.ptyProcess = null
-      console.log('[PTY] Process stopped')
+      logger.info('Process stopped', 'pty-manager')
     }
   }
 
@@ -150,22 +133,22 @@ export class PtyManager {
     if (this.ptyProcess) {
       this.ptyProcess.write(data)
     } else {
-      console.warn('[PTY] Cannot send input - process not running')
+      logger.warn('Cannot send input - process not running', 'pty-manager')
     }
   }
 
   public resize(cols: number, rows: number): void {
     if (this.ptyProcess) {
       this.ptyProcess.resize(cols, rows)
-      console.log(`[PTY] Resized to ${cols}x${rows}`)
+      logger.info(`Resized to ${cols}x${rows}`, 'pty-manager')
     } else {
-      console.warn('[PTY] Cannot resize - process not running')
+      logger.warn('Cannot resize - process not running', 'pty-manager')
     }
   }
 
   public changeDirectory(directory: string): void {
     if (!this.ptyProcess) {
-      console.warn('[PTY] Cannot change directory - process not running')
+      logger.warn('Cannot change directory - process not running', 'pty-manager')
       return
     }
 
@@ -174,7 +157,7 @@ export class PtyManager {
       ? `cd "${resolvedPath}"\r\n`
       : `cd "${resolvedPath}"\n`
     
-    console.log(`[PTY] Changing directory to: ${resolvedPath}`)
+    logger.info(`Changing directory to: ${resolvedPath}`, 'pty-manager')
     this.ptyProcess.write(command)
   }
 
@@ -182,7 +165,7 @@ export class PtyManager {
     this.currentEnv[key] = value
     
     if (!this.ptyProcess) {
-      console.log(`[PTY] Environment variable ${key} set for next session`)
+      logger.info(`Environment variable ${key} set for next session`, 'pty-manager')
       return
     }
 
@@ -191,7 +174,7 @@ export class PtyManager {
       ? `$env:${key}="${value}"\r\n`
       : `export ${key}="${value}"\n`
     
-    console.log(`[PTY] Setting environment variable: ${key}=${value}`)
+    logger.info(`Setting environment variable: ${key}=${value}`, 'pty-manager')
     this.ptyProcess.write(command)
   }
 
@@ -205,34 +188,18 @@ export class PtyManager {
 
   private startClaudeInShell(): void {
     if (!this.ptyProcess) {
-      console.warn('[PTY] Cannot start claude - process not running')
+      logger.warn('Cannot start claude - process not running', 'pty-manager')
       return
     }
 
-    console.log('[PTY] Starting claude command in shell...')
+    logger.info('Starting claude command in shell...', 'pty-manager')
     const command = os.platform() === 'win32' ? 'claude\r\n' : 'claude\n'
     this.ptyProcess.write(command)
   }
 
   public async startClaudeCode(workingDirectory?: string): Promise<void> {
     if (!this.ptyProcess) {
-      console.warn('[PTY] Cannot start claude-code - process not running')
-      return
-    }
-
-    // Check if Claude is installed before trying to start
-    const claudeDetector = new ClaudeDetector()
-    const detection = await claudeDetector.detectClaude()
-    
-    if (!detection.isInstalled) {
-      // Show error message instead of installation prompt
-      const errorMsg = '\x1b[31mError: Claude CLI not detected.\x1b[0m\r\n' +
-                      '\x1b[33mPlease install Claude CLI first. Check the status bar for installation instructions.\x1b[0m\r\n\r\n'
-      
-      this.mainWindow.webContents.send('terminal:data', {
-        sessionId: this.sessionId,
-        data: errorMsg
-      })
+      logger.warn('Cannot start claude-code - process not running', 'pty-manager')
       return
     }
 
@@ -241,26 +208,9 @@ export class PtyManager {
       this.changeDirectory(workingDirectory)
     }
 
-    // Determine the best command to use based on installation type
-    const validInstall = detection.installations.find(i => i.valid)
-    let command: string
-    
-    if (validInstall && (validInstall.type === 'global' || validInstall.path.includes('claude'))) {
-      // Use direct claude command for global installations
-      command = os.platform() === 'win32' ? 'claude\r\n' : 'claude\n'
-    } else {
-      // Show error instead of using npx
-      const errorMsg = '\x1b[31mError: No valid Claude CLI installation found.\x1b[0m\r\n' +
-                      '\x1b[33mPlease install Claude CLI first. Check the status bar for installation instructions.\x1b[0m\r\n\r\n'
-      
-      this.mainWindow.webContents.send('terminal:data', {
-        sessionId: this.sessionId,
-        data: errorMsg
-      })
-      return
-    }
-    
-    console.log('[PTY] Starting claude-code...')
+    // Start claude command
+    const command = os.platform() === 'win32' ? 'claude\r\n' : 'claude\n'
+    logger.info('Starting claude-code...', 'pty-manager')
     this.ptyProcess.write(command)
   }
 
@@ -300,7 +250,7 @@ export class PtyManager {
         
         // Check if claude-code has started (look for specific prompt patterns)
         if (this.isClaudeReady(data)) {
-          console.log(`[PTY] Claude-code ready for session ${this.sessionId}`)
+          logger.info(`Claude-code ready for session ${this.sessionId}`, 'pty-manager')
           this.isClaudeStarting = false
           
           // Send welcome message first
@@ -329,7 +279,7 @@ export class PtyManager {
 
     // Handle PTY exit
     this.ptyProcess.onExit((exitCode) => {
-      console.log(`[PTY] Process exited with code: ${exitCode.exitCode} for session ${this.sessionId}`)
+      logger.info(`Process exited with code: ${exitCode.exitCode} for session ${this.sessionId}`, 'pty-manager')
       this.ptyProcess = null
       this.isClaudeStarting = false
       this.mainWindow?.webContents.send('terminal:data', {

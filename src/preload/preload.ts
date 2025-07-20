@@ -9,58 +9,35 @@ const loggerAPI = {
 
 // Custom APIs for renderer
 const api = {
+  // Logger APIs
+  log: (level: string, message: string, component?: string, error?: any, meta?: Record<string, any>) => 
+    ipcRenderer.invoke('logger:log', { level, message, component, error, meta }),
+  getRecentLogs: (lines?: number) => ipcRenderer.invoke('logger:get-recent', lines),
+  getLogDirectory: () => ipcRenderer.invoke('logger:get-log-dir'),
+
   // Terminal APIs
   sendTerminalInput: (data: string, sessionId?: string) => ipcRenderer.invoke('terminal:input', data, sessionId),
   resizeTerminal: (cols: number, rows: number, sessionId?: string) => ipcRenderer.invoke('terminal:resize', cols, rows, sessionId),
   onTerminalData: (callback: (data: { sessionId: string; data: string } | string) => void) => 
     ipcRenderer.on('terminal:data', (_event, data) => callback(data)),
   
-  // PTY APIs
-  startPty: (options?: any, sessionId?: string) => ipcRenderer.invoke('pty:start', options, sessionId),
-  stopPty: (sessionId?: string) => ipcRenderer.invoke('pty:stop', sessionId),
-  changeDirectory: (path: string, sessionId?: string) => ipcRenderer.invoke('pty:change-directory', path, sessionId),
-  setEnvironmentVariable: (key: string, value: string, sessionId?: string) => ipcRenderer.invoke('pty:set-env', key, value, sessionId),
-  getEnvironmentVariable: (key: string, sessionId?: string) => ipcRenderer.invoke('pty:get-env', key, sessionId),
-  getAllEnvironmentVariables: (sessionId?: string) => ipcRenderer.invoke('pty:get-all-env', sessionId),
-  startClaudeCode: (workingDirectory?: string, sessionId?: string) => ipcRenderer.invoke('pty:start-claude-code', workingDirectory, sessionId),
+  // Session APIs
+  createSession: (projectPath: string, name?: string) => ipcRenderer.invoke('session:create', projectPath, name),
+  activateSession: (sessionId: string) => ipcRenderer.invoke('session:activate', sessionId),
+  resumeSession: (sessionId: string, projectPath: string) => ipcRenderer.invoke('session:resume', sessionId, projectPath),
+  deleteSession: (sessionId: string) => ipcRenderer.invoke('session:delete', sessionId),
   
   // Project APIs
-  getProjects: () => ipcRenderer.invoke('projects:get'),
-  createProject: (name: string, path: string) => ipcRenderer.invoke('projects:create', name, path),
-  deleteProject: (id: string) => ipcRenderer.invoke('projects:delete', id),
-  selectProjectDirectory: () => ipcRenderer.invoke('projects:select-directory'),
-  getProjectHistory: () => ipcRenderer.invoke('projects:get-history'),
-  clearProjectHistory: () => ipcRenderer.invoke('projects:clear-history'),
-  extractProjectName: (path: string) => ipcRenderer.invoke('projects:extract-name', path),
-  
-  // Session APIs
-  getSessions: (projectId: string) => ipcRenderer.invoke('sessions:get', projectId),
-  createSession: (projectId: string, name?: string) => ipcRenderer.invoke('sessions:create', projectId, name),
-  activateSession: (sessionId: string) => ipcRenderer.invoke('sessions:activate', sessionId),
-  deleteSession: (id: string) => ipcRenderer.invoke('sessions:delete', id),
+  selectProjectDirectory: () => ipcRenderer.invoke('project:select-directory'),
+  getProjectSessions: (projectPath: string) => ipcRenderer.invoke('project:get-sessions', projectPath),
+  getAllProjects: () => ipcRenderer.invoke('project:get-all'),
   
   // Settings APIs
   getSettings: () => ipcRenderer.invoke('settings:get'),
   updateSettings: (settings: any) => ipcRenderer.invoke('settings:update', settings),
   
-  // Statistics APIs
-  getStats: (scope: 'session' | 'project' | 'global', id?: string) => 
-    ipcRenderer.invoke('stats:get', scope, id),
-  
-  // Proxy APIs
-  setActiveModel: (modelId: string) => ipcRenderer.invoke('proxy:set-model', modelId),
-  
-  // Claude Detection APIs
-  detectClaude: () => ipcRenderer.invoke('claude:detect'),
-  testClaudeInstallation: (claudePath: string) => ipcRenderer.invoke('claude:test-installation', claudePath),
-  clearClaudeCache: () => ipcRenderer.invoke('claude:clear-cache'),
-
-  // Claude Code Integration APIs
-  getClaudeProjects: () => ipcRenderer.invoke('claude-code:get-projects'),
-  resumeClaudeSession: (sessionPath: string, workingDirectory: string) => 
-    ipcRenderer.invoke('claude-code:resume-session', sessionPath, workingDirectory),
-  createNewClaudeSession: (workingDirectory: string) => 
-    ipcRenderer.invoke('claude-code:create-new-session', workingDirectory)
+  // Status APIs
+  getCurrentStatus: () => ipcRenderer.invoke('status:get-current')
 }
 
 // Use `contextBridge` APIs to expose Electron APIs to
@@ -72,7 +49,8 @@ if (process.contextIsolated) {
     contextBridge.exposeInMainWorld('electronAPI', loggerAPI)
     contextBridge.exposeInMainWorld('api', api)
   } catch (error) {
-    console.error(error)
+    // Use original console for preload errors since logger might not be available
+    console.error('Preload context bridge error:', error)
   }
 } else {
   // @ts-ignore (define in dts)

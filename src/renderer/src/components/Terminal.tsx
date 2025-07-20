@@ -1,56 +1,24 @@
-import React, { useEffect, useRef, useImperativeHandle, forwardRef } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import { Terminal as XTerm } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
-import { useAppStore } from '../stores/appStore'
 import '@xterm/xterm/css/xterm.css'
-
-export interface TerminalRef {
-  clear: () => void
-  focus: () => void
-  write: (data: string) => void
-}
+import { logger } from '../utils/logger'
 
 interface TerminalProps {
-  sessionId?: string
+  sessionId: string
 }
 
-const Terminal = forwardRef<TerminalRef, TerminalProps>(({ sessionId }, ref) => {
+const Terminal: React.FC<TerminalProps> = ({ sessionId }) => {
   const terminalRef = useRef<HTMLDivElement>(null)
   const xtermRef = useRef<XTerm | null>(null)
   const fitAddonRef = useRef<FitAddon | null>(null)
-  
-  const { 
-    setTerminalConnected, 
-    setClaudeCodeRunning,
-    activeSessionId 
-  } = useAppStore()
-  
-  // Use prop sessionId if provided, otherwise fall back to store activeSessionId
-  const currentSessionId = sessionId || activeSessionId
-
-  // Expose methods via ref
-  useImperativeHandle(ref, () => ({
-    clear: () => {
-      if (xtermRef.current) {
-        xtermRef.current.clear()
-      }
-    },
-    focus: () => {
-      if (xtermRef.current) {
-        xtermRef.current.focus()
-      }
-    },
-    write: (data: string) => {
-      if (xtermRef.current) {
-        xtermRef.current.write(data)
-      }
-    }
-  }), [])
+  const [isConnected, setIsConnected] = useState(false)
 
   useEffect(() => {
+    logger.setComponent('Terminal')
     if (!terminalRef.current) return
 
-    // Clear existing terminal if it exists
+    // Clean up existing terminal
     if (xtermRef.current) {
       xtermRef.current.dispose()
     }
@@ -62,7 +30,6 @@ const Terminal = forwardRef<TerminalRef, TerminalProps>(({ sessionId }, ref) => 
         foreground: '#ffffff',
         cursor: '#ffffff',
         cursorAccent: '#000000',
-        selection: '#ffffff40',
         black: '#000000',
         red: '#ff5555',
         green: '#50fa7b',
@@ -93,38 +60,36 @@ const Terminal = forwardRef<TerminalRef, TerminalProps>(({ sessionId }, ref) => 
 
     const fitAddon = new FitAddon()
     terminal.loadAddon(fitAddon)
-
     terminal.open(terminalRef.current)
-    fitAddon.fit()
 
     // Store references
     xtermRef.current = terminal
     fitAddonRef.current = fitAddon
 
-    // Update connection status
-    setTerminalConnected(true)
+    // Fit terminal to container
+    setTimeout(() => {
+      try {
+        fitAddon.fit()
+        setIsConnected(true)
+      } catch (error) {
+        logger.warn('Failed to fit terminal', error as Error)
+      }
+    }, 0)
 
     // Handle terminal input
     terminal.onData((data) => {
-      // Send input to main process with session ID
-      console.log('[Terminal] Sending input:', data, 'Session:', currentSessionId)
-      if (window.api?.sendTerminalInput && currentSessionId) {
-        window.api.sendTerminalInput(data, currentSessionId)
-      } else {
-        // Fallback for browser testing
-        console.log('Terminal input:', data)
+      if (window.api?.sendTerminalInput) {
+        window.api.sendTerminalInput(data, sessionId)
       }
     })
 
-    // Listen for data from PTY process
-    let dataListener: ((data: { sessionId: string; data: string } | string) => void) | null = null
+    // Listen for terminal output
     if (window.api?.onTerminalData) {
-      dataListener = (data: { sessionId: string; data: string } | string) => {
+      const dataListener = (data: { sessionId: string; data: string } | string) => {
         if (xtermRef.current === terminal) {
-          // Handle both old format (string) and new format (with sessionId)
           if (typeof data === 'string') {
             terminal.write(data)
-          } else if (data.sessionId === currentSessionId) {
+          } else if (data.sessionId === sessionId) {
             terminal.write(data.data)
           }
         }
@@ -134,80 +99,49 @@ const Terminal = forwardRef<TerminalRef, TerminalProps>(({ sessionId }, ref) => 
 
     // Handle window resize
     const handleResize = () => {
-      fitAddon.fit()
-      // Notify PTY about terminal resize
-      if (window.api?.resizeTerminal && currentSessionId) {
-        window.api.resizeTerminal(terminal.cols, terminal.rows, currentSessionId)
+      try {
+        fitAddon.fit()
+        if (window.api?.resizeTerminal) {
+          window.api.resizeTerminal(terminal.cols, terminal.rows, sessionId)
+        }
+      } catch (error) {
+        logger.warn('Failed to resize terminal', error as Error)
       }
     }
     window.addEventListener('resize', handleResize)
 
-    // Write initial message based on environment
-    if (window.api) {
-      terminal.write('\x1b[36mCC Copilot Terminal\x1b[0m\r\n')
-      terminal.write('\x1b[32m✓ Connected to PTY\x1b[0m\r\n\r\n')
-      
-      // Focus the terminal after initialization
-      setTimeout(() => {
-        terminal.focus()
-        // Initial resize to match terminal size
-        if (window.api?.resizeTerminal && currentSessionId) {
-          window.api.resizeTerminal(terminal.cols, terminal.rows, currentSessionId)
-        }
-      }, 100)
-    } else {
-      // Browser mode - show demo content
-      terminal.write('\x1b[36mCC Copilot Terminal (Demo Mode)\x1b[0m\r\n')
-      terminal.write('\x1b[90mThis is a demo of the terminal interface.\x1b[0m\r\n')
-      terminal.write('\x1b[90mIn the full application, this would connect to claude-code.\x1b[0m\r\n\r\n')
-      terminal.write('\x1b[33mDemo commands:\x1b[0m\r\n')
-      terminal.write('  • Type anything to see it echoed\r\n')
-      terminal.write('  • Press Enter to see a demo response\r\n\r\n')
-      terminal.write('\x1b[32m$\x1b[0m ')
+    // Show connection message
+    terminal.write('\x1b[36mCC Copilot Terminal\x1b[0m\r\n')
+    terminal.write(`\x1b[32m✓ Session: ${sessionId}\x1b[0m\r\n\r\n`)
 
-      // Demo input handling for browser testing
-      let currentInput = ''
-      terminal.onData((data) => {
-        if (data === '\r') {
-          // Enter pressed
-          terminal.write('\r\n')
-          if (currentInput.trim()) {
-            terminal.write(`\x1b[34mDemo response to: "${currentInput}"\x1b[0m\r\n`)
-            terminal.write('This is how the terminal would respond in the full application.\r\n')
-          }
-          currentInput = ''
-          terminal.write('\x1b[32m$\x1b[0m ')
-        } else if (data === '\u007f') {
-          // Backspace
-          if (currentInput.length > 0) {
-            currentInput = currentInput.slice(0, -1)
-            terminal.write('\b \b')
-          }
-        } else if (data >= ' ') {
-          // Printable character
-          currentInput += data
-          terminal.write(data)
-        }
-      })
-    }
+    // Focus terminal
+    setTimeout(() => {
+      terminal.focus()
+      if (window.api?.resizeTerminal) {
+        window.api.resizeTerminal(terminal.cols, terminal.rows, sessionId)
+      }
+    }, 100)
 
     // Cleanup
     return () => {
       window.removeEventListener('resize', handleResize)
-      setTerminalConnected(false)
       terminal.dispose()
     }
-  }, [currentSessionId]) // Re-initialize when session changes
+  }, [sessionId])
+
+  if (!isConnected) {
+    return (
+      <div className="flex items-center justify-center h-full bg-black text-white">
+        <div>Connecting to terminal...</div>
+      </div>
+    )
+  }
 
   return (
-    <div 
-      ref={terminalRef}
-      className="h-full bg-black p-4"
-      style={{ padding: '16px' }}
-    />
+    <div className="h-full bg-black">
+      <div ref={terminalRef} className="h-full w-full p-4" />
+    </div>
   )
-})
-
-Terminal.displayName = 'Terminal'
+}
 
 export default Terminal
