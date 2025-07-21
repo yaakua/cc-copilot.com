@@ -313,7 +313,7 @@ const App: React.FC = () => {
 
   if (loading) {
     return (
-      <div className="flex h-screen bg-gray-900 text-white items-center justify-center">
+      <div className="flex h-screen items-center justify-center" style={{ backgroundColor: 'var(--bg-primary)', color: 'var(--text-primary)' }}>
         <div>Loading...</div>
       </div>
     )
@@ -321,11 +321,11 @@ const App: React.FC = () => {
 
   return (
     <ErrorBoundary>
-      <div className="flex flex-col h-screen bg-gray-900 text-white">
+      <div className="flex flex-col h-screen" style={{ backgroundColor: 'var(--bg-primary)', color: 'var(--text-primary)' }}>
         {/* Main Content Area */}
         <div className="flex flex-1 overflow-hidden">
           {/* Left Sidebar - Session List */}
-          <div className="w-80 bg-gray-800 border-r border-gray-700">
+          <div className="w-80 flex flex-col shrink-0" style={{ backgroundColor: 'var(--bg-sidebar)', borderRight: '1px solid var(--border-primary)' }}>
             <SessionList
               projects={projects}
               activeSessionId={currentActiveSessionId}

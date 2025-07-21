@@ -1,39 +1,45 @@
-@import url('https://rsms.me/inter/inter.css');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
-/* Claude-style color scheme */
+/* Modern UI color scheme based on reference design */
 :root {
-  --claude-bg: #343130;
-  --claude-sidebar: #2C2A29;
-  --claude-accent: #D96D53;
-  --claude-text-primary: #E5E3E1;
-  --claude-text-secondary: #8F8C8A;
-  --claude-border: #4A4746;
+  --bg-primary: #111827;
+  --bg-sidebar: #1e293b;
+  --bg-selection: #3b82f6;
+  --text-primary: #f8fafc;
+  --text-secondary: #cbd5e1;
+  --text-tertiary: #94a3b8;
+  --accent: #3b82f6;
+  --border-primary: #334155;
+  --status-green: #22c55e;
+  --status-red: #ef4444;
+  --icon-blue: #60a5fa;
+  --hover-bg: rgba(255, 255, 255, 0.05);
 }
 
-/* Custom scrollbar styles matching Claude design */
+/* Custom scrollbar styles */
 ::-webkit-scrollbar {
   width: 8px;
 }
 
 ::-webkit-scrollbar-track {
-  background: var(--claude-sidebar);
+  background: var(--bg-sidebar);
 }
 
 ::-webkit-scrollbar-thumb {
-  background: var(--claude-border);
+  background: var(--border-primary);
   border-radius: 4px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: #5A5653;
+  background: #475569;
 }
 
 /* Terminal styles */
 .xterm {
-  font-family: 'SF Mono', Monaco, 'Cascadia Code', 'Roboto Mono', Consolas, 'Courier New', monospace;
+  font-family: 'JetBrains Mono', 'SF Mono', Monaco, 'Cascadia Code', 'Roboto Mono', Consolas, 'Courier New', monospace;
   font-size: 14px;
   font-feature-settings: "liga" 0;
   position: relative;
@@ -66,15 +72,20 @@
   resize: none;
 }
 
-/* Claude theme for the app */
+/* Modern UI theme */
 body {
-  background-color: var(--claude-bg);
-  color: var(--claude-text-primary);
-  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen', 'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue', sans-serif;
+  background-color: var(--bg-primary);
+  color: var(--text-primary);
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen', 'Ubuntu', 'Cantarell', sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   margin: 0;
   padding: 0;
+}
+
+/* Terminal font class */
+.terminal-font {
+  font-family: 'JetBrains Mono', 'SF Mono', Monaco, 'Cascadia Code', 'Roboto Mono', Consolas, 'Courier New', monospace;
 }
 
 #root {
@@ -92,15 +103,50 @@ body {
   display: none;
 }
 
+/* Smooth transitions and animations */
+.transition-smooth {
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.hover-lift:hover {
+  transform: translateY(-1px);
+}
+
+/* Status indicator */
+.status-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  position: relative;
+}
+
+.status-dot::before {
+  content: '';
+  position: absolute;
+  top: -2px;
+  left: -2px;
+  right: -2px;
+  bottom: -2px;
+  border-radius: 50%;
+  background: inherit;
+  opacity: 0.3;
+  animation: pulse 2s infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { transform: scale(1); opacity: 0.3; }
+  50% { transform: scale(1.1); opacity: 0.1; }
+}
+
 /* Blinking cursor effect */
 .blinking-cursor {
   width: 8px;
   height: 1.2em;
-  background-color: var(--claude-text-primary);
+  background-color: var(--text-primary);
   animation: blink 1s step-end infinite;
 }
 
 @keyframes blink {
   from, to { background-color: transparent }
-  50% { background-color: var(--claude-text-primary); }
+  50% { background-color: var(--text-primary); }
 }

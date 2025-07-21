@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Claude CLI UI - Final Complete Prototype</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        .terminal-font { font-family: 'JetBrains Mono', monospace; }
+        .tab-item-active { background-color: #111827; color: #f8fafc; border-bottom-color: #3b82f6;}
+    </style>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        'bg-primary': '#111827',
+                        'bg-sidebar': '#1e293b',
+                        'bg-selection': '#3b82f6',
+                        'text-primary': '#f8fafc',
+                        'text-secondary': '#cbd5e1',
+                        'text-tertiary': '#94a3b8',
+                        'accent': '#3b82f6',
+                        'border-primary': '#334155',
+                        'status-green': '#22c55e',
+                        'status-red': '#ef4444',
+                        'icon-blue': '#60a5fa',
+                    }
+                }
+            }
+        }
+    </script>
+</head>
+<body class="bg-bg-primary text-text-primary overflow-hidden">
+
+    <div class="flex h-screen">
+        <!-- 左侧边栏 -->
+        <aside class="w-80 bg-bg-sidebar flex flex-col border-r border-border-primary shrink-0">
+            <!-- 1. 顶部 Logo -->
+            <div class="flex items-center gap-3 p-4 shrink-0">
+                <svg class="w-8 h-8 text-accent" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M6.5 10.5L12 15.5L17.5 10.5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path><path d="M5.5 5.5H18.5V18.5H5.5V5.5Z" stroke="currentColor" stroke-width="2"></path></svg>
+                <h1 class="text-xl font-bold">Claude CLI</h1>
+            </div>
+
+            <!-- 2. 中部项目列表 (可滚动) -->
+            <nav class="flex-grow px-2 overflow-y-auto space-y-1">
+                <!-- 项目 1 (收起) -->
+                <div class="flex items-center gap-3 p-2 rounded-lg cursor-pointer hover:bg-white/5">
+                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-4 h-4 text-text-tertiary shrink-0"><path stroke-linecap="round" stroke-linejoin="round" d="m8.25 4.5 7.5 7.5-7.5 7.5" /></svg>
+                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="w-5 h-5 text-icon-blue"><path d="M19.5 21a3 3 0 0 0 3-3V6a3 3 0 0 0-3-3H4.5a3 3 0 0 0-3 3v12a3 3 0 0 0 3 3h15Z" /></svg>
+                    <span class="font-semibold text-sm text-text-secondary">xhs-auto-publish</span>
+                </div>
+
+                <!-- 项目 2 (展开, 选中) -->
+                <div>
+                    <div class="flex items-center justify-between p-3 rounded-lg bg-bg-selection/30 cursor-pointer">
+                        <div class="flex items-center gap-3">
+                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-4 h-4 text-text-secondary transform rotate-90 shrink-0"><path stroke-linecap="round" stroke-linejoin="round" d="m8.25 4.5 7.5 7.5-7.5 7.5" /></svg>
+                            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="w-5 h-5 text-icon-blue"><path d="M19.5 21a3 3 0 0 0 3-3V6a3 3 0 0 0-3-3H4.5a3 3 0 0 0-3 3v12a3 3 0 0 0 3 3h15Z" /></svg>
+                            <div class="flex flex-col -space-y-1">
+                                <span class="font-bold text-sm text-text-primary">apple_worm_web</span>
+                                <span class="text-xs text-text-tertiary">/Users/pangle/Dev...</span>
+                            </div>
+                        </div>
+                        <div class="w-2.5 h-2.5 rounded-full bg-status-green ring-2 ring-status-green/30"></div>
+                    </div>
+                    <!-- 会话列表 -->
+                    <div id="session-list" class="pl-6 pt-1 space-y-0.5">
+                        <div onclick="addSession()" class="flex items-center gap-3 p-2 rounded-md cursor-pointer hover:bg-white/5 text-text-secondary">
+                            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="w-5 h-5"><path fill-rule="evenodd" d="M10 18a8 8 0 1 0 0-16 8 8 0 0 0 0 16Zm-.75-4.75a.75.75 0 0 0 1.5 0V8.66l1.95 2.1a.75.75 0 1 0 1.1-1.02l-3.25-3.5a.75.75 0 0 0-1.1 0L6.2 9.74a.75.75 0 1 0 1.1 1.02l1.95-2.1v4.59Z" clip-rule="evenodd" /></svg>
+                            <span class="text-sm">New Session</span>
+                        </div>
+                        <div class="session-item group/session flex items-center justify-between p-2 rounded-md bg-bg-selection/40 cursor-pointer">
+                            <div class="flex items-center gap-3">
+                                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="w-5 h-5 text-text-primary"><path d="M3.5 2.75a.75.75 0 0 0-1.5 0v14.5a.75.75 0 0 0 1.5 0v-4.392l1.657-.348a6.44 6.44 0 0 1 4.271.572 7.94 7.94 0 0 0 5.965.574l.302-.054a.75.75 0 0 0 .537-1.026l-3.21-6.42a.75.75 0 0 0-1.342-.24L10.5 8.25l-2.5-2.5a.75.75 0 0 0-1.06 0l-2.72 2.72V2.75Z" /></svg>
+                                <span class="text-sm font-semibold text-text-primary">Caveat: The messages ...</span>
+                            </div>
+                            <span class="text-sm font-bold text-status-red pr-1">Claude</span>
+                        </div>
+                        <div class="session-item group/session flex items-center justify-between p-2 rounded-md hover:bg-white/5 cursor-pointer">
+                            <div class="flex items-center gap-3 text-text-secondary">
+                                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="w-5 h-5"><path fill-rule="evenodd" d="M4.25 5.5a.75.75 0 0 0 0 1.5h11.5a.75.75 0 0 0 0-1.5H4.25Zm0 4a.75.75 0 0 0 0 1.5h11.5a.75.75 0 0 0 0-1.5H4.25Zm0 4a.75.75 0 0 0 0 1.5h11.5a.75.75 0 0 0 0-1.5H4.25Z" clip-rule="evenodd" /></svg>
+                                <span class="text-sm">Refactor Database Schema</span>
+                            </div>
+                            <button onclick="deleteSession(this)" class="opacity-0 group-hover/session:opacity-100 text-text-tertiary hover:text-text-primary transition-opacity" title="Delete Session"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" class="w-4 h-4"><path d="M5.28 4.22a.75.75 0 0 0-1.06 1.06L6.94 8l-2.72 2.72a.75.75 0 1 0 1.06 1.06L8 9.06l2.72 2.72a.75.75 0 1 0 1.06-1.06L9.06 8l2.72-2.72a.75.75 0 0 0-1.06-1.06L8 6.94 5.28 4.22Z" /></svg></button>
+                        </div>
+                    </div>
+                </div>
+            </nav>
+
+            <!-- 3. 底部全局操作 -->
+            <div class="px-2 py-3 border-t border-border-primary shrink-0">
+                <div class="space-y-1">
+                    <button class="w-full flex items-center gap-3 p-2 rounded-lg hover:bg-white/5 text-text-secondary hover:text-text-primary transition-colors">
+                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5"><path stroke-linecap="round" stroke-linejoin="round" d="M12 10.5v6m3-3H9m4.06-7.19-2.12-2.12a1.5 1.5 0 0 0-1.061-.44H4.5A2.25 2.25 0 0 0 2.25 6v12a2.25 2.25 0 0 0 2.25 2.25h15A2.25 2.25 0 0 0 21.75 18V9a2.25 2.25 0 0 0-2.25-2.25h-5.379a1.5 1.5 0 0 1-1.06-.44Z" /></svg>
+                        <span class="text-sm font-medium">New Project</span>
+                    </button>
+                    <button class="w-full flex items-center gap-3 p-2 rounded-lg hover:bg-white/5 text-text-secondary hover:text-text-primary transition-colors">
+                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5"><path stroke-linecap="round" stroke-linejoin="round" d="M9.594 3.94c.09-.542.56-.94 1.11-.94h2.593c.55 0 1.02.398 1.11.94l.213 1.281c.063.374.313.686.645.87.074.04.147.083.22.127.325.196.72.257 1.075.124l1.217-.456a1.125 1.125 0 0 1 1.37.49l1.296 2.247a1.125 1.125 0 0 1-.26 1.431l-1.003.827c-.293.24-.438.613-.43.992a6.759 6.759 0 0 1 0 1.255c-.008.378.138.75.43.99l1.005.828c.424.35.534.954.26 1.43l-1.298 2.247a1.125 1.125 0 0 1-1.369.491l-1.217-.456c-.355-.133-.75-.072-1.076.124a6.47 6.47 0 0 1-.22.128c-.333.184-.582.496-.645.87l-.213 1.28c-.09.543-.56.94-1.11.94h-2.594c-.55 0-1.02-.398-1.11-.94l-.213-1.281c-.063-.374-.313-.686-.645-.87a6.52 6.52 0 0 1-.22-.127c-.325-.196-.72-.257-1.075-.124l-1.217.456a1.125 1.125 0 0 1-1.37-.49l-1.296-2.247a1.125 1.125 0 0 1 .26-1.431l1.004-.827c.292-.24.437-.613.43-.992a6.759 6.759 0 0 1 0-1.255c.008-.378-.138-.75-.43-.99l-1.004-.828a1.125 1.125 0 0 1-.26-1.43l1.297-2.247a1.125 1.125 0 0 1 1.37-.491l1.216.456c.356.133.75.072 1.076-.124.072-.044.146-.087.22-.128.332-.184.582-.496.645-.87l.212-1.281Z" /><path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z" /></svg>
+                        <span class="text-sm font-medium">Settings</span>
+                    </button>
+                </div>
+            </div>
+        </aside>
+
+        <div class="flex-1 flex flex-col">
+            <main class="flex-1 flex flex-col min-h-0">
+                <div class="flex-shrink-0">
+                    <div class="flex items-end border-b border-border-primary bg-bg-sidebar">
+                        <div class="tab-item-active flex items-center gap-2 px-4 py-2.5 border-b-2 cursor-pointer">
+                            <span class="terminal-font text-sm">apple_worm_web - session</span>
+                        </div>
+                        <div class="flex items-center gap-2 px-4 py-2.5 border-b-2 border-transparent text-text-tertiary hover:text-text-primary cursor-pointer">
+                            <span class="terminal-font text-sm">qizhifu-platform</span>
+                        </div>
+                    </div>
+                </div>
+                <div class="flex-grow p-4 terminal-font bg-bg-primary text-text-secondary overflow-y-auto">
+                    <span class="text-status-green">$</span> npm install<br>
+                    <span class="text-text-tertiary">> ... installation logs ...</span><br>
+                    <span class="text-status-green">$</span> npm run dev<br>
+                    <span class="text-text-primary">> server started on port 3000</span>
+                </div>
+            </main>
+            <footer class="flex items-center justify-between px-4 py-1 bg-bg-sidebar border-t border-border-primary text-sm shrink-0">
+                <div class="flex items-center gap-4 text-text-tertiary">
+                    <div class="flex items-center gap-2">
+                        <div class="w-2.5 h-2.5 rounded-full bg-status-green"></div>
+                        <span>Connected</span>
+                    </div>
+                    <span>Provider: OpenAI</span>
+                </div>
+                <div class="text-text-tertiary">
+                    <span>main*</span>
+                </div>
+            </footer>
+        </div>
+    </div>
+
+<script>
+    const icons = ['<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="w-5 h-5"><path d="M10 3a.75.75 0 0 1 .75.75v1.5h1.5a.75.75 0 0 1 0 1.5h-1.5v1.5a.75.75 0 0 1-1.5 0v-1.5h-1.5a.75.75 0 0 1 0-1.5h1.5v-1.5A.75.75 0 0 1 10 3ZM10 18a8 8 0 1 0 0-16 8 8 0 0 0 0 16Zm0-1.5a6.5 6.5 0 1 1 0-13 6.5 6.5 0 0 1 0 13Z" /></svg>','<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="w-5 h-5"><path fill-rule="evenodd" d="M15.312 11.342a1.25 1.25 0 0 1 .625 2.168l-4.25 2.5a1.25 1.25 0 0 1-1.25 0l-4.25-2.5A1.25 1.25 0 0 1 5.342 10l4.25-7.5a1.25 1.25 0 0 1 2.166 0l4.25 7.5a1.25 1.25 0 0 1-.698 1.342Z" clip-rule="evenodd" /></svg>','<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="w-5 h-5"><path d="m2.695 14.762-1.262 3.155a.5.5 0 0 0 .65.65l3.155-1.262a4 4 0 0 0 1.343-.886L17.5 5.501a2.121 2.121 0 0 0-3-3L3.58 13.42a4 4 0 0 0-.886 1.343Z" /></svg>',];
+    let sessionCounter = 1;
+    function addSession() { const sessionList = document.getElementById('session-list'); const randomIcon = icons[Math.floor(Math.random() * icons.length)]; const sessionName = `Untitled Session ${sessionCounter++}`; const newSessionHTML = `<div class="session-item group/session flex items-center justify-between p-2 rounded-md hover:bg-white/5 cursor-pointer"><div class="flex items-center gap-3 text-text-secondary">${randomIcon}<span class="text-sm">${sessionName}</span></div><button onclick="deleteSession(this)" class="opacity-0 group-hover/session:opacity-100 text-text-tertiary hover:text-text-primary transition-opacity" title="Delete Session"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" class="w-4 h-4"><path d="M5.28 4.22a.75.75 0 0 0-1.06 1.06L6.94 8l-2.72 2.72a.75.75 0 1 0 1.06 1.06L8 9.06l2.72 2.72a.75.75 0 1 0 1.06-1.06L9.06 8l2.72-2.72a.75.75 0 0 0-1.06-1.06L8 6.94 5.28 4.22Z" /></svg></button></div>`; sessionList.insertAdjacentHTML('beforeend', newSessionHTML); }
+    function deleteSession(button) { const sessionItem = button.closest('.session-item'); if (sessionItem) { sessionItem.remove(); } }
+</script>
+</body>
+</html>
