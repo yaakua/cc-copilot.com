@@ -65,25 +65,7 @@ const Terminal: React.FC<TerminalProps> = ({ sessionId, isActive, session }) => 
     terminal.open(terminalRef.current)
 
     // Initial resize with multiple checks
-    const attemptFit = (attempts = 0) => {
-      if (attempts > 5) {
-        logger.warn('终端调整大小超过最大重试次数')
-        return
-      }
-      
-      try {
-        if (container.offsetWidth > 0 && container.offsetHeight > 0) {
-          fitAddon.fit()
-        } else {
-          setTimeout(() => attemptFit(attempts + 1), 20)
-        }
-      } catch (e) {
-        logger.warn('终端调整大小失败', e as Error)
-        setTimeout(() => attemptFit(attempts + 1), 20)
-      }
-    }
-    
-    setTimeout(() => attemptFit(), 10)
+    fitAddon.fit()
 
     // Listen for user input
     const onDataDisposable = terminal.onData((data) => {

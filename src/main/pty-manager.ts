@@ -1,5 +1,5 @@
 import * as pty from 'node-pty'
-import { BrowserWindow } from 'electron'
+import { BrowserWindow, ipcMain } from 'electron'
 import * as os from 'os'
 import * as fs from 'fs'
 import { logger } from './logger'
@@ -14,15 +14,23 @@ export interface PtyOptions {
 }
 
 export class PtyManager {
+  private onSessionReady: ((claudeSessionId: string) => void) | null = null;
   private ptyProcess: pty.IPty | null = null
   private mainWindow: BrowserWindow | null = null
   private currentEnv: Record<string, string | undefined> = {}
   private sessionId: string
 
-  constructor(mainWindow: BrowserWindow, sessionId: string) {
-    this.mainWindow = mainWindow
-    this.sessionId = sessionId
-    this.currentEnv = { ...process.env }
+  constructor(
+    mainWindow: BrowserWindow,
+    sessionId: string,
+    onSessionReadyCallback?: (claudeSessionId: string) => void
+  ) {
+    this.mainWindow = mainWindow;
+    this.sessionId = sessionId;
+    this.currentEnv = { ...process.env };
+    if (onSessionReadyCallback) {
+      this.onSessionReady = onSessionReadyCallback;
+    }
   }
 
   public async start(options: PtyOptions = {}): Promise<void> {
@@ -169,6 +177,17 @@ export class PtyManager {
     logger.info('为专用 Claude PTY 进程设置事件处理器', 'pty-manager')
     
     this.ptyProcess.onData((data: string) => {
+      // Check if a new claude session was created
+      const match = data.match(/Session created: (\S+\.jsonl)/);
+      if (match && match[1]) {
+        const claudeSessionFile = match[1];
+        const claudeSessionId = path.basename(claudeSessionFile, '.jsonl');
+        logger.info(`Detected new Claude session: ${claudeSessionId}`, 'pty-manager');
+        if (this.onSessionReady) {
+          this.onSessionReady(claudeSessionId);
+        }
+      }
+
       logger.debug(`[${this.sessionId}] 从 Claude PTY 接收数据: "${data.slice(0, 100).replace(/\r\n/g, ' ')}${data.length > 100 ? '...' : ''}"`, 'pty-manager')
       
       this.mainWindow?.webContents.send('terminal:data', {

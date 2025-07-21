@@ -5,31 +5,7 @@ import StatusBar from './components/StatusBar'
 import ErrorBoundary from './components/ErrorBoundary'
 import Settings from './components/Settings'
 import { logger } from './utils/logger'
-
-interface Session {
-  id: string
-  name: string
-  projectPath: string
-  createdAt: string
-  lastActiveAt: string
-  filePath: string
-  claudeProjectId?: string
-  claudeProjectDir?: string
-}
-
-interface Project {
-  path: string
-  name: string
-  sessions: Session[]
-}
-
-interface ClaudeDetectionResult {
-  isInstalled: boolean
-  version?: string
-  path?: string
-  error?: string
-  timestamp: number
-}
+import { Session, Project, ClaudeDetectionResult } from '../../shared/types'
 
 const App: React.FC = () => {
   const [projects, setProjects] = useState<Project[]>([])
@@ -45,104 +21,134 @@ const App: React.FC = () => {
     logger.setComponent('App')
     logger.info('App组件已挂载')
     loadProjects()
-    loadClaudeDetectionResult()
-
-    // Set up Claude detection result listener
+    loadClaudeDetectionResult
     const removeClaudeListener = window.api.onClaudeDetectionResult((result: ClaudeDetectionResult) => {
       logger.info('收到Claude检测结果', result)
       setClaudeDetectionResult(result)
       setClaudeDetecting(false)
     })
 
-    // Set up terminal closed listener
     const removeTerminalClosedListener = window.api.onTerminalClosed((eventData: { sessionId: string; error: boolean }) => {
       logger.info('Received terminal:closed event', { eventData })
-      
-      // Remove session from active tabs
-      setActiveSessionIds(prev => prev.filter(id => id !== eventData.sessionId))
-      
-      // If this was the current active session, switch to another tab or clear
-      if (currentActiveSessionId === eventData.sessionId) {
-        setActiveSessionIds(prev => {
-          const remaining = prev.filter(id => id !== eventData.sessionId)
-          setCurrentActiveSessionId(remaining.length > 0 ? remaining[remaining.length - 1] : null)
-          return remaining
+
+      setActiveSessionIds(prevActiveIds => {
+        const remainingIds = prevActiveIds.filter(id => id !== eventData.sessionId)
+
+        setCurrentActiveSessionId(prevCurrentId => {
+          if (prevCurrentId === eventData.sessionId) {
+            if (eventData.error) {
+              logger.warn('Claude session closed unexpectedly')
+            } else {
+              logger.info('Claude session ended normally')
+            }
+            return remainingIds.length > 0 ? remainingIds[remainingIds.length - 1] : null
+          }
+          return prevCurrentId
         })
-        
-        if (eventData.error) {
-          logger.warn('Claude session closed unexpectedly')
-        } else {
-          logger.info('Claude session ended normally')
-        }
-      }
+
+        return remainingIds
+      })
     })
 
     const removeSessionCreatedListener = window.api.onSessionCreated((newSession: Session) => {
-      logger.info('Received session:created event', { newSession });
-
-      // Add the new session to the appropriate project
+      logger.info('Received session:created event', { newSession })
       setProjects(prevProjects => {
-        const projectExists = prevProjects.some(p => p.path === newSession.projectPath);
-        if (projectExists) {
-          return prevProjects.map(p => 
-            p.path === newSession.projectPath 
-              ? { ...p, sessions: [...p.sessions, newSession] } 
-              : p
-          );
-        } else {
-          // If project doesn't exist, create it
-          const newProject: Project = {
-            path: newSession.projectPath,
-            name: newSession.projectPath.split('/').pop() || 'New Project',
-            sessions: [newSession]
-          };
-          return [...prevProjects, newProject];
+        const projectIndex = prevProjects.findIndex(p => p.id === newSession.projectId)
+        if (projectIndex === -1) {
+          logger.info('Received session for a non-existent project', { sessionId: newSession.id, projectId: newSession.projectId })
+          return prevProjects
         }
-      });
 
-      // Add to active sessions and set as current
-      setActiveSessionIds(prev => {
-        if (!prev.includes(newSession.id)) {
-          return [...prev, newSession.id];
+        const newProjects = [...prevProjects]
+        const project = { ...newProjects[projectIndex] }
+
+        if (!project.sessions.some(s => s.id === newSession.id)) {
+          project.sessions = [...project.sessions, newSession].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+          newProjects[projectIndex] = project
         }
-        return prev;
-      });
-      setCurrentActiveSessionId(newSession.id);
-    });
+
+        return newProjects
+      })
+
+      setActiveSessionIds(prev => [...prev, newSession.id])
+      setCurrentActiveSessionId(newSession.id)
+    })
 
     const removeSessionUpdatedListener = window.api.onSessionUpdated((updateData: { oldId: string; newSession: Session }) => {
-      logger.info('Received session:updated event', { updateData });
+      logger.info('Received session:updated event', { updateData })
 
-      // Update session ID in projects
       setProjects(prevProjects => {
-        return prevProjects.map(project => ({
-          ...project,
-          sessions: project.sessions.map(session => 
-            session.id === updateData.oldId 
-              ? { ...session, ...updateData.newSession }
-              : session
-          )
-        }));
-      });
+        const projectIndex = prevProjects.findIndex(p => p.sessions.some(s => s.id === updateData.oldId))
 
-      // Update active session IDs
-      setActiveSessionIds(prev => {
-        return prev.map(id => id === updateData.oldId ? updateData.newSession.id : id);
-      });
+        if (projectIndex === -1) {
+          logger.info('Received session:updated for a session not found in any project', { updateData })
+          return prevProjects
+        }
 
-      // Update current active session ID
-      if (currentActiveSessionId === updateData.oldId) {
-        setCurrentActiveSessionId(updateData.newSession.id);
-      }
-    });
+        const newProjects = [...prevProjects]
+        const projectToUpdate = { ...newProjects[projectIndex] }
+
+        projectToUpdate.sessions = projectToUpdate.sessions
+          .map(s => (s.id === updateData.oldId ? updateData.newSession : s))
+          .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+
+        newProjects[projectIndex] = projectToUpdate
+        return newProjects
+      })
+
+      setActiveSessionIds(prev => prev.map(id => (id === updateData.oldId ? updateData.newSession.id : id)))
+
+      setCurrentActiveSessionId(prevCurrentId => {
+        if (prevCurrentId === updateData.oldId) {
+          return updateData.newSession.id
+        }
+        return prevCurrentId
+      })
+    })
+
+    const removeSessionDeletedListener = window.api.onSessionDeleted((sessionId: string) => {
+      logger.info('Received session:deleted event', { sessionId })
+
+      setProjects(prevProjects =>
+        prevProjects.map(p => ({
+          ...p,
+          sessions: p.sessions.filter(s => s.id !== sessionId),
+        }))
+      )
+
+      setActiveSessionIds(prevActiveIds => {
+        const remainingIds = prevActiveIds.filter(id => id !== sessionId)
+
+        setCurrentActiveSessionId(prevCurrentId => {
+          if (prevCurrentId === sessionId) {
+            return remainingIds.length > 0 ? remainingIds[remainingIds.length - 1] : null
+          }
+          return prevCurrentId
+        })
+
+        return remainingIds
+      })
+    })
+
+    const removeProjectCreatedListener = window.api.onProjectCreated((newProject: Project) => {
+      logger.info('Received project:created event', { newProject })
+      setProjects(prev => {
+        if (!prev.some(p => p.id === newProject.id)) {
+          return [...prev, { ...newProject, sessions: [] }]
+        }
+        return prev
+      })
+    })
 
     return () => {
-      removeClaudeListener();
-      removeTerminalClosedListener();
-      removeSessionCreatedListener();
-      removeSessionUpdatedListener();
-    };
-  }, [currentActiveSessionId])
+      removeClaudeListener()
+      removeTerminalClosedListener()
+      removeSessionCreatedListener()
+      removeSessionUpdatedListener()
+      removeSessionDeletedListener()
+      removeProjectCreatedListener()
+    }
+  }, [])
 
   const loadClaudeDetectionResult = async () => {
     try {
@@ -193,39 +199,21 @@ const App: React.FC = () => {
 
       logger.info('选择了项目目录', { projectPath })
 
-      // Create new project using the API
-      const project = await window.api.createProject(projectPath)
-      logger.info('项目创建成功', { project })
+      // The backend will create the project and an initial session.
+      // The UI will be updated via `project:created` and `session:created` events.
+      const { project } = await window.api.createProject(projectPath);
+      logger.info('项目创建请求已发送', { project });
 
-      // Create a new session for this project
-      const session = await window.api.createSession(project.path, 'New Session')
-      
-      // Explicitly activate the session to ensure proper IPC setup
-      await window.api.activateSession(session.id)
-      
-      // Add to active sessions and set as current
-      setActiveSessionIds(prev => {
-        if (!prev.includes(session.id)) {
-          return [...prev, session.id]
-        }
-        return prev
-      })
-      setCurrentActiveSessionId(session.id)
-      
-      logger.info('项目和会话创建并激活成功', { 
-        projectId: project.id, 
-        sessionId: session.id 
-      })
-      
-      // Don't reload projects immediately - let the terminal show first
-      // Will reload projects later when Claude creates actual session files
-      logger.info('新项目会话已激活，应显示终端', { sessionId: session.id })
+      // If a new project was created, create a session for it
+      if (project) {
+        await handleCreateSession(project.id);
+      }
     } catch (error) {
       logger.error('创建项目失败', error as Error)
     }
   }
 
-  const handleCreateSession = async (projectPath: string) => {
+  const handleCreateSession = async (projectId: string) => {
     try {
       // Check if Claude is available before creating session
       if (!claudeDetectionResult?.isInstalled) {
@@ -234,25 +222,11 @@ const App: React.FC = () => {
         return
       }
 
-      logger.info('创建新会话', { projectPath })
-      const session = await window.api.createSession(projectPath)
-      
-      // Explicitly activate the session to ensure proper IPC setup
-      await window.api.activateSession(session.id)
-      
-      // Add to active sessions and set as current
-      setActiveSessionIds(prev => {
-        if (!prev.includes(session.id)) {
-          return [...prev, session.id]
-        }
-        return prev
-      })
-      setCurrentActiveSessionId(session.id)
-      logger.info('会话创建并激活成功', { sessionId: session.id })
-      
-      // Don't reload projects immediately for new sessions
-      // The session will eventually appear in Claude projects after Claude creates session files
-      logger.info('新会话已激活，应显示终端', { sessionId: session.id })
+      logger.info('创建新会话', { projectId });
+      // The backend will create the session.
+      // The UI will be updated via the `session:created` event.
+      await window.api.createSession(projectId);
+      logger.info('新会话创建请求已发送');
     } catch (error) {
       logger.error('创建会话失败', error as Error)
     }
@@ -273,84 +247,51 @@ const App: React.FC = () => {
         if (session) break
       }
 
-      logger.info('激活会话', { 
-        sessionId, 
-        projectPath: session?.projectPath
-      })
+      logger.info('激活会话', { sessionId });
 
-      if (session?.filePath) {
-        // For existing Claude sessions, use resume with the file path
-        await window.api.resumeSession(sessionId, session.projectPath)
-        logger.info('Claude会话已恢复', { sessionId, filePath: session.filePath })
-      } else {
-        // For new sessions, use normal activate
-        await window.api.activateSession(sessionId)
-        logger.info('会话已激活', { sessionId })
-      }
-      
+      await window.api.activateSession(sessionId);
+      logger.info('会话激活请求已发送', { sessionId });
+
       // Add to active sessions and set as current
       setActiveSessionIds(prev => {
         if (!prev.includes(sessionId)) {
-          return [...prev, sessionId]
+          return [...prev, sessionId];
         }
-        return prev
-      })
-      setCurrentActiveSessionId(sessionId)
+        return prev;
+      });
+      setCurrentActiveSessionId(sessionId);
     } catch (error) {
-      logger.error('激活会话失败', error as Error, { sessionId })
+      logger.error('激活会话失败', error as Error, { meta: { sessionId } })
     }
   }
 
   const handleDeleteSession = async (sessionId: string) => {
     try {
-      logger.info('删除会话', { sessionId })
-      const deletionResult = await window.api.deleteSession(sessionId)
-      
-      // Remove from active sessions
-      setActiveSessionIds(prev => prev.filter(id => id !== sessionId))
-      
-      // If this was the current active session, switch to another tab or clear
-      if (currentActiveSessionId === sessionId) {
-        setActiveSessionIds(prev => {
-          const remaining = prev.filter(id => id !== sessionId)
-          setCurrentActiveSessionId(remaining.length > 0 ? remaining[remaining.length - 1] : null)
-          return remaining
-        })
-      }
-      
-      if (deletionResult.success) {
-        logger.info('会话和相关文件删除成功', { 
-          sessionId, 
-          details: deletionResult.details 
-        })
-      } else {
-        logger.info('会话删除失败或不完整', { 
-          error: deletionResult.error,
-          details: deletionResult.details
-        })
-      }
-      
-      // Always reload projects after deletion to refresh the session list
-      await loadProjects()
+      logger.info('请求删除会话', { sessionId });
+      await window.api.deleteSession(sessionId);
+      // The UI will be updated via the `session:deleted` event.
     } catch (error) {
-      logger.error('删除会话失败', error as Error, { sessionId })
-      // Still try to reload projects in case of partial deletion
-      await loadProjects()
+      logger.error('删除会话失败', error as Error, { meta: { sessionId } })
     }
   }
 
   const handleCloseTab = (sessionId: string) => {
-    // Remove from active sessions
-    setActiveSessionIds(prev => prev.filter(id => id !== sessionId))
-    
-    // If this was the current active session, switch to another tab or clear
-    if (currentActiveSessionId === sessionId) {
-      setActiveSessionIds(prev => {
-        const remaining = prev.filter(id => id !== sessionId)
-        setCurrentActiveSessionId(remaining.length > 0 ? remaining[remaining.length - 1] : null)
-        return remaining
-      })
-    }
+    setActiveSessionIds(prevActiveIds => {
+      const remainingIds = prevActiveIds.filter(id => id !== sessionId);
+      
+      setCurrentActiveSessionId(prevCurrentId => {
+        if (prevCurrentId === sessionId) {
+          // The closed tab was the active one.
+          // We need to determine the new active tab.
+          // The old logic was to select the last one. Let's stick to that.
+          return remainingIds.length > 0 ? remainingIds[remainingIds.length - 1] : null;
+        }
+        // The active tab was not the one that was closed.
+        return prevCurrentId;
+      });
+
+      return remainingIds;
+    });
   }
 
   const handleOpenSettings = () => {

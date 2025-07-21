@@ -1,26 +1,11 @@
 import React, { useState } from 'react'
-
-interface Session {
-  id: string
-  name: string
-  projectPath: string
-  createdAt: string
-  lastActiveAt: string
-  isClaudeSession?: boolean
-  filePath?: string
-}
-
-interface Project {
-  path: string
-  name: string
-  sessions: Session[]
-}
+import { Session, Project } from '../../../shared/types'
 
 interface SessionListProps {
   projects: Project[]
   activeSessionId: string | null
   onCreateProject: () => void
-  onCreateSession: (projectPath: string) => void
+  onCreateSession: (projectId: string) => void
   onActivateSession: (sessionId: string) => void
   onDeleteSession: (sessionId: string) => void
   onOpenSettings?: () => void
@@ -39,12 +24,12 @@ const SessionList: React.FC<SessionListProps> = ({
 }) => {
   const [expandedProjects, setExpandedProjects] = useState<Set<string>>(new Set())
 
-  const toggleProject = (projectPath: string) => {
+  const toggleProject = (projectId: string) => {
     const newExpanded = new Set(expandedProjects)
-    if (newExpanded.has(projectPath)) {
-      newExpanded.delete(projectPath)
+    if (newExpanded.has(projectId)) {
+      newExpanded.delete(projectId)
     } else {
-      newExpanded.add(projectPath)
+      newExpanded.add(projectId)
     }
     setExpandedProjects(newExpanded)
   }
@@ -89,15 +74,15 @@ const SessionList: React.FC<SessionListProps> = ({
           </div>
         ) : (
           projects.map((project) => (
-            <div key={project.path} className="border-b border-gray-700">
+            <div key={project.id} className="border-b border-gray-700">
               {/* Project Header */}
               <div
                 className="flex items-center justify-between p-3 hover:bg-gray-700 cursor-pointer"
-                onClick={() => toggleProject(project.path)}
+                onClick={() => toggleProject(project.id)}
               >
                 <div className="flex items-center flex-1 min-w-0">
                   <span className="mr-2">
-                    {expandedProjects.has(project.path) ? '▼' : '▶'}
+                    {expandedProjects.has(project.id) ? '▼' : '▶'}
                   </span>
                   <div className="min-w-0 flex-1">
                     <div className="font-medium truncate">{project.name}</div>
@@ -107,7 +92,7 @@ const SessionList: React.FC<SessionListProps> = ({
                 <button
                   onClick={(e) => {
                     e.stopPropagation()
-                    onCreateSession(project.path)
+                    onCreateSession(project.id)
                   }}
                   className="ml-2 px-2 py-1 bg-green-600 hover:bg-green-700 rounded text-xs transition-colors"
                   title="New Session"
@@ -117,7 +102,7 @@ const SessionList: React.FC<SessionListProps> = ({
               </div>
 
               {/* Sessions List */}
-              {expandedProjects.has(project.path) && (
+              {expandedProjects.has(project.id) && (
                 <div className="bg-gray-750">
                   {project.sessions.length === 0 ? (
                     <div className="p-3 pl-8 text-sm text-gray-400">
@@ -135,7 +120,7 @@ const SessionList: React.FC<SessionListProps> = ({
                         <div className="flex-1 min-w-0">
                           <div className="flex items-center gap-2">
                             <div className="font-medium truncate">{session.name}</div>
-                            {session.isClaudeSession && (
+                            {session.claudeSessionId && (
                               <span className="text-xs bg-green-600 text-white px-1 rounded">Claude</span>
                             )}
                           </div>

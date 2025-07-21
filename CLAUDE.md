@@ -8,57 +8,55 @@ cc-copilot is a cross-platform desktop application that provides a GUI wrapper f
 
 ## Architecture
 
-This repository currently contains:
+The application is built using Electron, with a main process and a renderer process.
 
-### Documentation & Prototypes
-- `docs/index.html` - V2 prototype HTML mockup of the desktop application UI
-- `docs/req.md` - Detailed technical specification document (in Chinese) outlining the complete development plan
-- `README.md` - Project description and feature overview
+**Main Process (Node.js - `src/main/`)**
+- `main.ts`: Entry point for the main process. Initializes the application, creates the main window, and sets up IPC handlers.
+- `session-manager.ts`: Manages project and session data. Handles loading, creating, deleting, and activating sessions. It is responsible for reading and writing to `.claude/sessions.jsonl` and individual session log files.
+- `claude-detector.ts`: Detects the installation and version of the Claude CLI tool.
+- `pty-manager.ts`: Manages pseudoterminals (pty) for running the Claude CLI in sessions.
+- `proxy.ts`: (Future implementation) Will handle API requests and responses.
+- `logger.ts`: Configures the application's logging system (using `electron-log`).
+- `settings.ts`: Manages application settings.
 
-### Planned Architecture (from technical specification)
-The application will be built as an Electron app with:
+**Preload Script (`src/preload/`)**
+- `preload.ts`: A script that runs in a privileged context and exposes a controlled set of APIs from the main process to the renderer process via the `contextBridge`.
+- `index.d.ts`: TypeScript declaration file defining the types for the exposed APIs (`window.api`).
 
-**Main Process (Node.js):**
-- Manages claude-code child processes
-- Runs local proxy server (Express.js) for API routing
-- Handles data persistence (electron-store)
-- Manages IPC communication with renderer
+**Renderer Process (React - `src/renderer/`)**
+- `App.tsx`: The main React component that orchestrates the entire UI.
+- `components/`: Contains various React components for different parts of the UI (e.g., `SessionList`, `TabManager`, `StatusBar`).
+- `utils/logger.ts`: A wrapper for the logger API exposed from the preload script.
 
-**Renderer Process (Chromium):**
-- React + TypeScript UI
-- Tailwind CSS for styling
-- xterm.js for terminal integration
-- Zustand for state management
+**Shared Code (`src/shared/`)**
+- `types.ts`: Contains shared TypeScript types (like `Project`, `Session`) used across the main, preload, and renderer processes to ensure type safety and consistency.
 
-**Key Features:**
-- Project-based session organization
-- Dynamic model switching between API providers
-- Local proxy for API adaptation and routing
-- Token usage statistics (session/project/global scopes)
-- Integrated terminal experience
-- Cross-platform support (macOS/Windows)
+## Data Flow and State Management
 
-## Current State
+1.  **Initialization**: On startup, `SessionManager` in the main process reads the `.claude/` directory to discover projects and sessions.
+2.  **Data Loading**: `SessionManager` reads `sessions.jsonl` to get the metadata for all sessions. It then constructs the `Project` and `Session` objects.
+3.  **IPC Communication**: The renderer process (`App.tsx`) requests all projects from the main process using `window.api.getAllProjects()`.
+4.  **UI Rendering**: The renderer process receives the project and session data and renders the UI.
+5.  **Real-time Updates**: The main process uses `webContents.send()` to push real-time updates to the renderer for events like:
+    *   `session:created`
+    *   `session:updated`
+    *   `session:deleted`
+    *   `project:created`
+    *   `terminal:closed`
+    *   `claude:detection-result`
+6.  **State Management in Renderer**: The `App.tsx` component manages the application's state using React's `useState` and `useEffect` hooks. It listens for IPC events to keep its state synchronized with the main process.
 
-This is currently a planning/documentation repository. The actual implementation has not yet begun. The repository contains:
+## Session and Project Loading Logic
 
-1. **UI Prototype** (`docs/index.html`) - Complete HTML/CSS/JS mockup of the intended user interface
-2. **Technical Specification** (`docs/req.md`) - Comprehensive development roadmap with:
-   - Technology stack (Electron, React, TypeScript, Tailwind CSS, xterm.js)
-   - Detailed architecture design
-   - Phase-by-phase implementation plan
-   - Data models and API integration strategy
+A key aspect of the current architecture is how historical session data is loaded and displayed.
 
-## Development Notes
+-   **Project Discovery**: Projects are implicitly defined by the `cwd` (current working directory) property within each session's entry in `.claude/sessions.jsonl`. The `SessionManager` groups sessions by their `cwd` to form projects.
+-   **Session Information**: To provide more meaningful information in the UI, the loading process involves:
+    1.  Reading the main `sessions.jsonl` file to get the list of all sessions and their `cwd`.
+    2.  For each session, the main process needs to read the corresponding session log file (e.g., `~/.claude/sessions/1720496375853.jsonl`).
+    3.  From the session log, we can extract:
+        *   The initial prompt or command, which can be used as the session's display name.
+        *   The timestamp of the last message, to show when the session was last active.
+-   **New Session Creation**: When a new session is created, it is always associated with a project's directory (`cwd`). This ensures that all work is organized.
 
-When implementation begins, the project will likely:
-- Use Electron + Vite + React + TypeScript as the foundation
-- Implement a 5-phase development approach as outlined in `docs/req.md`
-- Focus on claude-code integration through child process management
-- Build a local proxy server for multi-provider API support
-
-## Files to Reference
-
-- `docs/req.md` - Complete technical specification and implementation roadmap
-- `docs/index.html` - UI/UX reference prototype
-- `README.md` - Project goals and feature overview
+This approach allows the UI to present a rich, organized view of the user's history without requiring a formal database, by leveraging the data already stored by the Claude CLI tool.

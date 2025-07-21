@@ -1,22 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react'
 import Terminal from './Terminal'
-
-interface Session {
-  id: string
-  name: string
-  projectPath: string
-  createdAt: string
-  lastActiveAt: string
-  filePath: string
-  claudeProjectId?: string
-  claudeProjectDir?: string
-}
-
-interface Project {
-  path: string
-  name: string
-  sessions: Session[]
-}
+import { Session, Project } from '../../../shared/types'
 
 interface TabInfo {
   sessionId: string
@@ -47,6 +31,8 @@ const TabManager: React.FC<TabManagerProps> = ({
     
     for (const sessionId of activeSessionIds) {
       let session: Session | undefined
+      
+      // Find session in projects
       for (const project of projects) {
         session = project.sessions.find(s => s.id === sessionId)
         if (session) break
@@ -74,7 +60,8 @@ const TabManager: React.FC<TabManagerProps> = ({
   }
 
   const getSessionDisplayName = (session: Session) => {
-    const projectName = projects.find(p => p.sessions.some(s => s.id === session.id))?.name || 'Unknown'
+    const project = projects.find(p => p.id === session.projectId)
+    const projectName = project?.name || 'Unknown'
     return `${projectName} - ${session.name}`
   }
 

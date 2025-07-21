@@ -6,7 +6,10 @@ export default defineConfig({
   main: {
     plugins: [externalizeDepsPlugin()],
     build: {
-      outDir: 'dist/main'
+      outDir: 'dist/main',
+      rollupOptions: {
+        external: ['uuid']
+      }
     }
   },
   preload: {

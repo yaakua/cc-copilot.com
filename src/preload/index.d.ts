@@ -1,4 +1,5 @@
 import { ElectronAPI } from '@electron-toolkit/preload'
+import { Project, Session, ClaudeDetectionResult } from '../shared/types'
 
 declare global {
   interface Window {
@@ -18,8 +19,10 @@ declare global {
       onTerminalData: (callback: (data: { sessionId: string; data: string } | string) => void) => () => void;
       onTerminalClosed: (callback: (eventData: { sessionId: string; error: boolean }) => void) => () => void;
       requestSessionData: (sessionId: string) => Promise<void>;
-      onSessionCreated: (callback: (session: any) => void) => () => void;
-      onSessionUpdated: (callback: (updateData: { oldId: string; newSession: any }) => void) => () => void;
+      onSessionCreated: (callback: (session: Session) => void) => () => void;
+      onSessionUpdated: (callback: (updateData: { oldId: string; newSession: Session }) => void) => () => void;
+      onSessionDeleted: (callback: (sessionId: string) => void) => () => void;
+      onProjectCreated: (callback: (project: Project) => void) => () => void;
 
       // Claude Detection APIs
       getClaudeDetectionResult: () => Promise<ClaudeDetectionResult>;
@@ -37,13 +40,13 @@ declare global {
       startClaudeCode: (workingDirectory?: string, sessionId?: string) => Promise<void>
       
       // Project APIs
-      createProject: (workingDirectory: string) => Promise<{ id: string; name: string; path: string }>
+      createProject: (workingDirectory: string) => Promise<{ project: Project, session: Session }>
       selectProjectDirectory: () => Promise<string | null>
       getProjectSessions: (projectPath: string) => Promise<any>
-      getAllProjects: () => Promise<any>
+      getAllProjects: () => Promise<Project[]>
       
       // Session APIs
-      createSession: (projectPath: string, name?: string) => Promise<{ id: string; projectPath: string; name: string }>
+      createSession: (projectId: string) => Promise<Session>
       activateSession: (sessionId: string) => Promise<boolean>
       resumeSession: (sessionId: string, projectPath: string) => Promise<any>
       deleteSession: (sessionId: string) => Promise<any>
@@ -56,101 +59,4 @@ declare global {
       getCurrentStatus: () => Promise<any>
     }
   }
-}
-
-export interface Project {
-  id: string
-  name: string
-  path: string
-  createdAt: string
-}
-
-export interface Session {
-  id: string
-  projectId: string
-  name: string
-  createdAt: string
-  history: Message[]
-  tokenUsage: TokenUsage
-}
-
-export interface Message {
-  role: 'user' | 'assistant'
-  content: string
-  timestamp: string
-}
-
-export interface ApiProvider {
-  id: string
-  name: string
-  baseUrl: string
-  apiKey: string
-  adapter: string
-}
-
-export interface TokenUsage {
-  prompt: number
-  completion: number
-  total: number
-}
-
-export interface ProxyConfig {
-  enabled: boolean
-  host: string
-  port: number
-  username?: string
-  password?: string
-  protocol: 'http' | 'https'
-}
-
-export interface Settings {
-  apiProviders: ApiProvider[]
-  proxy?: string
-  proxyConfig?: ProxyConfig
-  activeModelId?: string
-  defaultClaudePath?: string
-}
-
-export interface ClaudeDetectionResult {
-  isInstalled: boolean
-  installations?: ClaudeInstallation[]
-  defaultPath?: string
-  error?: string
-  version?: string
-  timestamp: number
-}
-
-export interface ClaudeInstallation {
-  id: string
-  name: string
-  path: string
-  version?: string
-  type: 'global' | 'local' | 'binary'
-  valid: boolean
-}
-
-export interface ClaudeProject {
-  id: string
-  name: string
-  path: string
-  sessionsDir: string
-  sessions: ClaudeSession[]
-}
-
-export interface ClaudeSession {
-  id: string
-  name: string
-  filePath: string
-  createdAt: string
-  firstMessage?: string
-}
-
-export interface LogEntry {
-  timestamp: string
-  level: string
-  message: string
-  filename?: string
-  line?: number
-  error?: string
-  meta?: any
 }

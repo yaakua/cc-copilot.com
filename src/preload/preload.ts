@@ -1,6 +1,6 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import { electronAPI } from '@electron-toolkit/preload'
-import type { LogEntry } from './index'
+import type { LogEntry } from './index.d.ts'
 
 // Logger API for renderer
 const loggerAPI = {
@@ -44,24 +44,40 @@ const api = {
     return () => ipcRenderer.removeListener(channel, listener)
   },
   
-  onSessionCreated: (callback: (session: any) => void) => {
-    const listener = (_event: any, session: any) => callback(session)
+  onSessionCreated: (callback: (session: import('../shared/types').Session) => void) => {
+    const listener = (_event: any, updateData: any) => callback(updateData)
     ipcRenderer.on('session:created', listener)
     return () => {
       ipcRenderer.removeListener('session:created', listener)
     }
   },
   
-  onSessionUpdated: (callback: (updateData: { oldId: string; newSession: any }) => void) => {
-    const listener = (_event: any, updateData: any) => callback(updateData)
+  onSessionUpdated: (callback: (updateData: { oldId: string; newSession: import('../shared/types').Session }) => void) => {
+     const listener = (_event: any, updateData: any) => callback(updateData)
     ipcRenderer.on('session:updated', listener)
     return () => {
       ipcRenderer.removeListener('session:updated', listener)
     }
   },
+
+  onSessionDeleted: (callback: (sessionId: string) => void) => {
+    const listener = (_event: any, sessionId: string) => callback(sessionId)
+    ipcRenderer.on('session:deleted', listener)
+    return () => {
+      ipcRenderer.removeListener('session:deleted', listener)
+    }
+  },
+
+  onProjectCreated: (callback: (project: import('../shared/types').Project) => void) => {
+    const listener = (_event: any, project: any) => callback(project)
+    ipcRenderer.on('project:created', listener)
+    return () => {
+      ipcRenderer.removeListener('project:created', listener)
+    }
+  },
   
   // Session APIs
-  createSession: (projectPath: string, name?: string) => ipcRenderer.invoke('session:create', projectPath, name),
+  createSession: (projectId: string) => ipcRenderer.invoke('session:create', projectId),
   activateSession: (sessionId: string) => ipcRenderer.invoke('session:activate', sessionId),
   resumeSession: (sessionId: string, projectPath: string) => ipcRenderer.invoke('session:resume', sessionId, projectPath),
   deleteSession: (sessionId: string) => ipcRenderer.invoke('session:delete', sessionId),

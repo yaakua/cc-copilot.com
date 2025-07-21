@@ -4,14 +4,15 @@ import * as path from 'path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import { ProxyServer } from './proxy'
 import { PtyManager } from './pty-manager'
-import { DataStore, Session } from './store'
+import { SessionManager, Session, Project } from './session-manager'
+import { v4 as uuidv4 } from 'uuid';
 import { SettingsManager } from './settings'
 import { logger } from './logger'
 import { claudeDetector, ClaudeDetectionResult } from './claude-detector'
 
 // Global instances
 let proxyServer: ProxyServer
-let dataStore: DataStore
+let sessionManager: SessionManager
 let settingsManager: SettingsManager
 
 // Session-specific PtyManager cache
@@ -37,8 +38,15 @@ function createWindow(): void {
 
   // Initialize services
   settingsManager = new SettingsManager()
-  dataStore = new DataStore()
+  sessionManager = new SessionManager()
   proxyServer = new ProxyServer(settingsManager)
+
+  // Sync with .claude directory on startup
+  try {
+    sessionManager.syncWithClaudeDirectory();
+  } catch (error) {
+    logger.error('Failed to sync with Claude directory on startup.', 'main', error as Error);
+  }
 
   mainWindow.on('ready-to-show', async () => {
     logger.info('主窗口准备显示', 'main')
@@ -94,12 +102,28 @@ function createWindow(): void {
 }
 
 function getOrCreatePtyManager(sessionId: string, mainWindow: BrowserWindow): PtyManager {
-  if (!ptyManagers.has(sessionId)) {
-    logger.info(`为会话创建新的PTY管理器: ${sessionId}`, 'main')
-    const manager = new PtyManager(mainWindow, sessionId)
-    ptyManagers.set(sessionId, manager)
+  if (ptyManagers.has(sessionId)) {
+    return ptyManagers.get(sessionId)!;
   }
-  return ptyManagers.get(sessionId)!
+
+  logger.info(`为会话创建新的PTY管理器: ${sessionId}`, 'main');
+
+  const onSessionReady = (claudeSessionId: string) => {
+    logger.info(`会话 ${sessionId} 已就绪, Claude 会话 ID: ${claudeSessionId}`, 'main');
+    const updatedSession = sessionManager.updateSession(sessionId, {
+      claudeSessionId: claudeSessionId,
+      isTemporary: false,
+      lastActiveAt: new Date().toISOString(),
+    });
+
+    if (updatedSession) {
+      mainWindow.webContents.send('session:updated', { oldId: sessionId, newSession: updatedSession });
+    }
+  };
+
+  const manager = new PtyManager(mainWindow, sessionId, onSessionReady);
+  ptyManagers.set(sessionId, manager);
+  return manager;
 }
 
 function setupIpcHandlers(mainWindow: BrowserWindow): void {
@@ -135,12 +159,26 @@ function setupIpcHandlers(mainWindow: BrowserWindow): void {
 
 
   // Project management
-  ipcMain.handle('project:create', async (_, workingDirectory: string) => {
-    const projectId = `new-${Date.now()}`
-    dataStore.createNewProject(projectId, workingDirectory)
-    logger.info(`创建新项目: ${projectId}，目录: ${workingDirectory}`, 'main')
-    return { id: projectId, name: path.basename(workingDirectory), path: workingDirectory }
-  })
+  ipcMain.handle('project:create', async (_, projectPath: string) => {
+    let project = sessionManager.getProjects().find(p => p.path === projectPath);
+    if (!project) {
+        project = {
+        id: uuidv4(),
+        name: path.basename(projectPath),
+        path: projectPath,
+        createdAt: new Date().toISOString(),
+      };
+      sessionManager.addProject(project);
+      mainWindow.webContents.send('project:created', project);
+    }
+
+    // This will now be handled by createSession
+    // const newSession = await sessionManager.createSession(project.id);
+    // logger.info(`创建新项目和会话: ${project.name}`, 'main');
+    // mainWindow.webContents.send('session:created', newSession);
+    
+    return { project };
+  });
 
   ipcMain.handle('project:select-directory', async () => {
     const { dialog } = require('electron')
@@ -158,14 +196,78 @@ function setupIpcHandlers(mainWindow: BrowserWindow): void {
 
   ipcMain.handle('project:get-all', async () => {
     try {
-      const projects = dataStore.getAllProjects()
-      logger.info(`获取到 ${projects.length} 个项目`, 'main')
-      return projects
+      const projects = sessionManager.getProjects();
+      const sessions = sessionManager.getAllSessions();
+
+      const projectsWithSessions = projects.map(p => ({
+        ...p,
+        sessions: sessions
+          .filter(s => s.projectId === p.id)
+          .sort((a, b) => new Date(b.lastActiveAt).getTime() - new Date(a.lastActiveAt).getTime())
+      }));
+
+      logger.info(`获取到 ${projectsWithSessions.length} 个项目`, 'main');
+      return projectsWithSessions;
     } catch (error) {
-      logger.error('获取所有项目失败', 'main', error as Error)
-      throw error
+      logger.error('获取所有项目失败', 'main', error as Error);
+      return [];
     }
-  })
+  });
+
+  // Session management
+  ipcMain.handle('session:create', async (_, projectId: string) => {
+    const project = sessionManager.getProjectById(projectId);
+    if (!project) {
+      logger.error(`创建会话失败: 未找到项目 ${projectId}`, 'main');
+      return null;
+    }
+
+    const newSession: Session = {
+      id: `sess-${Date.now()}`,
+      name: 'New Session',
+      projectId: projectId,
+      createdAt: new Date().toISOString(),
+      lastActiveAt: new Date().toISOString(),
+      isTemporary: true,
+      claudeSessionId: `temp-${Date.now()}`,
+      filePath: '',
+    };
+    sessionManager.addSession(newSession);
+
+    logger.info(`在项目 ${project.name} 中创建新会话`, 'main');
+    mainWindow.webContents.send('session:created', newSession);
+
+    return newSession;
+  });
+
+  ipcMain.handle('session:activate', async (_, sessionId: string) => {
+    currentActiveSessionId = sessionId;
+    const session = sessionManager.getSessionById(sessionId);
+    if (!session) {
+      logger.error(`激活会话失败: 未找到会话 ${sessionId}`, 'main');
+      return;
+    }
+
+    const project = sessionManager.getProjectById(session.projectId);
+    if (!project) {
+      logger.error(`激活会话失败: 未找到项目 ${session.projectId}`, 'main');
+      return;
+    }
+
+    const ptyManager = getOrCreatePtyManager(sessionId, mainWindow);
+    if (!ptyManager.isRunning()) {
+      const claudeArgs = [];
+      if (session.claudeSessionId) {
+        claudeArgs.push('--resume', session.claudeSessionId);
+      }
+
+      await ptyManager.start({
+        workingDirectory: project.path,
+        args: claudeArgs,
+      });
+    }
+    logger.info(`会话已激活: ${sessionId}`, 'main');
+  });
 
   // Claude detection management
   ipcMain.handle('claude:get-detection-result', async () => {
@@ -206,114 +308,9 @@ function setupIpcHandlers(mainWindow: BrowserWindow): void {
     return claudeDetector.isClaudeAvailable()
   })
 
-  // Session management
-  ipcMain.handle('session:create', async (_, projectPath: string, name?: string) => {
-    // Check if Claude is available before creating session
-    if (!claudeDetector.isClaudeAvailable()) {
-      const result = claudeDetector.getLastResult()
-      const errorMessage = result?.error || 'Claude CLI 未检测到'
-      logger.error('无法创建会话 - Claude CLI不可用', 'main', new Error(errorMessage))
-      throw new Error(`无法创建会话: ${errorMessage}. 请确保已安装Claude CLI并重新检测。`)
-    }
 
-    // 确定工作目录
-    let workingDirectory = projectPath
-    
-    // 如果传入的是项目ID而不是路径，尝试从新建项目中获取目录
-    if (!path.isAbsolute(projectPath)) {
-      const projectDirectory = dataStore.getProjectDirectory(projectPath)
-      if (projectDirectory) {
-        workingDirectory = projectDirectory
-        logger.info(`为新项目使用目录 ${projectPath}: ${workingDirectory}`, 'main')
-      } else {
-        // 如果是存在的Claude项目，从项目列表中获取路径
-        const allProjects = dataStore.getAllProjects()
-        const project = allProjects.find(p => p.name === projectPath || p.path.includes(projectPath))
-        if (project) {
-          workingDirectory = project.path
-          logger.info(`为现有项目使用目录 ${projectPath}: ${workingDirectory}`, 'main')
-        } else {
-          throw new Error(`Cannot find working directory for project: ${projectPath}`)
-        }
-      }
-    }
-    
-    // Start Claude session and wait for it to create a real session file
-    // Use a temporary sessionId initially, which will be replaced with the real one
-    const tempSessionId = `temp-${Date.now()}`
-    currentActiveSessionId = tempSessionId
-    
-    // Create PtyManager and start claude - start() will wait for shell to be ready
-    const manager = getOrCreatePtyManager(tempSessionId, mainWindow)
-    await manager.start({ workingDirectory, autoStartClaude: true, args: ['-c'] })
-    
-    logger.info(`Claude会话在目录中准备就绪: ${workingDirectory}`, 'main')
 
-    // Setup session monitoring for when Claude creates a real session file
-    const checkForRealSession = () => {
-      const projects = dataStore.getAllProjects()
-      for (const project of projects) {
-        if (project.path === workingDirectory) {
-          // Find the newest session that wasn't there before
-          const newestSession = project.sessions[0] // Sessions are sorted by modification time
-          if (newestSession && newestSession.id !== tempSessionId) {
-            // Found a real Claude session - replace the temporary one
-            logger.info(`检测到真实Claude会话: ${newestSession.id}, 替换临时会话: ${tempSessionId}`, 'main')
-            
-            // Update active session ID
-            currentActiveSessionId = newestSession.id
-            
-            // Move PTY manager to real session ID
-            ptyManagers.set(newestSession.id, manager)
-            ptyManagers.delete(tempSessionId)
-            
-            // Notify renderer of session ID change
-            mainWindow.webContents.send('session:updated', {
-              oldId: tempSessionId,
-              newSession: {
-                id: newestSession.id,
-                projectPath: workingDirectory,
-                name: newestSession.name
-              }
-            })
-            
-            return true
-          }
-        }
-      }
-      return false
-    }
 
-    // Check immediately and then periodically for a real session
-    if (!checkForRealSession()) {
-      const checkInterval = setInterval(() => {
-        if (checkForRealSession()) {
-          clearInterval(checkInterval)
-        }
-      }, 1000) // Check every second
-      
-      // Stop checking after 30 seconds
-      setTimeout(() => {
-        clearInterval(checkInterval)
-      }, 30000)
-    }
-
-    const newSession = { id: tempSessionId, projectPath: workingDirectory, name: name || 'New Claude Session' };
-
-    // Notify the renderer process that a new session has been created and is active
-    mainWindow.webContents.send('session:created', newSession);
-
-    return newSession;
-  })
-
-  ipcMain.handle('session:activate', async (_, sessionId: string) => {
-    logger.info(`激活会话: ${sessionId}`, 'main')
-    currentActiveSessionId = sessionId
-    // Ensure PtyManager exists for this session
-    const manager = getOrCreatePtyManager(sessionId, mainWindow)
-    logger.info(`PTY manager ready for session: ${sessionId}, isRunning: ${manager.isRunning()}`, 'main')
-    return true
-  })
 
   ipcMain.handle('session:resume', async (_, sessionId: string, projectPath: string) => {
     currentActiveSessionId = sessionId
@@ -323,31 +320,24 @@ function setupIpcHandlers(mainWindow: BrowserWindow): void {
   })
 
   ipcMain.handle('session:delete', async (_, sessionId: string) => {
-    logger.info(`删除会话: ${sessionId}`, 'main')
-    
-    const manager = ptyManagers.get(sessionId)
+    logger.info(`删除会话: ${sessionId}`, 'main');
+
+    const manager = ptyManagers.get(sessionId);
     if (manager) {
-      await manager.stop()
-      ptyManagers.delete(sessionId)
+      await manager.stop();
+      ptyManagers.delete(sessionId);
     }
     if (currentActiveSessionId === sessionId) {
-      currentActiveSessionId = null
+      currentActiveSessionId = null;
     }
-    
-    const deletionResult = dataStore.deleteSession(sessionId)
-    
-    if (deletionResult.success) {
-      logger.info(`会话删除成功完成: ${sessionId}`, 'main', { details: deletionResult.details })
-    } else {
-      logger.warn(`会话删除完成但有警告: ${sessionId}`, 'main',new Error(deletionResult.error), { 
-        details: deletionResult.details 
-      })
-    }
-    
-    return deletionResult
-  })
 
-  // This duplicate section has been removed - handlers are defined earlier in the file
+    sessionManager.deleteSession(sessionId);
+    logger.info(`会话已从SessionManager中删除: ${sessionId}`, 'main');
+
+    mainWindow.webContents.send('session:deleted', sessionId);
+
+    return { success: true };
+  });
 
   // Settings management
   ipcMain.handle('settings:get', () => {
@@ -364,26 +354,23 @@ function setupIpcHandlers(mainWindow: BrowserWindow): void {
 
   // Get current session info for status bar
   ipcMain.handle('status:get-current', () => {
-    if (!currentActiveSessionId) return null
-    
-    // Find session in all projects
-    let session: Session | undefined
-    const allProjects = dataStore.getAllProjects()
-    for (const project of allProjects) {
-      session = project.sessions.find(s => s.id === currentActiveSessionId)
-      if (session) break
-    }
-    
-    const activeProvider = settingsManager.getActiveProvider()
-    const proxyConfig = settingsManager.getProxyConfig()
-    
+    if (!currentActiveSessionId) return null;
+
+    const session = sessionManager.getSessionById(currentActiveSessionId);
+    if (!session) return null;
+
+    const project = sessionManager.getProjectById(session.projectId);
+
+    const activeProvider = settingsManager.getActiveProvider();
+    const proxyConfig = settingsManager.getProxyConfig();
+
     return {
       sessionId: currentActiveSessionId,
-      projectPath: session?.projectPath || '',
+      projectPath: project?.path || '',
       provider: activeProvider?.name || 'None',
       proxy: proxyConfig.enabled ? `${proxyConfig.host}:${proxyConfig.port}` : 'Disabled'
-    }
-  })
+    };
+  });
 }
 
 // App lifecycle
