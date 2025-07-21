@@ -10,6 +10,7 @@ export interface ClaudeAccount {
   organizationRole: string
   workspaceRole: string | null
   organizationName: string
+  authorization?: string // 存储从请求中拦截到的 authorization 头
 }
 
 // 第三方服务账号信息  
@@ -61,6 +62,11 @@ export interface AppSettings {
     fontFamily: string
     theme: 'dark' | 'light'
   }
+  
+  // 项目过滤配置
+  projectFilter: {
+    hiddenDirectories: string[] // 要在项目列表中隐藏的目录名列表
+  }
 }
 
 const defaultSettings: AppSettings = {
@@ -78,6 +84,31 @@ const defaultSettings: AppSettings = {
     fontSize: 14,
     fontFamily: 'Monaco, Consolas, monospace',
     theme: 'dark'
+  },
+  projectFilter: {
+    hiddenDirectories: [
+      '.git',
+      '.svn',
+      '.hg',
+      'node_modules',
+      '.DS_Store',
+      '.vscode',
+      '.idea',
+      'dist',
+      'build',
+      '.next',
+      '.nuxt',
+      'coverage',
+      '.nyc_output',
+      'tmp',
+      'temp',
+      '.cache',
+      '.parcel-cache',
+      '.env.local',
+      '.env.development.local',
+      '.env.test.local',
+      '.env.production.local'
+    ]
   }
 }
 
@@ -297,6 +328,52 @@ export class SettingsManager extends EventEmitter {
     const accounts = await this.readClaudeAccountsFromConfig()
     this.updateClaudeAccounts(accounts)
     return accounts
+  }
+
+  // 更新Claude账号的authorization值
+  updateClaudeAccountAuthorization(emailAddress: string, authorization: string): void {
+    const providers = this.getServiceProviders()
+    const claudeProvider = providers.find(p => p.type === 'claude_official')
+    
+    if (!claudeProvider) return
+    
+    const accounts = claudeProvider.accounts as ClaudeAccount[]
+    const account = accounts.find(acc => acc.emailAddress === emailAddress)
+    
+    if (account) {
+      account.authorization = authorization
+      this.addServiceProvider(claudeProvider)
+      this.emit('claude-account-auth:updated', { emailAddress, authorization })
+    }
+  }
+
+  // 获取项目过滤配置
+  getProjectFilterConfig() {
+    return this.store.get('projectFilter', defaultSettings.projectFilter)
+  }
+
+  // 更新项目过滤配置
+  updateProjectFilterConfig(config: Partial<AppSettings['projectFilter']>): void {
+    const current = this.store.get('projectFilter', defaultSettings.projectFilter)
+    const updated = { ...current, ...config }
+    this.store.set('projectFilter', updated)
+    this.emit('project-filter:updated', updated)
+  }
+
+  // 检查目录是否应该被隐藏
+  shouldHideDirectory(directoryPath: string): boolean {
+    const config = this.getProjectFilterConfig()
+    const directoryName = require('path').basename(directoryPath)
+    
+    // 检查是否在隐藏列表中
+    return config.hiddenDirectories.includes(directoryName) || 
+           config.hiddenDirectories.some(pattern => {
+             // 支持简单的模式匹配，以点开头的目录
+             if (pattern.startsWith('.') && directoryName.startsWith('.')) {
+               return directoryName === pattern
+             }
+             return directoryName === pattern
+           })
   }
 
   // 读取Claude配置文件

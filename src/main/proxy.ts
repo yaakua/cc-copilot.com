@@ -5,6 +5,9 @@ import { HttpProxyAgent } from 'http-proxy-agent'
 import { SettingsManager, ClaudeAccount, ThirdPartyAccount, ServiceProvider } from './settings'
 import { logger } from './logger'
 import http from 'http'
+import { spawn } from 'child_process'
+import * as os from 'os'
+import * as fs from 'fs'
 
 export class ProxyServer {
   private app: express.Application
@@ -48,6 +51,35 @@ export class ProxyServer {
       return (this.currentAccount as ClaudeAccount).emailAddress
     } else {
       return (this.currentAccount as ThirdPartyAccount).name
+    }
+  }
+
+  private interceptAndSaveAuthorization(headers: Record<string, any>): void {
+    // 只处理Claude官方服务的请求
+    if (!this.currentProvider || this.currentProvider.type !== 'claude_official' || !this.currentAccount) {
+      return
+    }
+
+    // 查找authorization头（可能是大小写变化的）
+    const authHeader = Object.keys(headers).find(key => key.toLowerCase() === 'authorization')
+    if (!authHeader || !headers[authHeader]) {
+      return
+    }
+
+    const authorization = headers[authHeader] as string
+    const currentClaudeAccount = this.currentAccount as ClaudeAccount
+
+    // 如果当前账号还没有保存authorization，或者authorization发生了变化
+    if (!currentClaudeAccount.authorization || currentClaudeAccount.authorization !== authorization) {
+      logger.info(`检测到Claude官方账号的authorization值: ${currentClaudeAccount.emailAddress}`, 'proxy')
+      
+      // 保存authorization值到设置中
+      this.settingsManager.updateClaudeAccountAuthorization(currentClaudeAccount.emailAddress, authorization)
+      
+      // 更新当前账号的authorization字段（内存中的副本）
+      currentClaudeAccount.authorization = authorization
+      
+      logger.info(`已保存Claude账号 ${currentClaudeAccount.emailAddress} 的authorization值`, 'proxy')
     }
   }
 
@@ -111,12 +143,36 @@ export class ProxyServer {
       
       on: {
         proxyReq: (proxyReq, req, res) => {
-          this.modifyRequestHeaders(proxyReq, req)
+          this.modifyRequestHeaders(proxyReq)
+          // 1. Get an array of all header names using the public API.
+          const actualRequest = (proxyReq as any)._currentRequest;
+
+          // Add a safety check in case it's not there on some calls.
+          if (!actualRequest) {
+            logger.warn('Could not find the underlying _currentRequest object to read headers.', 'proxy');
+            return;
+          }
+          
+          // Now, we can use the standard, documented Node.js API on the *actual* request.
+          // This will work regardless of Node.js version (as long as it's reasonably modern).
+          const headerNames = actualRequest.getRawHeaderNames();
+          
+          const headersObject = headerNames.reduce((acc: Record<string, any>, name: string) => {
+            acc[name] = actualRequest.getHeader(name);
+            return acc;
+          }, {});
+
+          const headersString = JSON.stringify(headersObject, null, 2);
+
+          logger.info(`####[REQUEST HEADERS]####\n${headersString}`, 'proxy');
+          
+          // 拦截并保存Claude官方账号的authorization值
+          this.interceptAndSaveAuthorization(headersObject);
           
           const usingUpstreamProxy = this.shouldUseProxy() && this.proxyAgent
           const accountInfo = this.getAccountDisplayName()
           const providerName = this.currentProvider?.name || 'Unknown'
-          
+         
           logger.debug(`[REQUEST] ${req.method} ${req.url} via ${usingUpstreamProxy ? proxyConfig.url : 'direct'} | Provider: ${providerName} | Account: ${accountInfo}`, 'proxy')
         },
         proxyRes: (proxyRes, req, res) => {
@@ -131,7 +187,7 @@ export class ProxyServer {
     this.app.use('/', createProxyMiddleware(proxyOptions))
   }
 
-  private modifyRequestHeaders(proxyReq: http.ClientRequest, req: express.Request) {
+  private modifyRequestHeaders(proxyReq: http.ClientRequest) {
     if (!this.currentProvider || !this.currentAccount) {
       logger.warn('没有活动的服务提供方或账号，跳过请求头修改', 'proxy')
       return
@@ -143,13 +199,19 @@ export class ProxyServer {
 
     if (this.currentProvider.type === 'claude_official') {
       // Claude官方账号的认证逻辑
-      // 这里需要根据Claude CLI的实际认证方式进行调整
-      // 目前先添加账号UUID作为自定义头，后续根据实际分析结果调整
       const claudeAccount = this.currentAccount as ClaudeAccount
-      proxyReq.setHeader('x-claude-account-uuid', claudeAccount.accountUuid)
-      proxyReq.setHeader('x-claude-organization-uuid', claudeAccount.organizationUuid)
       
-      logger.debug(`设置Claude官方账号认证头: ${claudeAccount.emailAddress}`, 'proxy')
+      if (claudeAccount.authorization) {
+        // 如果有保存的authorization值，直接使用
+        proxyReq.setHeader('authorization', claudeAccount.authorization)
+        logger.debug(`使用保存的authorization认证Claude账号: ${claudeAccount.emailAddress}`, 'proxy')
+      } else {
+        // 如果没有authorization值，使用原来的方式作为备用
+        // 注意：这通常不会起作用，主要是为了向后兼容
+        proxyReq.setHeader('x-claude-account-uuid', claudeAccount.accountUuid)
+        proxyReq.setHeader('x-claude-organization-uuid', claudeAccount.organizationUuid)
+        logger.warn(`Claude账号 ${claudeAccount.emailAddress} 缺少authorization值，使用UUID方式`, 'proxy')
+      }
     } else {
       // 第三方账号使用API Key认证
       const thirdPartyAccount = this.currentAccount as ThirdPartyAccount
@@ -220,8 +282,6 @@ export class ProxyServer {
 
   public updateProxySettings(): void {
     try {
-      logger.info('更新代理设置', 'proxy')
-      
       // Clear existing middleware
       (this.app as any)._router = null
       
@@ -302,6 +362,119 @@ export class ProxyServer {
       target: this.currentTarget,
       proxyEnabled: this.shouldUseProxy(),
       proxyUrl: this.shouldUseProxy() ? proxyConfig.url : 'Disabled'
+    }
+  }
+
+  // 检测Claude官方账号的authorization值
+  public async detectClaudeAuthorization(): Promise<{ success: boolean, error?: string }> {
+    if (!this.currentProvider || this.currentProvider.type !== 'claude_official' || !this.currentAccount) {
+      return { success: false, error: '当前未选择Claude官方账号' }
+    }
+
+    const currentClaudeAccount = this.currentAccount as ClaudeAccount
+    
+    try {
+      logger.info(`开始检测Claude账号 ${currentClaudeAccount.emailAddress} 的authorization值`, 'proxy')
+      
+      // 创建临时目录
+      const tempDir = fs.mkdtempSync(os.tmpdir() + '/claude-auth-detect-')
+      
+      return new Promise((resolve) => {
+        const env = {
+          ...process.env,
+          ANTHROPIC_BASE_URL: `http://127.0.0.1:${this.port}`, // 通过我们的代理
+        }
+
+        // 执行claude命令来触发认证
+        const childProcess = spawn('claude', ['-p', 'hello'], {
+          cwd: tempDir,
+          env,
+          stdio: 'pipe'
+        })
+
+        let output = ''
+        let hasCompleted = false
+
+        const timeout = setTimeout(() => {
+          if (!hasCompleted) {
+            hasCompleted = true
+            childProcess.kill()
+            
+            // 清理临时目录
+            try {
+              fs.rmSync(tempDir, { recursive: true, force: true })
+            } catch (error) {
+              logger.warn('清理临时目录失败', 'proxy', error as Error)
+            }
+            
+            // 检查是否已经获取到authorization
+            const updatedAccount = this.settingsManager.getServiceProviders()
+              .find(p => p.type === 'claude_official')?.accounts
+              .find((acc) => (acc as ClaudeAccount).emailAddress === currentClaudeAccount.emailAddress) as ClaudeAccount
+            
+            if (updatedAccount?.authorization) {
+              resolve({ success: true })
+            } else {
+              resolve({ success: false, error: '检测超时，未能获取到authorization值' })
+            }
+          }
+        }, 10000) // 10秒超时
+
+        childProcess.stdout.on('data', (data) => {
+          output += data.toString()
+        })
+
+        childProcess.stderr.on('data', (data) => {
+          output += data.toString()
+        })
+
+        childProcess.on('close', (code) => {
+          if (!hasCompleted) {
+            hasCompleted = true
+            clearTimeout(timeout)
+            
+            // 清理临时目录
+            try {
+              fs.rmSync(tempDir, { recursive: true, force: true })
+            } catch (error) {
+              logger.warn('清理临时目录失败', 'proxy', error as Error)
+            }
+
+            // 检查是否已经获取到authorization
+            const updatedAccount = this.settingsManager.getServiceProviders()
+              .find(p => p.type === 'claude_official')?.accounts
+              .find((acc) => (acc as ClaudeAccount).emailAddress === currentClaudeAccount.emailAddress) as ClaudeAccount
+
+            if (updatedAccount?.authorization) {
+              logger.info(`成功检测到Claude账号 ${currentClaudeAccount.emailAddress} 的authorization值`, 'proxy')
+              resolve({ success: true })
+            } else {
+              logger.warn(`检测完成但未获取到authorization值，命令退出码: ${code}`, 'proxy')
+              resolve({ success: false, error: `检测失败，命令退出码: ${code}，输出: ${output}` })
+            }
+          }
+        })
+
+        childProcess.on('error', (error) => {
+          if (!hasCompleted) {
+            hasCompleted = true
+            clearTimeout(timeout)
+            
+            // 清理临时目录
+            try {
+              fs.rmSync(tempDir, { recursive: true, force: true })
+            } catch (cleanupError) {
+              logger.warn('清理临时目录失败', 'proxy', cleanupError as Error)
+            }
+
+            logger.error('执行claude命令时出错', 'proxy', error)
+            resolve({ success: false, error: `执行claude命令失败: ${error.message}` })
+          }
+        })
+      })
+    } catch (error) {
+      logger.error('检测authorization过程中出错', 'proxy', error as Error)
+      return { success: false, error: `检测过程中出错: ${(error as Error).message}` }
     }
   }
 }

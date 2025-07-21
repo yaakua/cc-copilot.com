@@ -23,6 +23,7 @@ declare global {
       onSessionUpdated: (callback: (updateData: { oldId: string; newSession: Session }) => void) => () => void;
       onSessionDeleted: (callback: (sessionId: string) => void) => () => void;
       onProjectCreated: (callback: (project: Project) => void) => () => void;
+      onProjectsUpdated: (callback: (projects: Project[]) => void) => () => void;
 
       // Claude Detection APIs
       getClaudeDetectionResult: () => Promise<ClaudeDetectionResult>;
@@ -54,6 +55,8 @@ declare global {
       // Settings APIs
       getSettings: () => Promise<any>
       updateSettings: (settings: any) => Promise<void>
+      getProjectFilterConfig: () => Promise<any>
+      updateProjectFilterConfig: (config: any) => Promise<void>
 
       // Account Management APIs
       getServiceProviders: () => Promise<any[]>
@@ -64,6 +67,7 @@ declare global {
       addThirdPartyAccount: (providerId: string, account: any) => Promise<void>
       removeThirdPartyAccount: (providerId: string, accountId: string) => Promise<void>
       setProviderProxy: (providerId: string, useProxy: boolean) => Promise<void>
+      detectClaudeAuthorization: () => Promise<{ success: boolean, error?: string }>
       
       // Status APIs
       getCurrentStatus: () => Promise<any>

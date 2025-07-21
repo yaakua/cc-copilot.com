@@ -23,13 +23,14 @@ export class Logger {
   private static instance: Logger
   private logDir: string
   private currentLogFile: string
-  private minLevel: LogLevel = LogLevel.INFO
+  private minLevel: LogLevel = LogLevel.DEBUG
   private maxFileSize: number = 10 * 1024 * 1024 // 10MB
   private maxFiles: number = 5
 
   private constructor() {
     // Create logs directory in user data folder
     this.logDir = path.join(app.getPath('userData'), 'logs')
+    console.log('日志目录:', this.logDir)
     this.ensureLogDirectory()
     this.currentLogFile = this.getLogFileName()
     this.cleanOldLogs()

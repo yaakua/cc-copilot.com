@@ -39,7 +39,7 @@ function createWindow(): void {
 
   // Initialize services
   settingsManager = new SettingsManager()
-  sessionManager = new SessionManager()
+  sessionManager = new SessionManager(settingsManager)
   proxyServer = new ProxyServer(settingsManager)
 
   // Sync with .claude directory on startup
@@ -387,6 +387,49 @@ function setupIpcHandlers(mainWindow: BrowserWindow): void {
     if (settings.proxyConfig) {
       proxyServer.updateProxySettings()
     }
+    // If project filter settings changed, trigger a resync
+    if (settings.projectFilter) {
+      try {
+        sessionManager.syncWithClaudeDirectory()
+        // Notify renderer about updated projects
+        const projects = sessionManager.getProjects()
+        const sessions = sessionManager.getAllSessions()
+        const projectsWithSessions = projects.map(p => ({
+          ...p,
+          sessions: sessions
+            .filter(s => s.projectId === p.id)
+            .sort((a, b) => new Date(b.lastActiveAt).getTime() - new Date(a.lastActiveAt).getTime())
+        }))
+        mainWindow.webContents.send('projects:updated', projectsWithSessions)
+      } catch (error) {
+        logger.error('重新同步项目失败', 'main', error as Error)
+      }
+    }
+  })
+
+  ipcMain.handle('settings:get-project-filter', () => {
+    return settingsManager.getProjectFilterConfig()
+  })
+
+  ipcMain.handle('settings:update-project-filter', (_, config: any) => {
+    settingsManager.updateProjectFilterConfig(config)
+    // Trigger a resync to apply the new filter
+    try {
+      sessionManager.syncWithClaudeDirectory()
+      // Notify renderer about updated projects
+      const projects = sessionManager.getProjects()
+      const sessions = sessionManager.getAllSessions()
+      const projectsWithSessions = projects.map(p => ({
+        ...p,
+        sessions: sessions
+          .filter(s => s.projectId === p.id)
+          .sort((a, b) => new Date(b.lastActiveAt).getTime() - new Date(a.lastActiveAt).getTime())
+      }))
+      mainWindow.webContents.send('projects:updated', projectsWithSessions)
+    } catch (error) {
+      logger.error('应用项目过滤器失败', 'main', error as Error)
+      throw error
+    }
   })
 
   // Account management
@@ -425,6 +468,18 @@ function setupIpcHandlers(mainWindow: BrowserWindow): void {
 
   ipcMain.handle('accounts:set-provider-proxy', (_, providerId: string, useProxy: boolean) => {
     settingsManager.setProviderProxyUsage(providerId, useProxy)
+  })
+
+  ipcMain.handle('accounts:detect-claude-authorization', async () => {
+    try {
+      logger.info('开始检测Claude账号authorization', 'main')
+      const result = await proxyServer.detectClaudeAuthorization()
+      logger.info(`检测Claude authorization结果: ${result.success ? '成功' : '失败'}`, 'main')
+      return result
+    } catch (error) {
+      logger.error('检测Claude authorization失败', 'main', error as Error)
+      return { success: false, error: `检测失败: ${(error as Error).message}` }
+    }
   })
 
   // Get current session info for status bar

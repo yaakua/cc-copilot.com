@@ -3,6 +3,7 @@ import * as path from 'path';
 import * as os from 'os';
 import { logger } from './logger';
 import { app } from 'electron';
+import { SettingsManager } from './settings';
 
 import { v4 as uuidv4 } from 'uuid';
 
@@ -32,11 +33,18 @@ interface StoreData {
 export class SessionManager {
   private storePath: string;
   private data: StoreData;
+  private settingsManager: SettingsManager | null = null;
 
-  constructor() {
+  constructor(settingsManager?: SettingsManager) {
     const userDataPath = app.getPath('userData');
     this.storePath = path.join(userDataPath, 'session-store.json');
+    this.settingsManager = settingsManager || null;
     this.data = this.load();
+  }
+
+  // 设置 SettingsManager（如果构造时没有传入）
+  public setSettingsManager(settingsManager: SettingsManager): void {
+    this.settingsManager = settingsManager;
   }
 
   private load(): StoreData {
@@ -72,6 +80,10 @@ export class SessionManager {
   }
 
   public getProjects(): Project[] {
+    // 实时过滤项目，以防设置更改
+    if (this.settingsManager) {
+      return this.data.projects.filter(project => !this.settingsManager!.shouldHideDirectory(project.path));
+    }
     return this.data.projects;
   }
 
@@ -92,6 +104,12 @@ export class SessionManager {
   }
 
   public addProject(project: Project): void {
+    // 检查项目路径是否应该被过滤
+    if (this.settingsManager && this.settingsManager.shouldHideDirectory(project.path)) {
+      logger.info(`项目被过滤无法添加: ${project.name} at ${project.path}`, 'SessionManager');
+      return;
+    }
+    
     if (!this.data.projects.some(p => p.id === project.id)) {
       this.data.projects.push(project);
       this.save(this.data);
@@ -194,6 +212,12 @@ export class SessionManager {
           
           // Create project if we found project info
           if (projectPath && projectName) {
+            // 检查项目路径是否应该被过滤
+            if (this.settingsManager && this.settingsManager.shouldHideDirectory(projectPath)) {
+              logger.info(`项目被过滤跳过: ${projectName} at ${projectPath}`, 'SessionManager');
+              continue;
+            }
+            
             // Since we cleared data, check if project already exists (in case of duplicate cwd paths)
             project = this.data.projects.find(p => p.path === projectPath);
             if (!project) {
