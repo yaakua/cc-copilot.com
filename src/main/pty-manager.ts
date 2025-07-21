@@ -1,8 +1,9 @@
 import * as pty from 'node-pty'
-import { BrowserWindow, ipcMain } from 'electron'
+import { BrowserWindow } from 'electron'
 import * as os from 'os'
 import * as fs from 'fs'
 import { logger } from './logger'
+import path from 'path'
 
 export interface PtyOptions {
   workingDirectory?: string
@@ -161,7 +162,6 @@ export class PtyManager {
   public resize(cols: number, rows: number): void {
     if (this.ptyProcess) {
       this.ptyProcess.resize(cols, rows)
-      logger.info(`调整大小为 ${cols}x${rows}`, 'pty-manager')
     } else {
       logger.warn('无法调整大小 - 进程未运行', 'pty-manager')
     }

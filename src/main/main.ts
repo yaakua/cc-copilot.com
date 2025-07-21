@@ -386,7 +386,7 @@ function setupIpcHandlers(mainWindow: BrowserWindow): void {
       sessionId: currentActiveSessionId,
       projectPath: project?.path || '',
       provider: activeProvider?.name || 'None',
-      proxy: proxyConfig.enabled ? `${proxyConfig.host}:${proxyConfig.port}` : 'Disabled'
+      proxy: proxyConfig.enabled ? `${proxyConfig.url}` : 'Disabled'
     };
   });
 }

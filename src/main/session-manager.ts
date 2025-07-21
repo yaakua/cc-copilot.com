@@ -147,7 +147,20 @@ export class SessionManager {
       for (const projectFolder of projectFolders) {
         try {
           const projectFolderPath = path.join(projectsDir, projectFolder);
-          const sessionFiles = fs.readdirSync(projectFolderPath).filter(f => f.endsWith('.jsonl'));
+          const allSessionFiles = fs.readdirSync(projectFolderPath).filter(f => f.endsWith('.jsonl'));
+          const sessionFiles = allSessionFiles
+            .map(file => ({
+              name: file,
+              path: path.join(projectFolderPath, file),
+              stats: fs.statSync(path.join(projectFolderPath, file))
+            }))
+            .sort((a, b) => b.stats.mtime.getTime() - a.stats.mtime.getTime()) // Sort by modification time (newest first)
+            .slice(0, 20) // Limit to 20 most recent sessions
+            .map(item => item.name);
+          
+          if (allSessionFiles.length > 20) {
+            logger.info(`Project ${projectFolder} has ${allSessionFiles.length} sessions, loading latest 20`, 'SessionManager');
+          }
           
           let project: Project | undefined;
           let projectPath: string | undefined;

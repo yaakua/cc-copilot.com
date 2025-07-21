@@ -1,11 +1,11 @@
 import Store from 'electron-store'
 import { app } from 'electron'
+import { EventEmitter } from 'events'
 
 export interface AppSettings {
   proxyConfig: {
     enabled: boolean
-    host: string
-    port: number
+    url: string
     auth?: {
       username: string
       password: string
@@ -28,8 +28,7 @@ export interface AppSettings {
 const defaultSettings: AppSettings = {
   proxyConfig: {
     enabled: false,
-    host: '127.0.0.1',
-    port: 8080
+    url: 'http://127.0.0.1:1087'
   },
   apiProviders: [],
   activeProviderId: '',
@@ -40,10 +39,11 @@ const defaultSettings: AppSettings = {
   }
 }
 
-export class SettingsManager {
+export class SettingsManager extends EventEmitter {
   private store: Store<AppSettings>
 
   constructor() {
+    super()
     this.store = new Store<AppSettings>({
       defaults: defaultSettings,
       cwd: app.getPath('userData'),
@@ -57,6 +57,7 @@ export class SettingsManager {
 
   updateSettings(settings: Partial<AppSettings>): void {
     this.store.set(settings as any)
+    this.emit('settings:updated', settings)
   }
 
   getProxyConfig() {
@@ -65,7 +66,9 @@ export class SettingsManager {
 
   updateProxyConfig(config: Partial<AppSettings['proxyConfig']>): void {
     const current = this.store.get('proxyConfig')
-    this.store.set('proxyConfig', { ...current, ...config })
+    const updated = { ...current, ...config }
+    this.store.set('proxyConfig', updated)
+    this.emit('proxy:config-updated', updated)
   }
 
   getActiveProvider() {
@@ -76,5 +79,6 @@ export class SettingsManager {
 
   setActiveProvider(providerId: string): void {
     this.store.set('activeProviderId', providerId)
+    this.emit('provider:changed', providerId)
   }
 }
