@@ -3,13 +3,23 @@ import { Terminal as XTerm } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import '@xterm/xterm/css/xterm.css'
 import { logger } from '../utils/logger'
-
+interface Session {
+  id: string
+  name: string
+  projectPath: string
+  createdAt: string
+  lastActiveAt: string
+  filePath: string
+  claudeProjectId?: string
+  claudeProjectDir?: string
+}
 interface TerminalProps {
   sessionId: string
   isActive: boolean
+  session: Session
 }
 
-const Terminal: React.FC<TerminalProps> = ({ sessionId, isActive }) => {
+const Terminal: React.FC<TerminalProps> = ({ sessionId, isActive, session }) => {
   const terminalRef = useRef<HTMLDivElement>(null)
   const xtermInstanceRef = useRef<XTerm | null>(null)
   const fitAddonRef = useRef<FitAddon | null>(null)
@@ -17,10 +27,15 @@ const Terminal: React.FC<TerminalProps> = ({ sessionId, isActive }) => {
   // Effect for initialization and cleanup
   useEffect(() => {
     logger.setComponent('Terminal')
-    logger.info('终端组件已挂载', { sessionId })
-
     if (!terminalRef.current) {
       logger.warn('终端容器引用尚不可用。')
+      return
+    }
+
+    // Ensure container has dimensions before initializing
+    const container = terminalRef.current
+    if (container.offsetWidth === 0 || container.offsetHeight === 0) {
+      logger.warn('终端容器尺寸为0，等待下一次渲染')
       return
     }
 
@@ -48,10 +63,27 @@ const Terminal: React.FC<TerminalProps> = ({ sessionId, isActive }) => {
     fitAddonRef.current = fitAddon
 
     terminal.open(terminalRef.current)
-    logger.info('xterm在容器中打开', { sessionId })
 
-    // Initial resize
-    fitAddon.fit()
+    // Initial resize with multiple checks
+    const attemptFit = (attempts = 0) => {
+      if (attempts > 5) {
+        logger.warn('终端调整大小超过最大重试次数')
+        return
+      }
+      
+      try {
+        if (container.offsetWidth > 0 && container.offsetHeight > 0) {
+          fitAddon.fit()
+        } else {
+          setTimeout(() => attemptFit(attempts + 1), 20)
+        }
+      } catch (e) {
+        logger.warn('终端调整大小失败', e as Error)
+        setTimeout(() => attemptFit(attempts + 1), 20)
+      }
+    }
+    
+    setTimeout(() => attemptFit(), 10)
 
     // Listen for user input
     const onDataDisposable = terminal.onData((data) => {
@@ -64,14 +96,9 @@ const Terminal: React.FC<TerminalProps> = ({ sessionId, isActive }) => {
         xtermInstanceRef.current.write(eventData.data)
       }
     })
-
-    // Request historical data
-    if (window.api?.requestSessionData) {
-      window.api.requestSessionData(sessionId)
-    }
-
+   
     // Welcome message
-    terminal.write(`\x1b[36mCC Copilot Terminal - Session: ${sessionId}\x1b[0m\r\n`)
+    terminal.write(`\x1b[36mCC Copilot Terminal - ${session.name}\x1b[0m\r\n`)
 
     // Cleanup on component unmount
     return () => {

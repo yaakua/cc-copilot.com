@@ -113,9 +113,11 @@ export interface Settings {
 
 export interface ClaudeDetectionResult {
   isInstalled: boolean
-  installations: ClaudeInstallation[]
+  installations?: ClaudeInstallation[]
   defaultPath?: string
   error?: string
+  version?: string
+  timestamp: number
 }
 
 export interface ClaudeInstallation {

@@ -133,15 +133,6 @@ function setupIpcHandlers(mainWindow: BrowserWindow): void {
     }
   })
 
-  ipcMain.handle('terminal:request-data', async (_, sessionId: string) => {
-    logger.info(`请求会话数据: ${sessionId}`, 'main');
-    const manager = ptyManagers.get(sessionId);
-    if (manager) {
-      manager.requestFullBuffer();
-    } else {
-      logger.warn(`在请求数据时未找到PTY管理器: ${sessionId}`, 'main');
-    }
-  });
 
   // Project management
   ipcMain.handle('project:create', async (_, workingDirectory: string) => {
@@ -328,11 +319,6 @@ function setupIpcHandlers(mainWindow: BrowserWindow): void {
     currentActiveSessionId = sessionId
     const manager = getOrCreatePtyManager(sessionId, mainWindow)
     await manager.start({ workingDirectory: projectPath, autoStartClaude: true , args: ['-r',sessionId]})
-    
-    // Use the sessionId directly with claude -r command
-    // sessionId is already the real Claude session ID from the .jsonl filename
-    manager.sendInput(`claude -r ${sessionId}\n`)
-    
     return true
   })
 

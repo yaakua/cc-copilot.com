@@ -164,26 +164,12 @@ export class PtyManager {
     return this.ptyProcess !== null
   }
 
-  public requestFullBuffer(): void {
-    if (this.ptyProcess) {
-      // This is a trick to request a screen refresh from the terminal
-      // It sends a "Device Status Report" query, and most shells respond
-      // by redrawing the screen.
-      this.ptyProcess.write('\x1b[5n');
-      logger.info(`已为会话请求完整缓冲区: ${this.sessionId}`, 'pty-manager');
-    } else {
-      logger.warn(`无法为会话请求完整缓冲区（PTY未运行）: ${this.sessionId}`, 'pty-manager');
-    }
-  }
-
-
-
   private setupEventHandlers(): void {
     if (!this.ptyProcess) return
     logger.info('为专用 Claude PTY 进程设置事件处理器', 'pty-manager')
     
     this.ptyProcess.onData((data: string) => {
-      logger.info(`[${this.sessionId}] 从 Claude PTY 接收数据: "${data.slice(0, 100).replace(/\r\n/g, ' ')}${data.length > 100 ? '...' : ''}"`, 'pty-manager')
+      logger.debug(`[${this.sessionId}] 从 Claude PTY 接收数据: "${data.slice(0, 100).replace(/\r\n/g, ' ')}${data.length > 100 ? '...' : ''}"`, 'pty-manager')
       
       this.mainWindow?.webContents.send('terminal:data', {
         sessionId: this.sessionId,

@@ -171,7 +171,7 @@ const TabManager: React.FC<TabManagerProps> = ({
             key={tab.sessionId}
             className={`absolute inset-0 h-full w-full ${tab.isActive ? 'block' : 'hidden'}`}
           >
-            <Terminal sessionId={tab.sessionId} isActive={tab.isActive} />
+            <Terminal sessionId={tab.sessionId} isActive={tab.isActive} session={tab.session} />
           </div>
         ))}
       </div>

@@ -18,7 +18,6 @@ const api = {
   // Terminal APIs
   sendTerminalInput: (data: string, sessionId?: string) => ipcRenderer.invoke('terminal:input', data, sessionId),
   resizeTerminal: (cols: number, rows: number, sessionId?: string) => ipcRenderer.invoke('terminal:resize', cols, rows, sessionId),
-  requestSessionData: (sessionId: string) => ipcRenderer.invoke('terminal:request-data', sessionId),
   onTerminalData: (callback: (data: { sessionId: string; data: string } | string) => void) => {
     console.log('在预加载中注册终端数据监听器')
     const listener = (_event: any, data: any) => {
