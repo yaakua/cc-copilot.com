@@ -15,7 +15,17 @@ declare global {
       // Terminal APIs
       sendTerminalInput: (data: string, sessionId?: string) => Promise<void>
       resizeTerminal: (cols: number, rows: number, sessionId?: string) => Promise<void>
-      onTerminalData: (callback: (data: { sessionId: string; data: string } | string) => void) => void
+      onTerminalData: (callback: (data: { sessionId: string; data: string } | string) => void) => () => void;
+      onTerminalClosed: (callback: (eventData: { sessionId: string; error: boolean }) => void) => () => void;
+      requestSessionData: (sessionId: string) => Promise<void>;
+      onSessionCreated: (callback: (session: any) => void) => () => void;
+      onSessionUpdated: (callback: (updateData: { oldId: string; newSession: any }) => void) => () => void;
+
+      // Claude Detection APIs
+      getClaudeDetectionResult: () => Promise<ClaudeDetectionResult>;
+      redetectClaude: () => Promise<ClaudeDetectionResult>;
+      isClaudeAvailable: () => Promise<boolean>;
+      onClaudeDetectionResult: (callback: (result: ClaudeDetectionResult) => void) => () => void;
       
       // PTY APIs
       startPty: (options?: any, sessionId?: string) => Promise<void>

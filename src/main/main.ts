@@ -134,19 +134,14 @@ function setupIpcHandlers(mainWindow: BrowserWindow): void {
   })
 
   ipcMain.handle('terminal:request-data', async (_, sessionId: string) => {
-    logger.info(`请求会话数据: ${sessionId}`, 'main')
-    const manager = ptyManagers.get(sessionId)
-    if (manager && manager.isRunning()) {
-      // Send a status message to indicate the terminal is ready
-      mainWindow?.webContents.send('terminal:data', {
-        sessionId: sessionId,
-        data: '\x1b[90m[Terminal connected]\x1b[0m\r\n'
-      })
-      logger.info(`已发送重连消息并请求会话当前状态: ${sessionId}`, 'main')
+    logger.info(`请求会话数据: ${sessionId}`, 'main');
+    const manager = ptyManagers.get(sessionId);
+    if (manager) {
+      manager.requestFullBuffer();
     } else {
-      logger.warn(`未找到运行中的PTY管理器: ${sessionId}`, 'main')
+      logger.warn(`在请求数据时未找到PTY管理器: ${sessionId}`, 'main');
     }
-  })
+  });
 
   // Project management
   ipcMain.handle('project:create', async (_, workingDirectory: string) => {
@@ -230,11 +225,6 @@ function setupIpcHandlers(mainWindow: BrowserWindow): void {
       throw new Error(`无法创建会话: ${errorMessage}. 请确保已安装Claude CLI并重新检测。`)
     }
 
-    // For Claude sessions, we don't create sessions manually
-    // Instead, we start a new Claude CLI session which will create its own session file
-    const sessionId = `temp-${Date.now()}`
-    currentActiveSessionId = sessionId
-    
     // 确定工作目录
     let workingDirectory = projectPath
     
@@ -257,12 +247,72 @@ function setupIpcHandlers(mainWindow: BrowserWindow): void {
       }
     }
     
+    // Start Claude session and wait for it to create a real session file
+    // Use a temporary sessionId initially, which will be replaced with the real one
+    const tempSessionId = `temp-${Date.now()}`
+    currentActiveSessionId = tempSessionId
+    
     // Create PtyManager and start claude - start() will wait for shell to be ready
-    const manager = getOrCreatePtyManager(sessionId, mainWindow)
-    await manager.start({ workingDirectory, autoStartClaude: true })
+    const manager = getOrCreatePtyManager(tempSessionId, mainWindow)
+    await manager.start({ workingDirectory, autoStartClaude: true, args: ['-c'] })
     
     logger.info(`Claude会话在目录中准备就绪: ${workingDirectory}`, 'main')
-    return { id: sessionId, projectPath: workingDirectory, name: name || 'New Claude Session' }
+
+    // Setup session monitoring for when Claude creates a real session file
+    const checkForRealSession = () => {
+      const projects = dataStore.getAllProjects()
+      for (const project of projects) {
+        if (project.path === workingDirectory) {
+          // Find the newest session that wasn't there before
+          const newestSession = project.sessions[0] // Sessions are sorted by modification time
+          if (newestSession && newestSession.id !== tempSessionId) {
+            // Found a real Claude session - replace the temporary one
+            logger.info(`检测到真实Claude会话: ${newestSession.id}, 替换临时会话: ${tempSessionId}`, 'main')
+            
+            // Update active session ID
+            currentActiveSessionId = newestSession.id
+            
+            // Move PTY manager to real session ID
+            ptyManagers.set(newestSession.id, manager)
+            ptyManagers.delete(tempSessionId)
+            
+            // Notify renderer of session ID change
+            mainWindow.webContents.send('session:updated', {
+              oldId: tempSessionId,
+              newSession: {
+                id: newestSession.id,
+                projectPath: workingDirectory,
+                name: newestSession.name
+              }
+            })
+            
+            return true
+          }
+        }
+      }
+      return false
+    }
+
+    // Check immediately and then periodically for a real session
+    if (!checkForRealSession()) {
+      const checkInterval = setInterval(() => {
+        if (checkForRealSession()) {
+          clearInterval(checkInterval)
+        }
+      }, 1000) // Check every second
+      
+      // Stop checking after 30 seconds
+      setTimeout(() => {
+        clearInterval(checkInterval)
+      }, 30000)
+    }
+
+    const newSession = { id: tempSessionId, projectPath: workingDirectory, name: name || 'New Claude Session' };
+
+    // Notify the renderer process that a new session has been created and is active
+    mainWindow.webContents.send('session:created', newSession);
+
+    return newSession;
   })
 
   ipcMain.handle('session:activate', async (_, sessionId: string) => {
@@ -277,27 +327,11 @@ function setupIpcHandlers(mainWindow: BrowserWindow): void {
   ipcMain.handle('session:resume', async (_, sessionId: string, projectPath: string) => {
     currentActiveSessionId = sessionId
     const manager = getOrCreatePtyManager(sessionId, mainWindow)
-    await manager.start({ workingDirectory: projectPath })
+    await manager.start({ workingDirectory: projectPath, autoStartClaude: true , args: ['-r',sessionId]})
     
-    // Find the session file path for Claude resume
-    const allProjects = dataStore.getAllProjects()
-    let sessionFilePath: string | undefined
-    
-    for (const project of allProjects) {
-      const session = project.sessions.find(s => s.id === sessionId)
-      if (session && session.filePath) {
-        sessionFilePath = session.filePath
-        break
-      }
-    }
-    
-    if (sessionFilePath) {
-      // Use the actual file path for Claude resume
-      manager.sendInput(`claude --resume "${sessionFilePath}"\n`)
-    } else {
-      // Fallback for non-Claude sessions
-      manager.sendInput(`claude\n`)
-    }
+    // Use the sessionId directly with claude -r command
+    // sessionId is already the real Claude session ID from the .jsonl filename
+    manager.sendInput(`claude -r ${sessionId}\n`)
     
     return true
   })

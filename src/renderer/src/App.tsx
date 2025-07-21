@@ -77,10 +77,71 @@ const App: React.FC = () => {
       }
     })
 
+    const removeSessionCreatedListener = window.api.onSessionCreated((newSession: Session) => {
+      logger.info('Received session:created event', { newSession });
+
+      // Add the new session to the appropriate project
+      setProjects(prevProjects => {
+        const projectExists = prevProjects.some(p => p.path === newSession.projectPath);
+        if (projectExists) {
+          return prevProjects.map(p => 
+            p.path === newSession.projectPath 
+              ? { ...p, sessions: [...p.sessions, newSession] } 
+              : p
+          );
+        } else {
+          // If project doesn't exist, create it
+          const newProject: Project = {
+            path: newSession.projectPath,
+            name: newSession.projectPath.split('/').pop() || 'New Project',
+            sessions: [newSession]
+          };
+          return [...prevProjects, newProject];
+        }
+      });
+
+      // Add to active sessions and set as current
+      setActiveSessionIds(prev => {
+        if (!prev.includes(newSession.id)) {
+          return [...prev, newSession.id];
+        }
+        return prev;
+      });
+      setCurrentActiveSessionId(newSession.id);
+    });
+
+    const removeSessionUpdatedListener = window.api.onSessionUpdated((updateData: { oldId: string; newSession: Session }) => {
+      logger.info('Received session:updated event', { updateData });
+
+      // Update session ID in projects
+      setProjects(prevProjects => {
+        return prevProjects.map(project => ({
+          ...project,
+          sessions: project.sessions.map(session => 
+            session.id === updateData.oldId 
+              ? { ...session, ...updateData.newSession }
+              : session
+          )
+        }));
+      });
+
+      // Update active session IDs
+      setActiveSessionIds(prev => {
+        return prev.map(id => id === updateData.oldId ? updateData.newSession.id : id);
+      });
+
+      // Update current active session ID
+      if (currentActiveSessionId === updateData.oldId) {
+        setCurrentActiveSessionId(updateData.newSession.id);
+      }
+    });
+
     return () => {
-      removeClaudeListener()
-      removeTerminalClosedListener()
-    }
+      removeClaudeListener();
+      removeTerminalClosedListener();
+      removeSessionCreatedListener();
+      removeSessionUpdatedListener();
+    };
   }, [currentActiveSessionId])
 
   const loadClaudeDetectionResult = async () => {

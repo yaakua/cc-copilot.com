@@ -45,6 +45,22 @@ const api = {
     return () => ipcRenderer.removeListener(channel, listener)
   },
   
+  onSessionCreated: (callback: (session: any) => void) => {
+    const listener = (_event: any, session: any) => callback(session)
+    ipcRenderer.on('session:created', listener)
+    return () => {
+      ipcRenderer.removeListener('session:created', listener)
+    }
+  },
+  
+  onSessionUpdated: (callback: (updateData: { oldId: string; newSession: any }) => void) => {
+    const listener = (_event: any, updateData: any) => callback(updateData)
+    ipcRenderer.on('session:updated', listener)
+    return () => {
+      ipcRenderer.removeListener('session:updated', listener)
+    }
+  },
+  
   // Session APIs
   createSession: (projectPath: string, name?: string) => ipcRenderer.invoke('session:create', projectPath, name),
   activateSession: (sessionId: string) => ipcRenderer.invoke('session:activate', sessionId),

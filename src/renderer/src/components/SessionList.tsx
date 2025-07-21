@@ -24,6 +24,7 @@ interface SessionListProps {
   onActivateSession: (sessionId: string) => void
   onDeleteSession: (sessionId: string) => void
   onOpenSettings?: () => void
+  claudeAvailable: boolean
 }
 
 const SessionList: React.FC<SessionListProps> = ({
@@ -33,7 +34,8 @@ const SessionList: React.FC<SessionListProps> = ({
   onCreateSession,
   onActivateSession,
   onDeleteSession,
-  onOpenSettings
+  onOpenSettings,
+  claudeAvailable,
 }) => {
   const [expandedProjects, setExpandedProjects] = useState<Set<string>>(new Set())
 

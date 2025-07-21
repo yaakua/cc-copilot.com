@@ -120,8 +120,9 @@ const TabManager: React.FC<TabManagerProps> = ({
           className="flex-1 flex overflow-x-auto scrollbar-hide"
           style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}
         >
-          <style jsx>{`
-            div::-webkit-scrollbar {
+          {/* Hide scrollbar for Webkit browsers */}
+          <style>{`
+            .scrollbar-hide::-webkit-scrollbar {
               display: none;
             }
           `}</style>
@@ -164,18 +165,13 @@ const TabManager: React.FC<TabManagerProps> = ({
       </div>
 
       {/* Terminal Content */}
-      <div className="flex-1 relative">
+      <div className="flex-1 relative bg-black">
         {tabs.map((tab) => (
           <div
             key={tab.sessionId}
-            className={`absolute inset-0 ${tab.isActive ? 'block' : 'hidden'}`}
+            className={`absolute inset-0 h-full w-full ${tab.isActive ? 'block' : 'hidden'}`}
           >
-            <div className="text-xs text-gray-500 p-2 border-b border-gray-700">
-              Active Session: {tab.sessionId}
-            </div>
-            <div className="h-[calc(100%-2rem)]">
-              <Terminal sessionId={tab.sessionId} />
-            </div>
+            <Terminal sessionId={tab.sessionId} isActive={tab.isActive} />
           </div>
         ))}
       </div>

@@ -10,6 +10,7 @@ export interface PtyOptions {
   cols?: number
   rows?: number
   autoStartClaude?: boolean
+  args?: string[]
 }
 
 export class PtyManager {
@@ -67,7 +68,7 @@ export class PtyManager {
       // ===== 核心改动：直接启动 claude，而不是 shell =========
       // ==========================================================
       const command = 'claude' // 直接是要执行的命令
-      const args: string[] = [] // claude 的参数，例如 [--resume, sessionId] 等，如果需要的话
+      const args: string[] = options.args || [] // claude 的参数，例如 [--resume, sessionId] 等，如果需要的话
 
       logger.info(`创建专用 PTY 进程: command=${command}, args=${args.join(' ')}, cwd=${workingDirectory}`, 'pty-manager')
       
@@ -161,6 +162,18 @@ export class PtyManager {
 
   public isRunning(): boolean {
     return this.ptyProcess !== null
+  }
+
+  public requestFullBuffer(): void {
+    if (this.ptyProcess) {
+      // This is a trick to request a screen refresh from the terminal
+      // It sends a "Device Status Report" query, and most shells respond
+      // by redrawing the screen.
+      this.ptyProcess.write('\x1b[5n');
+      logger.info(`已为会话请求完整缓冲区: ${this.sessionId}`, 'pty-manager');
+    } else {
+      logger.warn(`无法为会话请求完整缓冲区（PTY未运行）: ${this.sessionId}`, 'pty-manager');
+    }
   }
 
 
