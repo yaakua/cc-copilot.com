@@ -27,7 +27,7 @@ const StatusBar: React.FC<StatusBarProps> = ({ activeSessionId }) => {
         const status = await window.api.getCurrentStatus()
         setStatusInfo(status)
       } catch (error) {
-        logger.error('Failed to load status', error as Error)
+        logger.error('加载状态失败', error as Error)
       }
     }
 

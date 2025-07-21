@@ -24,7 +24,7 @@ class ErrorBoundary extends Component<Props, State> {
 
   public componentDidCatch(error: Error, errorInfo: ErrorInfo) {
     logger.setComponent('ErrorBoundary')
-    logger.error('Error caught by boundary', error, { errorInfo })
+    logger.error('边界捕获错误', error, { errorInfo })
     this.setState({ error, errorInfo })
   }
 

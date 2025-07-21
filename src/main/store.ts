@@ -173,7 +173,7 @@ export class DataStore {
       
       return projects
     } catch (error) {
-      logger.error('Error reading Claude projects', 'store', error as Error)
+      logger.error('读取Claude项目错误', 'store', error as Error)
       return []
     }
   }
@@ -216,7 +216,7 @@ export class DataStore {
       
       return sessions
     } catch (error) {
-      logger.error('Error reading Claude sessions', 'store', error as Error)
+      logger.error('读取Claude会话错误', 'store', error as Error)
       return []
     }
   }
@@ -231,7 +231,7 @@ export class DataStore {
           const event = JSON.parse(line)
           // Claude Code 会话文件中的 cwd 在 user 或 assistant 类型的消息中
           if (event.cwd) {
-            logger.debug("###cwd", event.cwd)
+            logger.debug("###工作目录", event.cwd)
             return event.cwd
           }
         } catch (e) {
@@ -242,7 +242,7 @@ export class DataStore {
       
       return null
     } catch (error) {
-      logger.error('Error extracting cwd from session', 'store', error as Error)
+      logger.error('从会话中提取工作目录错误', 'store', error as Error)
       return null
     }
   }
@@ -284,7 +284,7 @@ export class DataStore {
       
       return undefined
     } catch (error) {
-      logger.error('Error reading first message from session', 'store', error as Error)
+      logger.error('从会话中读取第一条消息错误', 'store', error as Error)
       return undefined
     }
   }

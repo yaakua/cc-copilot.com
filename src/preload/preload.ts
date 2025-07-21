@@ -20,23 +20,29 @@ const api = {
   resizeTerminal: (cols: number, rows: number, sessionId?: string) => ipcRenderer.invoke('terminal:resize', cols, rows, sessionId),
   requestSessionData: (sessionId: string) => ipcRenderer.invoke('terminal:request-data', sessionId),
   onTerminalData: (callback: (data: { sessionId: string; data: string } | string) => void) => {
-    console.log('Registering terminal data listener in preload')
+    console.log('在预加载中注册终端数据监听器')
     const listener = (_event: any, data: any) => {
-      console.log('Preload received terminal data:', data)
-      console.log('Preload calling callback with data')
+      console.log('预加载接收到终端数据:', data)
+      console.log('预加载正在调用回调函数处理数据')
       try {
         callback(data)
-        console.log('Preload callback executed successfully')
+        console.log('预加载回调函数执行成功')
       } catch (error) {
-        console.error('Preload callback execution failed:', error)
+        console.error('预加载回调执行失败:', error)
       }
     }
     ipcRenderer.on('terminal:data', listener)
-    console.log('Preload terminal:data listener registered')
+    console.log('预加载终端数据监听器已注册')
     return () => {
-      console.log('Preload removing terminal:data listener')
+      console.log('预加载正在移除终端数据监听器')
       ipcRenderer.removeListener('terminal:data', listener)
     }
+  },
+  onTerminalClosed: (callback: (eventData: { sessionId: string; error: boolean }) => void) => {
+    const channel = 'terminal:closed'
+    const listener = (_event: any, data: any) => callback(data)
+    ipcRenderer.on(channel, listener)
+    return () => ipcRenderer.removeListener(channel, listener)
   },
   
   // Session APIs
@@ -56,7 +62,21 @@ const api = {
   updateSettings: (settings: any) => ipcRenderer.invoke('settings:update', settings),
   
   // Status APIs
-  getCurrentStatus: () => ipcRenderer.invoke('status:get-current')
+  getCurrentStatus: () => ipcRenderer.invoke('status:get-current'),
+
+  // Claude Detection APIs
+  getClaudeDetectionResult: () => ipcRenderer.invoke('claude:get-detection-result'),
+  redetectClaude: () => ipcRenderer.invoke('claude:redetect'),
+  isClaudeAvailable: () => ipcRenderer.invoke('claude:is-available'),
+  onClaudeDetectionResult: (callback: (result: any) => void) => {
+    const listener = (_event: any, result: any) => {
+      callback(result)
+    }
+    ipcRenderer.on('claude:detection-result', listener)
+    return () => {
+      ipcRenderer.removeListener('claude:detection-result', listener)
+    }
+  }
 }
 
 // Use `contextBridge` APIs to expose Electron APIs to
@@ -69,7 +89,7 @@ if (process.contextIsolated) {
     contextBridge.exposeInMainWorld('api', api)
   } catch (error) {
     // Use original console for preload errors since logger might not be available
-    console.error('Preload context bridge error:', error)
+    console.error('预加载上下文桥接错误:', error)
   }
 } else {
   // @ts-ignore (define in dts)

@@ -70,11 +70,11 @@ export class Logger {
         try {
           fs.unlinkSync(file.path)
         } catch (error) {
-          console.warn(`Failed to delete old log file ${file.name}:`, error)
+          console.warn(`删除旧日志文件失败 ${file.name}:`, error)
         }
       })
     } catch (error) {
-      console.warn('Failed to clean old logs:', error)
+      console.warn('清理旧日志失败:', error)
     }
   }
 
@@ -111,7 +111,7 @@ export class Logger {
 
       fs.appendFileSync(this.currentLogFile, logLine)
     } catch (error) {
-      console.error('Failed to write to log file:', error)
+      console.error('写入日志文件失败:', error)
     }
   }
 
@@ -132,7 +132,7 @@ export class Logger {
 
   private getCallerInfo(): string {
     const stack = new Error().stack
-    if (!stack) return 'unknown'
+    if (!stack) return '未知'
     
     const lines = stack.split('\n')
     // Skip Error, getCallerInfo, log method, and the actual logger method call
@@ -149,7 +149,7 @@ export class Logger {
         }
       }
     }
-    return 'unknown'
+    return '未知'
   }
 
   private log(level: LogLevel, message: string, component?: string, error?: Error, meta?: Record<string, any>): void {

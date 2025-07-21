@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react'
 import SessionList from './components/SessionList'
-import Terminal from './components/Terminal'
+import TabManager from './components/TabManager'
 import StatusBar from './components/StatusBar'
 import ErrorBoundary from './components/ErrorBoundary'
+import Settings from './components/Settings'
 import { logger } from './utils/logger'
 
 interface Session {
@@ -22,33 +23,92 @@ interface Project {
   sessions: Session[]
 }
 
+interface ClaudeDetectionResult {
+  isInstalled: boolean
+  version?: string
+  path?: string
+  error?: string
+  timestamp: number
+}
+
 const App: React.FC = () => {
   const [projects, setProjects] = useState<Project[]>([])
-  const [activeSessionId, setActiveSessionId] = useState<string | null>(null)
+  const [activeSessionIds, setActiveSessionIds] = useState<string[]>([])
+  const [currentActiveSessionId, setCurrentActiveSessionId] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [showSettings, setShowSettings] = useState(false)
+  const [claudeDetectionResult, setClaudeDetectionResult] = useState<ClaudeDetectionResult | null>(null)
+  const [claudeDetecting, setClaudeDetecting] = useState(false)
 
   // Load initial data
   useEffect(() => {
     logger.setComponent('App')
-    logger.info('App component mounted')
+    logger.info('App组件已挂载')
     loadProjects()
-  }, [])
+    loadClaudeDetectionResult()
+
+    // Set up Claude detection result listener
+    const removeClaudeListener = window.api.onClaudeDetectionResult((result: ClaudeDetectionResult) => {
+      logger.info('收到Claude检测结果', result)
+      setClaudeDetectionResult(result)
+      setClaudeDetecting(false)
+    })
+
+    // Set up terminal closed listener
+    const removeTerminalClosedListener = window.api.onTerminalClosed((eventData: { sessionId: string; error: boolean }) => {
+      logger.info('Received terminal:closed event', { eventData })
+      
+      // Remove session from active tabs
+      setActiveSessionIds(prev => prev.filter(id => id !== eventData.sessionId))
+      
+      // If this was the current active session, switch to another tab or clear
+      if (currentActiveSessionId === eventData.sessionId) {
+        setActiveSessionIds(prev => {
+          const remaining = prev.filter(id => id !== eventData.sessionId)
+          setCurrentActiveSessionId(remaining.length > 0 ? remaining[remaining.length - 1] : null)
+          return remaining
+        })
+        
+        if (eventData.error) {
+          logger.warn('Claude session closed unexpectedly')
+        } else {
+          logger.info('Claude session ended normally')
+        }
+      }
+    })
+
+    return () => {
+      removeClaudeListener()
+      removeTerminalClosedListener()
+    }
+  }, [currentActiveSessionId])
+
+  const loadClaudeDetectionResult = async () => {
+    try {
+      const result = await window.api.getClaudeDetectionResult()
+      if (result) {
+        setClaudeDetectionResult(result)
+        logger.info('获取到Claude检测结果', result)
+      }
+    } catch (error) {
+      logger.error('获取Claude检测结果失败', error as Error)
+    }
+  }
 
   const loadProjects = async () => {
     try {
-      logger.info('Loading projects from main process')
+      logger.info('从主进程加载项目')
       // Load projects directly from main process (includes Claude projects)
       const allProjects = await window.api.getAllProjects()
-      console.log('###allProjects', allProjects)  
+      console.log('###所有项目', allProjects)  
       setProjects(allProjects)
       
-      logger.info('Projects loaded successfully', { 
+      logger.info('项目加载成功', { 
         projectCount: allProjects.length,
-        sessionCount: allProjects.reduce((acc, p) => acc + p.sessions.length, 0)
+        sessionCount: allProjects.reduce((acc: number, p: any) => acc + p.sessions.length, 0)
       })
     } catch (error) {
-      logger.error('Failed to load projects', error as Error)
+      logger.error('加载项目失败', error as Error)
     } finally {
       setLoading(false)
     }
@@ -56,18 +116,25 @@ const App: React.FC = () => {
 
   const handleCreateProject = async () => {
     try {
-      logger.info('Creating new project')
-      const projectPath = await window.api.selectProjectDirectory()
-      if (!projectPath) {
-        logger.info('Project creation cancelled by user')
+      // Check if Claude is available before creating project
+      if (!claudeDetectionResult?.isInstalled) {
+        logger.warn('Claude CLI未安装，无法创建项目')
+        alert(`无法创建项目: Claude CLI未检测到\n\n错误: ${claudeDetectionResult?.error || '未知错误'}\n\n请安装Claude CLI后重新检测。`)
         return
       }
 
-      logger.info('Selected project directory', { projectPath })
+      logger.info('创建新项目')
+      const projectPath = await window.api.selectProjectDirectory()
+      if (!projectPath) {
+        logger.info('用户取消了项目创建')
+        return
+      }
+
+      logger.info('选择了项目目录', { projectPath })
 
       // Create new project using the API
       const project = await window.api.createProject(projectPath)
-      logger.info('Project created successfully', { project })
+      logger.info('项目创建成功', { project })
 
       // Create a new session for this project
       const session = await window.api.createSession(project.path, 'New Session')
@@ -75,42 +142,69 @@ const App: React.FC = () => {
       // Explicitly activate the session to ensure proper IPC setup
       await window.api.activateSession(session.id)
       
-      setActiveSessionId(session.id)
+      // Add to active sessions and set as current
+      setActiveSessionIds(prev => {
+        if (!prev.includes(session.id)) {
+          return [...prev, session.id]
+        }
+        return prev
+      })
+      setCurrentActiveSessionId(session.id)
       
-      logger.info('Project and session created and activated successfully', { 
+      logger.info('项目和会话创建并激活成功', { 
         projectId: project.id, 
         sessionId: session.id 
       })
       
       // Don't reload projects immediately - let the terminal show first
       // Will reload projects later when Claude creates actual session files
-      logger.info('New project session is active, terminal should be displayed', { sessionId: session.id })
+      logger.info('新项目会话已激活，应显示终端', { sessionId: session.id })
     } catch (error) {
-      logger.error('Failed to create project', error as Error)
+      logger.error('创建项目失败', error as Error)
     }
   }
 
   const handleCreateSession = async (projectPath: string) => {
     try {
-      logger.info('Creating new session', { projectPath })
+      // Check if Claude is available before creating session
+      if (!claudeDetectionResult?.isInstalled) {
+        logger.warn('Claude CLI未安装，无法创建会话')
+        alert(`无法创建会话: Claude CLI未检测到\n\n错误: ${claudeDetectionResult?.error || '未知错误'}\n\n请安装Claude CLI后重新检测。`)
+        return
+      }
+
+      logger.info('创建新会话', { projectPath })
       const session = await window.api.createSession(projectPath)
       
       // Explicitly activate the session to ensure proper IPC setup
       await window.api.activateSession(session.id)
       
-      setActiveSessionId(session.id)
-      logger.info('Session created and activated successfully', { sessionId: session.id })
+      // Add to active sessions and set as current
+      setActiveSessionIds(prev => {
+        if (!prev.includes(session.id)) {
+          return [...prev, session.id]
+        }
+        return prev
+      })
+      setCurrentActiveSessionId(session.id)
+      logger.info('会话创建并激活成功', { sessionId: session.id })
       
       // Don't reload projects immediately for new sessions
       // The session will eventually appear in Claude projects after Claude creates session files
-      logger.info('New session is active, terminal should be displayed', { sessionId: session.id })
+      logger.info('新会话已激活，应显示终端', { sessionId: session.id })
     } catch (error) {
-      logger.error('Failed to create session', error as Error)
+      logger.error('创建会话失败', error as Error)
     }
   }
 
   const handleActivateSession = async (sessionId: string) => {
     try {
+      // If session is already in active tabs, just switch to it
+      if (activeSessionIds.includes(sessionId)) {
+        setCurrentActiveSessionId(sessionId)
+        return
+      }
+
       // Find the session
       let session: Session | undefined
       for (const project of projects) {
@@ -118,7 +212,7 @@ const App: React.FC = () => {
         if (session) break
       }
 
-      logger.info('Activating session', { 
+      logger.info('激活会话', { 
         sessionId, 
         projectPath: session?.projectPath
       })
@@ -126,35 +220,50 @@ const App: React.FC = () => {
       if (session?.filePath) {
         // For existing Claude sessions, use resume with the file path
         await window.api.resumeSession(sessionId, session.projectPath)
-        logger.info('Claude session resumed', { sessionId, filePath: session.filePath })
+        logger.info('Claude会话已恢复', { sessionId, filePath: session.filePath })
       } else {
         // For new sessions, use normal activate
         await window.api.activateSession(sessionId)
-        logger.info('Session activated', { sessionId })
+        logger.info('会话已激活', { sessionId })
       }
       
-      setActiveSessionId(sessionId)
+      // Add to active sessions and set as current
+      setActiveSessionIds(prev => {
+        if (!prev.includes(sessionId)) {
+          return [...prev, sessionId]
+        }
+        return prev
+      })
+      setCurrentActiveSessionId(sessionId)
     } catch (error) {
-      logger.error('Failed to activate session', error as Error, { sessionId })
+      logger.error('激活会话失败', error as Error, { sessionId })
     }
   }
 
   const handleDeleteSession = async (sessionId: string) => {
     try {
-      logger.info('Deleting session', { sessionId })
+      logger.info('删除会话', { sessionId })
       const deletionResult = await window.api.deleteSession(sessionId)
       
-      if (activeSessionId === sessionId) {
-        setActiveSessionId(null)
+      // Remove from active sessions
+      setActiveSessionIds(prev => prev.filter(id => id !== sessionId))
+      
+      // If this was the current active session, switch to another tab or clear
+      if (currentActiveSessionId === sessionId) {
+        setActiveSessionIds(prev => {
+          const remaining = prev.filter(id => id !== sessionId)
+          setCurrentActiveSessionId(remaining.length > 0 ? remaining[remaining.length - 1] : null)
+          return remaining
+        })
       }
       
       if (deletionResult.success) {
-        logger.info('Session and associated files deleted successfully', { 
+        logger.info('会话和相关文件删除成功', { 
           sessionId, 
           details: deletionResult.details 
         })
       } else {
-        logger.info('Session deletion failed or incomplete', { 
+        logger.info('会话删除失败或不完整', { 
           error: deletionResult.error,
           details: deletionResult.details
         })
@@ -163,14 +272,41 @@ const App: React.FC = () => {
       // Always reload projects after deletion to refresh the session list
       await loadProjects()
     } catch (error) {
-      logger.error('Failed to delete session', error as Error, { sessionId })
+      logger.error('删除会话失败', error as Error, { sessionId })
       // Still try to reload projects in case of partial deletion
       await loadProjects()
     }
   }
 
+  const handleCloseTab = (sessionId: string) => {
+    // Remove from active sessions
+    setActiveSessionIds(prev => prev.filter(id => id !== sessionId))
+    
+    // If this was the current active session, switch to another tab or clear
+    if (currentActiveSessionId === sessionId) {
+      setActiveSessionIds(prev => {
+        const remaining = prev.filter(id => id !== sessionId)
+        setCurrentActiveSessionId(remaining.length > 0 ? remaining[remaining.length - 1] : null)
+        return remaining
+      })
+    }
+  }
+
   const handleOpenSettings = () => {
     setShowSettings(true)
+  }
+
+  const handleRedetectClaude = async () => {
+    try {
+      setClaudeDetecting(true)
+      logger.info('重新检测Claude CLI')
+      const result = await window.api.redetectClaude()
+      logger.info('Claude重新检测完成', result)
+      // The result will be set via the listener
+    } catch (error) {
+      logger.error('Claude重新检测失败', error as Error)
+      setClaudeDetecting(false)
+    }
   }
 
   if (loading) {
@@ -190,91 +326,37 @@ const App: React.FC = () => {
           <div className="w-80 bg-gray-800 border-r border-gray-700">
             <SessionList
               projects={projects}
-              activeSessionId={activeSessionId}
+              activeSessionId={currentActiveSessionId}
               onCreateProject={handleCreateProject}
               onCreateSession={handleCreateSession}
               onActivateSession={handleActivateSession}
               onDeleteSession={handleDeleteSession}
               onOpenSettings={handleOpenSettings}
+              claudeAvailable={claudeDetectionResult?.isInstalled === true}
             />
           </div>
           
-          {/* Right Content - Terminal */}
-          <div className="flex-1 flex flex-col">
-            {activeSessionId ? (
-              <>
-                <div className="text-xs text-gray-500 p-2 border-b border-gray-700">
-                  Active Session: {activeSessionId}
-                </div>
-                <Terminal sessionId={activeSessionId} />
-              </>
-            ) : (
-              <div className="flex-1 flex items-center justify-center text-gray-400">
-                <div className="text-center">
-                  <h2 className="text-xl mb-2">No Active Session</h2>
-                  <p>Select a session from the sidebar or create a new project</p>
-                </div>
-              </div>
-            )}
-          </div>
+          {/* Right Content - TabManager */}
+          <TabManager
+            projects={projects}
+            activeSessionIds={activeSessionIds}
+            currentActiveSessionId={currentActiveSessionId}
+            onActivateSession={setCurrentActiveSessionId}
+            onCloseTab={handleCloseTab}
+          />
         </div>
         
         {/* Bottom Status Bar */}
-        <StatusBar activeSessionId={activeSessionId} />
+        <StatusBar activeSessionId={currentActiveSessionId} />
         
         {/* Settings Modal */}
         {showSettings && (
-          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-            <div className="bg-gray-800 rounded-lg p-6 w-96 max-w-full max-h-full overflow-auto">
-              <div className="flex items-center justify-between mb-4">
-                <h2 className="text-xl font-semibold">Settings</h2>
-                <button
-                  onClick={() => setShowSettings(false)}
-                  className="text-gray-400 hover:text-white text-xl"
-                >
-                  ×
-                </button>
-              </div>
-              
-              <div className="space-y-4">
-                <div>
-                  <h3 className="text-sm font-medium mb-2">Claude CLI</h3>
-                  <p className="text-xs text-gray-400 mb-2">
-                    Claude CLI is required for terminal sessions. Install it using:
-                  </p>
-                  <code className="block bg-gray-900 p-2 rounded text-xs text-green-400">
-                    npm install -g @anthropic-ai/claude-code
-                  </code>
-                </div>
-                
-                <div>
-                  <h3 className="text-sm font-medium mb-2">Project Management</h3>
-                  <p className="text-xs text-gray-400">
-                    Projects are automatically discovered from your Claude projects directory.
-                    Create new sessions within projects to start coding.
-                  </p>
-                </div>
-                
-                <div>
-                  <h3 className="text-sm font-medium mb-2">Keyboard Shortcuts</h3>
-                  <div className="text-xs text-gray-400 space-y-1">
-                    <div>Ctrl/Cmd + C: Copy in terminal</div>
-                    <div>Ctrl/Cmd + V: Paste in terminal</div>
-                    <div>Ctrl/Cmd + L: Clear terminal</div>
-                  </div>
-                </div>
-              </div>
-              
-              <div className="mt-6 flex justify-end">
-                <button
-                  onClick={() => setShowSettings(false)}
-                  className="px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded transition-colors"
-                >
-                  Close
-                </button>
-              </div>
-            </div>
-          </div>
+          <Settings
+            claudeDetectionResult={claudeDetectionResult}
+            claudeDetecting={claudeDetecting}
+            onRedetectClaude={handleRedetectClaude}
+            onClose={() => setShowSettings(false)}
+          />
         )}
       </div>
     </ErrorBoundary>

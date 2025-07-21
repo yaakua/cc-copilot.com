@@ -7,6 +7,7 @@ import { PtyManager } from './pty-manager'
 import { DataStore, Session } from './store'
 import { SettingsManager } from './settings'
 import { logger } from './logger'
+import { claudeDetector, ClaudeDetectionResult } from './claude-detector'
 
 // Global instances
 let proxyServer: ProxyServer
@@ -40,16 +41,39 @@ function createWindow(): void {
   proxyServer = new ProxyServer(settingsManager)
 
   mainWindow.on('ready-to-show', async () => {
-    logger.info('Main window ready to show', 'main')
+    logger.info('主窗口准备显示', 'main')
     mainWindow.show()
     
     try {
       // Start proxy server when window is ready
-      logger.info('Starting proxy server', 'main')
+      logger.info('启动代理服务器', 'main')
       await proxyServer.start()
-      logger.info('Proxy server started successfully', 'main')
+      logger.info('代理服务器启动成功', 'main')
     } catch (error) {
-      logger.error('Failed to start proxy server', 'main', error as Error)
+      logger.error('启动代理服务器失败', 'main', error as Error)
+    }
+
+    // Start Claude detection
+    try {
+      logger.info('开始Claude CLI检测', 'main')
+      const result = await claudeDetector.detect()
+      if (result.isInstalled) {
+        logger.info(`Claude CLI检测成功: ${result.version}`, 'main')
+      } else {
+        logger.warn(`Claude CLI未找到: ${result.error}`, 'main')
+      }
+      
+      // Notify renderer about detection result
+      mainWindow.webContents.send('claude:detection-result', result)
+    } catch (error) {
+      logger.error('Claude CLI检测失败', 'main', error as Error)
+      // Send failure result to renderer
+      const failureResult: ClaudeDetectionResult = {
+        isInstalled: false,
+        error: `检测失败: ${(error as Error).message}`,
+        timestamp: Date.now()
+      }
+      mainWindow.webContents.send('claude:detection-result', failureResult)
     }
   })
 
@@ -71,7 +95,7 @@ function createWindow(): void {
 
 function getOrCreatePtyManager(sessionId: string, mainWindow: BrowserWindow): PtyManager {
   if (!ptyManagers.has(sessionId)) {
-    logger.info(`Creating new PTY manager for session: ${sessionId}`, 'main')
+    logger.info(`为会话创建新的PTY管理器: ${sessionId}`, 'main')
     const manager = new PtyManager(mainWindow, sessionId)
     ptyManagers.set(sessionId, manager)
   }
@@ -110,7 +134,7 @@ function setupIpcHandlers(mainWindow: BrowserWindow): void {
   })
 
   ipcMain.handle('terminal:request-data', async (_, sessionId: string) => {
-    logger.info(`Requesting session data for: ${sessionId}`, 'main')
+    logger.info(`请求会话数据: ${sessionId}`, 'main')
     const manager = ptyManagers.get(sessionId)
     if (manager && manager.isRunning()) {
       // Send a status message to indicate the terminal is ready
@@ -118,11 +142,9 @@ function setupIpcHandlers(mainWindow: BrowserWindow): void {
         sessionId: sessionId,
         data: '\x1b[90m[Terminal connected]\x1b[0m\r\n'
       })
-      // Request current shell state
-      manager.sendCurrentState()
-      logger.info(`Sent reconnection message and requested current state for session: ${sessionId}`, 'main')
+      logger.info(`已发送重连消息并请求会话当前状态: ${sessionId}`, 'main')
     } else {
-      logger.warn(`No running PTY manager found for session: ${sessionId}`, 'main')
+      logger.warn(`未找到运行中的PTY管理器: ${sessionId}`, 'main')
     }
   })
 
@@ -130,7 +152,7 @@ function setupIpcHandlers(mainWindow: BrowserWindow): void {
   ipcMain.handle('project:create', async (_, workingDirectory: string) => {
     const projectId = `new-${Date.now()}`
     dataStore.createNewProject(projectId, workingDirectory)
-    logger.info(`Created new project: ${projectId} with directory: ${workingDirectory}`, 'main')
+    logger.info(`创建新项目: ${projectId}，目录: ${workingDirectory}`, 'main')
     return { id: projectId, name: path.basename(workingDirectory), path: workingDirectory }
   })
 
@@ -151,16 +173,63 @@ function setupIpcHandlers(mainWindow: BrowserWindow): void {
   ipcMain.handle('project:get-all', async () => {
     try {
       const projects = dataStore.getAllProjects()
-      logger.info(`Retrieved ${projects.length} projects`, 'main')
+      logger.info(`获取到 ${projects.length} 个项目`, 'main')
       return projects
     } catch (error) {
-      logger.error('Failed to get all projects', 'main', error as Error)
+      logger.error('获取所有项目失败', 'main', error as Error)
       throw error
     }
   })
 
+  // Claude detection management
+  ipcMain.handle('claude:get-detection-result', async () => {
+    const result = claudeDetector.getLastResult()
+    logger.info('获取Claude检测结果', 'main', {result:result})
+    return result
+  })
+
+  ipcMain.handle('claude:redetect', async () => {
+    try {
+      logger.info('重新检测Claude CLI', 'main')
+      const result = await claudeDetector.detect(true) // 强制重新检测
+      
+      // Notify all windows about new detection result
+      BrowserWindow.getAllWindows().forEach(window => {
+        window.webContents.send('claude:detection-result', result)
+      })
+      
+      return result
+    } catch (error) {
+      logger.error('重新检测Claude CLI失败', 'main', error as Error)
+      const failureResult: ClaudeDetectionResult = {
+        isInstalled: false,
+        error: `重新检测失败: ${(error as Error).message}`,
+        timestamp: Date.now()
+      }
+      
+      // Notify all windows about failure
+      BrowserWindow.getAllWindows().forEach(window => {
+        window.webContents.send('claude:detection-result', failureResult)
+      })
+      
+      return failureResult
+    }
+  })
+
+  ipcMain.handle('claude:is-available', async () => {
+    return claudeDetector.isClaudeAvailable()
+  })
+
   // Session management
   ipcMain.handle('session:create', async (_, projectPath: string, name?: string) => {
+    // Check if Claude is available before creating session
+    if (!claudeDetector.isClaudeAvailable()) {
+      const result = claudeDetector.getLastResult()
+      const errorMessage = result?.error || 'Claude CLI 未检测到'
+      logger.error('无法创建会话 - Claude CLI不可用', 'main', new Error(errorMessage))
+      throw new Error(`无法创建会话: ${errorMessage}. 请确保已安装Claude CLI并重新检测。`)
+    }
+
     // For Claude sessions, we don't create sessions manually
     // Instead, we start a new Claude CLI session which will create its own session file
     const sessionId = `temp-${Date.now()}`
@@ -174,14 +243,14 @@ function setupIpcHandlers(mainWindow: BrowserWindow): void {
       const projectDirectory = dataStore.getProjectDirectory(projectPath)
       if (projectDirectory) {
         workingDirectory = projectDirectory
-        logger.info(`Using directory for new project ${projectPath}: ${workingDirectory}`, 'main')
+        logger.info(`为新项目使用目录 ${projectPath}: ${workingDirectory}`, 'main')
       } else {
         // 如果是存在的Claude项目，从项目列表中获取路径
         const allProjects = dataStore.getAllProjects()
         const project = allProjects.find(p => p.name === projectPath || p.path.includes(projectPath))
         if (project) {
           workingDirectory = project.path
-          logger.info(`Using directory for existing project ${projectPath}: ${workingDirectory}`, 'main')
+          logger.info(`为现有项目使用目录 ${projectPath}: ${workingDirectory}`, 'main')
         } else {
           throw new Error(`Cannot find working directory for project: ${projectPath}`)
         }
@@ -192,12 +261,12 @@ function setupIpcHandlers(mainWindow: BrowserWindow): void {
     const manager = getOrCreatePtyManager(sessionId, mainWindow)
     await manager.start({ workingDirectory, autoStartClaude: true })
     
-    logger.info(`Claude session ready in directory: ${workingDirectory}`, 'main')
+    logger.info(`Claude会话在目录中准备就绪: ${workingDirectory}`, 'main')
     return { id: sessionId, projectPath: workingDirectory, name: name || 'New Claude Session' }
   })
 
   ipcMain.handle('session:activate', async (_, sessionId: string) => {
-    logger.info(`Activating session: ${sessionId}`, 'main')
+    logger.info(`激活会话: ${sessionId}`, 'main')
     currentActiveSessionId = sessionId
     // Ensure PtyManager exists for this session
     const manager = getOrCreatePtyManager(sessionId, mainWindow)
@@ -234,7 +303,7 @@ function setupIpcHandlers(mainWindow: BrowserWindow): void {
   })
 
   ipcMain.handle('session:delete', async (_, sessionId: string) => {
-    logger.info(`Deleting session: ${sessionId}`, 'main')
+    logger.info(`删除会话: ${sessionId}`, 'main')
     
     const manager = ptyManagers.get(sessionId)
     if (manager) {
@@ -248,9 +317,9 @@ function setupIpcHandlers(mainWindow: BrowserWindow): void {
     const deletionResult = dataStore.deleteSession(sessionId)
     
     if (deletionResult.success) {
-      logger.info(`Session deletion completed successfully: ${sessionId}`, 'main', { details: deletionResult.details })
+      logger.info(`会话删除成功完成: ${sessionId}`, 'main', { details: deletionResult.details })
     } else {
-      logger.warn(`Session deletion completed with warnings: ${sessionId}`, 'main',new Error(deletionResult.error), { 
+      logger.warn(`会话删除完成但有警告: ${sessionId}`, 'main',new Error(deletionResult.error), { 
         details: deletionResult.details 
       })
     }
@@ -299,7 +368,7 @@ function setupIpcHandlers(mainWindow: BrowserWindow): void {
 
 // App lifecycle
 app.whenReady().then(() => {
-  logger.info('App ready, initializing...', 'main')
+  logger.info('应用程序准备就绪，正在初始化...', 'main')
   electronApp.setAppUserModelId('com.cccopilot')
   
   app.on('browser-window-created', (_, window) => {
@@ -307,7 +376,7 @@ app.whenReady().then(() => {
   })
 
   createWindow()
-  logger.info('Main window created', 'main')
+  logger.info('主窗口已创建', 'main')
 
   app.on('activate', function () {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()
@@ -315,21 +384,21 @@ app.whenReady().then(() => {
 })
 
 app.on('window-all-closed', async () => {
-  logger.info('All windows closed, cleaning up...', 'main')
+  logger.info('所有窗口已关闭，正在清理...', 'main')
   
   // Clean up PTY managers
   for (const [sessionId, manager] of ptyManagers) {
-    logger.info(`Stopping PTY manager for session: ${sessionId}`, 'main')
+    logger.info(`停止会话的PTY管理器: ${sessionId}`, 'main')
     await manager.stop()
   }
   ptyManagers.clear()
   
   if (proxyServer) {
-    logger.info('Stopping proxy server', 'main')
+    logger.info('停止代理服务器', 'main')
     await proxyServer.stop()
   }
   
-  logger.info('Cleanup completed', 'main')
+  logger.info('清理完成', 'main')
   
   if (process.platform !== 'darwin') app.quit()
 })

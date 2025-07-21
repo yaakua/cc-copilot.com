@@ -73,7 +73,7 @@ export class ProxyServer {
 
     if (!proxyConfig?.enabled || !proxyConfig.host || !proxyConfig.port) {
       this.proxyAgent = null
-      logger.info('No upstream proxy configured', 'proxy')
+      logger.info('未配置上游代理', 'proxy')
       return
     }
 
@@ -92,15 +92,15 @@ export class ProxyServer {
 
       logger.info(`Upstream proxy agent initialized: ${proxyConfig.host}:${proxyConfig.port}`, 'proxy')
     } catch (error) {
-      logger.error('Failed to initialize proxy agent', 'proxy', error as Error)
+      logger.error('初始化代理代理失败', 'proxy', error as Error)
       this.proxyAgent = null
     }
   }
 
   public updateProxySettings(): void {
-    logger.info('Updating proxy settings', 'proxy')
+    logger.info('更新代理设置', 'proxy')
     this.initializeProxyAgent()
-    logger.info('Proxy settings updated successfully', 'proxy')
+    logger.info('代理设置更新成功', 'proxy')
   }
 
   public start(): Promise<void> {
@@ -111,7 +111,7 @@ export class ProxyServer {
       })
       
       this.server.on('error', (err: any) => {
-        logger.error('Server error', 'proxy', err)
+        logger.error('服务器错误', 'proxy', err)
         reject(err)
       })
     })
@@ -121,7 +121,7 @@ export class ProxyServer {
     return new Promise((resolve) => {
       if (this.server) {
         this.server.close(() => {
-          logger.info('Server stopped', 'proxy')
+          logger.info('服务器已停止', 'proxy')
           resolve()
         })
       } else {

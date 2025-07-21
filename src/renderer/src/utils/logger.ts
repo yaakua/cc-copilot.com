@@ -38,7 +38,7 @@ class RendererLogger {
         logMethod(`[${this.component}] ${message}`, meta || '', error || '')
       }
     } catch (err) {
-      console.error('Failed to send log to main process:', err)
+      console.error('发送日志到主进程失败:', err)
       console[level](`[${this.component}] ${message}`, meta || '', error || '')
     }
   }
@@ -81,7 +81,7 @@ class RendererLogger {
       }
       return []
     } catch (error) {
-      console.error('Failed to get recent logs:', error)
+      console.error('获取最近日志失败:', error)
       return []
     }
   }
@@ -94,7 +94,7 @@ class RendererLogger {
       }
       return ''
     } catch (error) {
-      console.error('Failed to get log directory:', error)
+      console.error('获取日志目录失败:', error)
       return ''
     }
   }

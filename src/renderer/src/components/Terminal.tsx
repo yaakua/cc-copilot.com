@@ -14,11 +14,11 @@ const Terminal: React.FC<TerminalProps> = ({ sessionId }) => {
 
   useEffect(() => {
     logger.setComponent('Terminal')
-    logger.info('Terminal effect started', { sessionId })
+    logger.info('终端效果已启动', { sessionId })
 
     // 确保 DOM 元素已经准备好
     if (!terminalRef.current) {
-      logger.warn('Terminal container ref is not available yet.')
+      logger.warn('终端容器引用尚不可用。')
       return
     }
 
@@ -69,15 +69,15 @@ const Terminal: React.FC<TerminalProps> = ({ sessionId }) => {
 
     // 将终端挂载到 DOM
     terminal.open(terminalRef.current)
-    logger.info('xterm opened in container', { sessionId })
+    logger.info('xterm在容器中打开', { sessionId })
 
     // 调整终端大小以适应容器
     requestAnimationFrame(() => {
       try {
         fitAddon.fit()
-        logger.info('Terminal fitted to container', { sessionId })
+        logger.info('终端适配到容器', { sessionId })
       } catch (e) {
-        logger.error('Failed to fit terminal', e as Error)
+        logger.error('适配终端失败', e as Error)
       }
     })
 
@@ -94,7 +94,7 @@ const Terminal: React.FC<TerminalProps> = ({ sessionId }) => {
       if (xtermInstanceRef.current && eventData.sessionId === sessionId) {
         xtermInstanceRef.current.write(eventData.data)
       } else if (eventData.sessionId !== sessionId) {
-        logger.warn('Received data for another session', {
+        logger.warn('接收到其他会话的数据', {
             expected: sessionId,
             received: eventData.sessionId,
         })
@@ -109,7 +109,7 @@ const Terminal: React.FC<TerminalProps> = ({ sessionId }) => {
           window.api.resizeTerminal(terminal.cols, terminal.rows, sessionId)
         }
       } catch (e) {
-        logger.warn('Failed to resize terminal on window resize', e as Error)
+        logger.warn('窗口调整大小时终端调整失败', e as Error)
       }
     }
     window.addEventListener('resize', handleResize)
@@ -132,7 +132,7 @@ const Terminal: React.FC<TerminalProps> = ({ sessionId }) => {
 
     // 清理函数
     return () => {
-      logger.info('Cleaning up terminal effect', { sessionId })
+      logger.info('清理终端效果', { sessionId })
       window.removeEventListener('resize', handleResize)
       onDataDisposable.dispose()
       if (removeDataListener) {
