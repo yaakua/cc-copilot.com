@@ -1,6 +1,7 @@
 import { app, shell, BrowserWindow, ipcMain, dialog } from 'electron'
 import { join } from 'path'
 import * as path from 'path'
+import * as os from 'os'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import { ProxyServer } from './proxy'
 import { PtyManager } from './pty-manager'
@@ -110,6 +111,7 @@ function getOrCreatePtyManager(sessionId: string, mainWindow: BrowserWindow): Pt
 
   const onSessionReady = (claudeSessionId: string) => {
     logger.info(`会话 ${sessionId} 已就绪, Claude 会话 ID: ${claudeSessionId}`, 'main');
+    
     const updatedSession = sessionManager.updateSession(sessionId, {
       claudeSessionId: claudeSessionId,
       isTemporary: false,
@@ -117,6 +119,7 @@ function getOrCreatePtyManager(sessionId: string, mainWindow: BrowserWindow): Pt
     });
 
     if (updatedSession) {
+      logger.info(`临时会话 ${sessionId} 已关联到 Claude 会话: ${claudeSessionId}`, 'main');
       mainWindow.webContents.send('session:updated', { oldId: sessionId, newSession: updatedSession });
     }
   };
@@ -222,21 +225,36 @@ function setupIpcHandlers(mainWindow: BrowserWindow): void {
       return null;
     }
 
+    logger.info(`为项目 ${project.name} 创建新会话，工作目录: ${project.path}`, 'main');
+    
+    // Create a temporary session for UI display
     const newSession: Session = {
       id: `sess-${Date.now()}`,
       name: 'New Session',
       projectId: projectId,
       createdAt: new Date().toISOString(),
       lastActiveAt: new Date().toISOString(),
-      isTemporary: true,
-      claudeSessionId: `temp-${Date.now()}`,
-      filePath: '',
+      isTemporary: true, // Will be updated when Claude CLI creates the real session
     };
     sessionManager.addSession(newSession);
 
-    logger.info(`在项目 ${project.name} 中创建新会话`, 'main');
-    mainWindow.webContents.send('session:created', newSession);
+    // Immediately start Claude CLI for this session
+    currentActiveSessionId = newSession.id;
+    const ptyManager = getOrCreatePtyManager(newSession.id, mainWindow);
+    
+    try {
+      await ptyManager.start({
+        workingDirectory: project.path,
+        args: [], // No resume args since this is a new session
+      });
+      
+      logger.info(`Claude CLI已启动，会话: ${newSession.id}，工作目录: ${project.path}`, 'main');
+    } catch (error) {
+      logger.error(`启动Claude CLI失败，会话: ${newSession.id}`, 'main', error as Error);
+      // Still send the session to UI even if Claude CLI failed to start
+    }
 
+    mainWindow.webContents.send('session:created', newSession);
     return newSession;
   });
 
