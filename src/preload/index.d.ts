@@ -54,6 +54,16 @@ declare global {
       // Settings APIs
       getSettings: () => Promise<any>
       updateSettings: (settings: any) => Promise<void>
+
+      // Account Management APIs
+      getServiceProviders: () => Promise<any[]>
+      getActiveProvider: () => Promise<any | null>
+      setActiveProvider: (providerId: string) => Promise<void>
+      setActiveAccount: (providerId: string, accountId: string) => Promise<void>
+      refreshClaudeAccounts: () => Promise<any[]>
+      addThirdPartyAccount: (providerId: string, account: any) => Promise<void>
+      removeThirdPartyAccount: (providerId: string, accountId: string) => Promise<void>
+      setProviderProxy: (providerId: string, useProxy: boolean) => Promise<void>
       
       // Status APIs
       getCurrentStatus: () => Promise<any>

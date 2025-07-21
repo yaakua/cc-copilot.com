@@ -53,6 +53,25 @@ function createWindow(): void {
     logger.info('主窗口准备显示', 'main')
     mainWindow.show()
     
+    // Initialize accounts from Claude configuration
+    try {
+      logger.info('初始化Claude账号信息', 'main')
+      const claudeAccounts = await settingsManager.refreshClaudeAccounts()
+      if (claudeAccounts.length > 0) {
+        logger.info(`发现 ${claudeAccounts.length} 个Claude账号`, 'main')
+        
+        // 如果没有设置活动的服务提供方，自动设置为Claude官方
+        if (!settingsManager.getActiveServiceProvider()) {
+          settingsManager.setActiveServiceProvider('claude_official')
+          logger.info('设置Claude官方作为默认服务提供方', 'main')
+        }
+      } else {
+        logger.warn('未找到Claude账号配置', 'main')
+      }
+    } catch (error) {
+      logger.error('初始化Claude账号失败', 'main', error as Error)
+    }
+    
     try {
       // Start proxy server when window is ready
       logger.info('启动代理服务器', 'main')
@@ -370,6 +389,44 @@ function setupIpcHandlers(mainWindow: BrowserWindow): void {
     }
   })
 
+  // Account management
+  ipcMain.handle('accounts:get-service-providers', () => {
+    return settingsManager.getServiceProviders()
+  })
+
+  ipcMain.handle('accounts:get-active-provider', () => {
+    return settingsManager.getCurrentActiveAccount()
+  })
+
+  ipcMain.handle('accounts:set-active-provider', (_, providerId: string) => {
+    settingsManager.setActiveServiceProvider(providerId)
+  })
+
+  ipcMain.handle('accounts:set-active-account', (_, providerId: string, accountId: string) => {
+    settingsManager.setActiveAccount(providerId, accountId)
+  })
+
+  ipcMain.handle('accounts:refresh-claude-accounts', async () => {
+    try {
+      return await settingsManager.refreshClaudeAccounts()
+    } catch (error) {
+      logger.error('刷新Claude账号失败', 'main', error as Error)
+      throw error
+    }
+  })
+
+  ipcMain.handle('accounts:add-third-party', (_, providerId: string, account: any) => {
+    settingsManager.addThirdPartyAccount(providerId, account)
+  })
+
+  ipcMain.handle('accounts:remove-third-party', (_, providerId: string, accountId: string) => {
+    settingsManager.removeThirdPartyAccount(providerId, accountId)
+  })
+
+  ipcMain.handle('accounts:set-provider-proxy', (_, providerId: string, useProxy: boolean) => {
+    settingsManager.setProviderProxyUsage(providerId, useProxy)
+  })
+
   // Get current session info for status bar
   ipcMain.handle('status:get-current', () => {
     if (!currentActiveSessionId) return null;
@@ -379,14 +436,16 @@ function setupIpcHandlers(mainWindow: BrowserWindow): void {
 
     const project = sessionManager.getProjectById(session.projectId);
 
-    const activeProvider = settingsManager.getActiveProvider();
-    const proxyConfig = settingsManager.getProxyConfig();
+    // 使用新的代理状态获取方法
+    const proxyStatus = proxyServer ? proxyServer.getCurrentStatus() : null;
 
     return {
       sessionId: currentActiveSessionId,
       projectPath: project?.path || '',
-      provider: activeProvider?.name || 'None',
-      proxy: proxyConfig.enabled ? `${proxyConfig.url}` : 'Disabled'
+      provider: proxyStatus?.provider || 'None',
+      account: proxyStatus?.account || 'None', 
+      proxy: proxyStatus?.proxyEnabled ? proxyStatus.proxyUrl : 'Disabled',
+      target: proxyStatus?.target || 'Unknown'
     };
   });
 }

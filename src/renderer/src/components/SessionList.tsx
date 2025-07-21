@@ -68,8 +68,18 @@ const SessionList: React.FC<SessionListProps> = ({
   claudeAvailable,
 }) => {
   const [expandedProjects, setExpandedProjects] = useState<Set<string>>(new Set())
+  const [currentTime, setCurrentTime] = useState(new Date().getTime())
 
-  // 自动展开当前活跃会话对应的项目
+  // 定时更新时间，用于实时显示倒计时
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setCurrentTime(new Date().getTime())
+    }, 1000) // 每秒更新一次
+
+    return () => clearInterval(timer)
+  }, [])
+
+  // 自动展开当前活跃会话对应的项目（手风琴效果）
   useEffect(() => {
     if (activeSessionId) {
       // 找到活跃会话对应的项目
@@ -79,7 +89,13 @@ const SessionList: React.FC<SessionListProps> = ({
       
       if (activeProject) {
         setExpandedProjects(prev => {
-          const newExpanded = new Set(prev)
+          // 如果当前活跃项目已经展开，保持现状
+          if (prev.has(activeProject.id)) {
+            return prev
+          }
+          
+          // 否则关闭所有其他项目，只展开活跃项目（手风琴效果）
+          const newExpanded = new Set<string>()
           newExpanded.add(activeProject.id)
           return newExpanded
         })
@@ -88,13 +104,19 @@ const SessionList: React.FC<SessionListProps> = ({
   }, [activeSessionId, projects])
 
   const toggleProject = (projectId: string) => {
-    const newExpanded = new Set(expandedProjects)
-    if (newExpanded.has(projectId)) {
-      newExpanded.delete(projectId)
-    } else {
-      newExpanded.add(projectId)
-    }
-    setExpandedProjects(newExpanded)
+    setExpandedProjects(prev => {
+      const newExpanded = new Set<string>()
+      
+      // 如果点击的项目已经展开，则关闭所有项目（手风琴效果）
+      if (prev.has(projectId)) {
+        // 关闭所有项目
+        return newExpanded
+      } else {
+        // 只展开点击的项目，关闭其他所有项目
+        newExpanded.add(projectId)
+        return newExpanded
+      }
+    })
   }
 
   // 检查项目是否包含当前活跃的会话
@@ -104,6 +126,27 @@ const SessionList: React.FC<SessionListProps> = ({
 
   const formatDate = (dateString: string) => {
     return new Date(dateString).toLocaleString()
+  }
+
+  // 格式化相对时间（倒计时方式）
+  const formatRelativeTime = (dateString: string) => {
+    const sessionTime = new Date(dateString).getTime()
+    const diffInSeconds = Math.floor((currentTime - sessionTime) / 1000)
+    
+    if (diffInSeconds < 0) {
+      return '刚刚'
+    } else if (diffInSeconds < 60) {
+      return `${diffInSeconds}秒前`
+    } else if (diffInSeconds < 3600) {
+      const minutes = Math.floor(diffInSeconds / 60)
+      return `${minutes}分钟前`
+    } else if (diffInSeconds < 86400) {
+      const hours = Math.floor(diffInSeconds / 3600)
+      return `${hours}小时前`
+    } else {
+      const days = Math.floor(diffInSeconds / 86400)
+      return `${days}天前`
+    }
   }
 
   return (
@@ -129,14 +172,13 @@ const SessionList: React.FC<SessionListProps> = ({
             <div key={project.id}>
               {/* Project Header */}
               <div
-                className={`flex items-center justify-between p-3 rounded-lg cursor-pointer transition-smooth ${
+                className={`group flex items-center justify-between p-3 rounded-lg cursor-pointer transition-smooth ${
                   expandedProjects.has(project.id) 
                     ? 'bg-opacity-30' 
                     : ''
                 }`}
                 style={{ 
-                  backgroundColor: expandedProjects.has(project.id) ? 'var(--bg-selection)' : 'transparent',
-                  opacity: expandedProjects.has(project.id) ? 0.3 : 1
+                  backgroundColor: expandedProjects.has(project.id) ? 'rgba(59, 130, 246, 0.15)' : 'transparent'
                 }}
                 onMouseEnter={(e) => {
                   if (!expandedProjects.has(project.id)) {
@@ -150,7 +192,7 @@ const SessionList: React.FC<SessionListProps> = ({
                 }}
                 onClick={() => toggleProject(project.id)}
               >
-                <div className="flex items-center gap-3">
+                <div className="flex items-center gap-3 flex-1 min-w-0">
                   <svg 
                     xmlns="http://www.w3.org/2000/svg" 
                     fill="none" 
@@ -158,44 +200,57 @@ const SessionList: React.FC<SessionListProps> = ({
                     strokeWidth="2" 
                     stroke="currentColor" 
                     className={`w-4 h-4 shrink-0 transform transition-transform ${expandedProjects.has(project.id) ? 'rotate-90' : ''}`}
-                    style={{ color: 'var(--text-secondary)' }}
+                    style={{ color: expandedProjects.has(project.id) ? '#ffffff' : 'var(--text-secondary)' }}
                   >
                     <path strokeLinecap="round" strokeLinejoin="round" d="m8.25 4.5 7.5 7.5-7.5 7.5" />
                   </svg>
-                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5" style={{ color: 'var(--icon-blue)' }}>
+                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5 shrink-0" style={{ color: expandedProjects.has(project.id) ? '#60a5fa' : 'var(--icon-blue)' }}>
                     <path d="M19.5 21a3 3 0 0 0 3-3V6a3 3 0 0 0-3-3H4.5a3 3 0 0 0-3 3v12a3 3 0 0 0 3 3h15Z" />
                   </svg>
-                  <div className="flex flex-col -space-y-1">
-                    <span className="font-bold text-sm" style={{ color: expandedProjects.has(project.id) ? 'var(--text-primary)' : 'var(--text-secondary)' }}>
+                  <div className="flex flex-col -space-y-1 min-w-0 flex-1">
+                    <span className="font-bold text-sm truncate" style={{ color: expandedProjects.has(project.id) ? '#ffffff' : 'var(--text-secondary)' }}>
                       {project.name}
                     </span>
-                    <span className="text-xs" style={{ color: 'var(--text-tertiary)' }}>
-                      {project.path.length > 20 ? `${project.path.substring(0, 20)}...` : project.path}
+                    <span className="text-xs truncate" style={{ color: expandedProjects.has(project.id) ? 'rgba(255, 255, 255, 0.8)' : 'var(--text-tertiary)' }}>
+                      {project.path}
                     </span>
                   </div>
                 </div>
-                {hasActiveSession(project) && (
-                  <div className="status-dot" style={{ backgroundColor: 'var(--status-green)' }}></div>
-                )}
+                <div className="flex items-center gap-2 shrink-0">
+                  {/* New Session Button */}
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      onCreateSession(project.id)
+                    }}
+                    className={`${expandedProjects.has(project.id) ? 'opacity-80' : 'opacity-0 group-hover:opacity-100'} p-1 rounded transition-all duration-200`}
+                    style={{ color: expandedProjects.has(project.id) ? '#ffffff' : 'var(--text-tertiary)' }}
+                    onMouseEnter={(e) => {
+                      e.currentTarget.style.backgroundColor = expandedProjects.has(project.id) ? 'rgba(255, 255, 255, 0.2)' : 'var(--hover-bg)'
+                      e.currentTarget.style.color = '#ffffff'
+                      e.currentTarget.style.opacity = '1'
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.backgroundColor = 'transparent'
+                      e.currentTarget.style.color = expandedProjects.has(project.id) ? '#ffffff' : 'var(--text-tertiary)'
+                      e.currentTarget.style.opacity = expandedProjects.has(project.id) ? '0.8' : '0'
+                    }}
+                    title="New Session"
+                  >
+                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" className="w-4 h-4">
+                      <path d="M8.75 3.75a.75.75 0 0 0-1.5 0v3.5h-3.5a.75.75 0 0 0 0 1.5h3.5v3.5a.75.75 0 0 0 1.5 0v-3.5h3.5a.75.75 0 0 0 0-1.5h-3.5v-3.5Z" />
+                    </svg>
+                  </button>
+                  {/* Status Indicator */}
+                  {hasActiveSession(project) && (
+                    <div className="status-dot" style={{ backgroundColor: 'var(--status-green)' }}></div>
+                  )}
+                </div>
               </div>
 
               {/* Sessions List */}
               {expandedProjects.has(project.id) && (
                 <div className="pl-6 pt-1 space-y-0.5">
-                  {/* New Session Button */}
-                  <div 
-                    onClick={() => onCreateSession(project.id)}
-                    className="flex items-center gap-3 p-2 rounded-md cursor-pointer transition-colors"
-                    style={{ color: 'var(--text-secondary)' }}
-                    onMouseEnter={(e) => e.currentTarget.style.backgroundColor = 'var(--hover-bg)'}
-                    onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
-                  >
-                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-5 h-5">
-                      <path fillRule="evenodd" d="M10 18a8 8 0 1 0 0-16 8 8 0 0 0 0 16Zm-.75-4.75a.75.75 0 0 0 1.5 0V8.66l1.95 2.1a.75.75 0 1 0 1.1-1.02l-3.25-3.5a.75.75 0 0 0-1.1 0L6.2 9.74a.75.75 0 1 0 1.1 1.02l1.95-2.1v4.59Z" clipRule="evenodd" />
-                    </svg>
-                    <span className="text-sm">New Session</span>
-                  </div>
-                  
                   {project.sessions.length === 0 ? (
                     <div className="p-3 text-sm" style={{ color: 'var(--text-tertiary)' }}>
                       No sessions yet
@@ -204,11 +259,12 @@ const SessionList: React.FC<SessionListProps> = ({
                     project.sessions.map((session, sessionIndex) => (
                       <div
                         key={session.id}
-                        className={`group/session flex items-center justify-between p-2 rounded-md cursor-pointer transition-colors ${
+                        className={`group/session flex items-start justify-between p-2 rounded-md cursor-pointer transition-colors ${
                           activeSessionId === session.id ? '' : ''
                         }`}
                         style={{
-                          backgroundColor: activeSessionId === session.id ? 'rgba(59, 130, 246, 0.4)' : 'transparent'
+                          backgroundColor: activeSessionId === session.id ? 'var(--bg-selection)' : 'transparent',
+                          opacity: activeSessionId === session.id ? 0.6 : 1
                         }}
                         onMouseEnter={(e) => {
                           if (activeSessionId !== session.id) {
@@ -222,16 +278,33 @@ const SessionList: React.FC<SessionListProps> = ({
                         }}
                         onClick={() => onActivateSession(session.id)}
                       >
-                        <div className="flex items-center gap-3">
-                          <span style={{ color: activeSessionId === session.id ? 'var(--text-primary)' : 'var(--text-secondary)' }}>
+                        <div className="flex items-start gap-3 min-w-0 flex-1">
+                          <span className="shrink-0 mt-0.5" style={{ color: activeSessionId === session.id ? '#ffffff' : 'var(--text-secondary)' }}>
                             {getSessionIcon(sessionIndex)}
                           </span>
-                          <span 
-                            className="text-sm font-semibold truncate" 
-                            style={{ color: activeSessionId === session.id ? 'var(--text-primary)' : 'var(--text-secondary)' }}
-                          >
-                            {session.name.length > 25 ? `${session.name.substring(0, 25)}...` : session.name}
-                          </span>
+                          <div className="min-w-0 flex-1">
+                            <div 
+                              className="text-sm font-semibold leading-tight"
+                              style={{ 
+                                color: activeSessionId === session.id ? '#ffffff' : 'var(--text-secondary)',
+                                display: '-webkit-box',
+                                WebkitLineClamp: 2,
+                                WebkitBoxOrient: 'vertical',
+                                overflow: 'hidden',
+                                lineHeight: '1.3'
+                              }}
+                            >
+                              {session.name}
+                            </div>
+                            <div 
+                              className="text-xs mt-1" 
+                              style={{ 
+                                color: activeSessionId === session.id ? 'rgba(255, 255, 255, 0.8)' : 'var(--text-tertiary)' 
+                              }}
+                            >
+                              {formatRelativeTime(session.createdAt || session.lastActiveAt)}
+                            </div>
+                          </div>
                         </div>
                         <button
                           onClick={(e) => {
@@ -240,7 +313,7 @@ const SessionList: React.FC<SessionListProps> = ({
                               onDeleteSession(session.id)
                             }
                           }}
-                          className="opacity-0 group-hover/session:opacity-100 transition-opacity hover:text-red-400"
+                          className="opacity-0 group-hover/session:opacity-100 transition-opacity hover:text-red-400 mt-0.5 shrink-0"
                           style={{ color: 'var(--text-tertiary)' }}
                           title="Delete Session"
                         >

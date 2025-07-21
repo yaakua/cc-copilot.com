@@ -91,6 +91,16 @@ const api = {
   // Settings APIs
   getSettings: () => ipcRenderer.invoke('settings:get'),
   updateSettings: (settings: any) => ipcRenderer.invoke('settings:update', settings),
+
+  // Account Management APIs
+  getServiceProviders: () => ipcRenderer.invoke('accounts:get-service-providers'),
+  getActiveProvider: () => ipcRenderer.invoke('accounts:get-active-provider'),
+  setActiveProvider: (providerId: string) => ipcRenderer.invoke('accounts:set-active-provider', providerId),
+  setActiveAccount: (providerId: string, accountId: string) => ipcRenderer.invoke('accounts:set-active-account', providerId, accountId),
+  refreshClaudeAccounts: () => ipcRenderer.invoke('accounts:refresh-claude-accounts'),
+  addThirdPartyAccount: (providerId: string, account: any) => ipcRenderer.invoke('accounts:add-third-party', providerId, account),
+  removeThirdPartyAccount: (providerId: string, accountId: string) => ipcRenderer.invoke('accounts:remove-third-party', providerId, accountId),
+  setProviderProxy: (providerId: string, useProxy: boolean) => ipcRenderer.invoke('accounts:set-provider-proxy', providerId, useProxy),
   
   // Status APIs
   getCurrentStatus: () => ipcRenderer.invoke('status:get-current'),
