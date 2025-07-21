@@ -7,6 +7,11 @@ declare global {
       sendLog: (logEntry: LogEntry) => void
     }
     api: {
+      // Logger APIs
+      log: (level: string, message: string, component?: string, error?: any, meta?: Record<string, any>) => Promise<void>
+      getRecentLogs: (lines?: number) => Promise<any>
+      getLogDirectory: () => Promise<string>
+
       // Terminal APIs
       sendTerminalInput: (data: string, sessionId?: string) => Promise<void>
       resizeTerminal: (cols: number, rows: number, sessionId?: string) => Promise<void>
@@ -22,39 +27,23 @@ declare global {
       startClaudeCode: (workingDirectory?: string, sessionId?: string) => Promise<void>
       
       // Project APIs
-      getProjects: () => Promise<Project[]>
-      createProject: (name: string, path: string) => Promise<Project>
-      deleteProject: (id: string) => Promise<void>
+      createProject: (workingDirectory: string) => Promise<{ id: string; name: string; path: string }>
       selectProjectDirectory: () => Promise<string | null>
-      getProjectHistory: () => Promise<string[]>
-      clearProjectHistory: () => Promise<void>
-      extractProjectName: (path: string) => Promise<string>
+      getProjectSessions: (projectPath: string) => Promise<any>
+      getAllProjects: () => Promise<any>
       
       // Session APIs
-      getSessions: (projectId: string) => Promise<Session[]>
-      createSession: (projectId: string, name?: string) => Promise<Session>
-      activateSession: (sessionId: string) => Promise<void>
-      deleteSession: (id: string) => Promise<void>
+      createSession: (projectPath: string, name?: string) => Promise<{ id: string; projectPath: string; name: string }>
+      activateSession: (sessionId: string) => Promise<boolean>
+      resumeSession: (sessionId: string, projectPath: string) => Promise<any>
+      deleteSession: (sessionId: string) => Promise<any>
       
       // Settings APIs
-      getSettings: () => Promise<Settings>
+      getSettings: () => Promise<any>
       updateSettings: (settings: any) => Promise<void>
       
-      // Statistics APIs
-      getStats: (scope: 'session' | 'project' | 'global', id?: string) => Promise<TokenUsage>
-      
-      // Proxy APIs
-      setActiveModel: (modelId: string) => Promise<void>
-      
-      // Claude Detection APIs
-      detectClaude: () => Promise<ClaudeDetectionResult>
-      testClaudeInstallation: (claudePath: string) => Promise<boolean>
-      clearClaudeCache: () => Promise<void>
-
-      // Claude Code Integration APIs
-      getClaudeProjects: () => Promise<ClaudeProject[]>
-      resumeClaudeSession: (sessionPath: string, workingDirectory: string) => Promise<void>
-      createNewClaudeSession: (workingDirectory: string) => Promise<string>
+      // Status APIs
+      getCurrentStatus: () => Promise<any>
     }
   }
 }

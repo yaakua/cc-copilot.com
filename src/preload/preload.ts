@@ -18,8 +18,15 @@ const api = {
   // Terminal APIs
   sendTerminalInput: (data: string, sessionId?: string) => ipcRenderer.invoke('terminal:input', data, sessionId),
   resizeTerminal: (cols: number, rows: number, sessionId?: string) => ipcRenderer.invoke('terminal:resize', cols, rows, sessionId),
-  onTerminalData: (callback: (data: { sessionId: string; data: string } | string) => void) => 
-    ipcRenderer.on('terminal:data', (_event, data) => callback(data)),
+  onTerminalData: (callback: (data: { sessionId: string; data: string } | string) => void) => {
+    console.log('Registering terminal data listener in preload')
+    const listener = (_event: any, data: any) => {
+      console.log('Preload received terminal data:', data)
+      callback(data)
+    }
+    ipcRenderer.on('terminal:data', listener)
+    return () => ipcRenderer.removeListener('terminal:data', listener)
+  },
   
   // Session APIs
   createSession: (projectPath: string, name?: string) => ipcRenderer.invoke('session:create', projectPath, name),
@@ -28,6 +35,7 @@ const api = {
   deleteSession: (sessionId: string) => ipcRenderer.invoke('session:delete', sessionId),
   
   // Project APIs
+  createProject: (workingDirectory: string) => ipcRenderer.invoke('project:create', workingDirectory),
   selectProjectDirectory: () => ipcRenderer.invoke('project:select-directory'),
   getProjectSessions: (projectPath: string) => ipcRenderer.invoke('project:get-sessions', projectPath),
   getAllProjects: () => ipcRenderer.invoke('project:get-all'),

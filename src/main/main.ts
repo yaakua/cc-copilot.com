@@ -1,5 +1,6 @@
 import { app, shell, BrowserWindow, ipcMain, dialog } from 'electron'
 import { join } from 'path'
+import * as path from 'path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import { ProxyServer } from './proxy'
 import { PtyManager } from './pty-manager'
@@ -108,6 +109,39 @@ function setupIpcHandlers(mainWindow: BrowserWindow): void {
     }
   })
 
+  // Project management
+  ipcMain.handle('project:create', async (_, workingDirectory: string) => {
+    const projectId = `new-${Date.now()}`
+    dataStore.createNewProject(projectId, workingDirectory)
+    logger.info(`Created new project: ${projectId} with directory: ${workingDirectory}`, 'main')
+    return { id: projectId, name: path.basename(workingDirectory), path: workingDirectory }
+  })
+
+  ipcMain.handle('project:select-directory', async () => {
+    const { dialog } = require('electron')
+    const result = await dialog.showOpenDialog(mainWindow, {
+      title: '选择项目目录',
+      properties: ['openDirectory'],
+      message: '请选择要作为Claude项目的工作目录'
+    })
+    
+    if (!result.canceled && result.filePaths.length > 0) {
+      return result.filePaths[0]
+    }
+    return null
+  })
+
+  ipcMain.handle('project:get-all', async () => {
+    try {
+      const projects = dataStore.getAllProjects()
+      logger.info(`Retrieved ${projects.length} projects`, 'main')
+      return projects
+    } catch (error) {
+      logger.error('Failed to get all projects', 'main', error as Error)
+      throw error
+    }
+  })
+
   // Session management
   ipcMain.handle('session:create', async (_, projectPath: string, name?: string) => {
     // For Claude sessions, we don't create sessions manually
@@ -115,18 +149,42 @@ function setupIpcHandlers(mainWindow: BrowserWindow): void {
     const sessionId = `temp-${Date.now()}`
     currentActiveSessionId = sessionId
     
+    // 确定工作目录
+    let workingDirectory = projectPath
+    
+    // 如果传入的是项目ID而不是路径，尝试从新建项目中获取目录
+    if (!path.isAbsolute(projectPath)) {
+      const projectDirectory = dataStore.getProjectDirectory(projectPath)
+      if (projectDirectory) {
+        workingDirectory = projectDirectory
+        logger.info(`Using directory for new project ${projectPath}: ${workingDirectory}`, 'main')
+      } else {
+        // 如果是存在的Claude项目，从项目列表中获取路径
+        const allProjects = dataStore.getAllProjects()
+        const project = allProjects.find(p => p.name === projectPath || p.path.includes(projectPath))
+        if (project) {
+          workingDirectory = project.path
+          logger.info(`Using directory for existing project ${projectPath}: ${workingDirectory}`, 'main')
+        } else {
+          throw new Error(`Cannot find working directory for project: ${projectPath}`)
+        }
+      }
+    }
+    
     // Create PtyManager and start claude
     const manager = getOrCreatePtyManager(sessionId, mainWindow)
-    await manager.start({ workingDirectory: projectPath, autoStartClaude: true })
+    await manager.start({ workingDirectory, autoStartClaude: true })
     
-    logger.info(`Started new Claude session in directory: ${projectPath}`, 'main')
-    return { id: sessionId, projectPath, name: name || 'New Claude Session' }
+    logger.info(`Started new Claude session in directory: ${workingDirectory}`, 'main')
+    return { id: sessionId, projectPath: workingDirectory, name: name || 'New Claude Session' }
   })
 
   ipcMain.handle('session:activate', async (_, sessionId: string) => {
+    logger.info(`Activating session: ${sessionId}`, 'main')
     currentActiveSessionId = sessionId
     // Ensure PtyManager exists for this session
-    getOrCreatePtyManager(sessionId, mainWindow)
+    const manager = getOrCreatePtyManager(sessionId, mainWindow)
+    logger.info(`PTY manager ready for session: ${sessionId}, isRunning: ${manager.isRunning()}`, 'main')
     return true
   })
 
@@ -140,7 +198,7 @@ function setupIpcHandlers(mainWindow: BrowserWindow): void {
     let sessionFilePath: string | undefined
     
     for (const project of allProjects) {
-      const session = project.sessions.find(s => s.id === sessionId && s.isClaudeSession)
+      const session = project.sessions.find(s => s.id === sessionId)
       if (session && session.filePath) {
         sessionFilePath = session.filePath
         break
@@ -175,8 +233,7 @@ function setupIpcHandlers(mainWindow: BrowserWindow): void {
     if (deletionResult.success) {
       logger.info(`Session deletion completed successfully: ${sessionId}`, 'main', { details: deletionResult.details })
     } else {
-      logger.warn(`Session deletion completed with warnings: ${sessionId}`, 'main', { 
-        error: deletionResult.error, 
+      logger.warn(`Session deletion completed with warnings: ${sessionId}`, 'main',new Error(deletionResult.error), { 
         details: deletionResult.details 
       })
     }
@@ -184,19 +241,7 @@ function setupIpcHandlers(mainWindow: BrowserWindow): void {
     return deletionResult
   })
 
-  // Project management
-  ipcMain.handle('project:select-directory', async () => {
-    const result = await dialog.showOpenDialog({
-      properties: ['openDirectory'],
-      title: 'Select Project Directory'
-    })
-    return result.canceled ? null : result.filePaths[0]
-  })
-
-
-  ipcMain.handle('project:get-all', () => {
-    return dataStore.getAllProjects()
-  })
+  // This duplicate section has been removed - handlers are defined earlier in the file
 
   // Settings management
   ipcMain.handle('settings:get', () => {

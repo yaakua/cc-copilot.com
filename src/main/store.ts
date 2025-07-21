@@ -37,8 +37,31 @@ export interface ClaudeSession {
 }
 
 export class DataStore {
+  private newProjectDirectories: Map<string, string> = new Map() // projectId -> directory path
+
   constructor() {
     // No local store needed - we only work with Claude sessions
+  }
+
+  // 新建项目的目录管理
+  createNewProject(projectId: string, workingDirectory: string): void {
+    logger.info(`Creating new project: ${projectId} with directory: ${workingDirectory}`, 'store')
+    this.newProjectDirectories.set(projectId, workingDirectory)
+  }
+
+  getProjectDirectory(projectId: string): string | null {
+    return this.newProjectDirectories.get(projectId) || null
+  }
+
+  removeProject(projectId: string): void {
+    this.newProjectDirectories.delete(projectId)
+  }
+
+  getAllNewProjects(): Array<{ id: string; directory: string }> {
+    return Array.from(this.newProjectDirectories.entries()).map(([id, directory]) => ({
+      id,
+      directory
+    }))
   }
 
   deleteSession(id: string): { success: boolean; error?: string; details?: string } {
@@ -111,16 +134,30 @@ export class DataStore {
       
       for (const projectDirName of projectDirs) {
         const projectDirPath = path.join(projectsDir, projectDirName)
+        logger.debug(`Processing project directory: ${projectDirPath}`, 'store')
         const sessions = this.getClaudeSessionsForProject(projectDirPath)
         
+        // 如果项目下没有会话文件，跳过该项目
+        if (sessions.length === 0) {
+          logger.info(`Skipping project ${projectDirName} - no session files found`, 'store')
+          continue
+        }
+        
         // 从第一个会话文件中获取项目路径
-        let projectPath = projectDirName
+        let projectPath = ""
         if (sessions.length > 0) {
-          const firstSessionPath = sessions[0].filePath
-          const cwd = this.extractCwdFromSession(firstSessionPath)
-          if (cwd) {
-            projectPath = cwd
+          // 遍历所有会话，直到找到一个有效的 cwd
+          for (const session of sessions) {
+            const cwd = this.extractCwdFromSession(session.filePath)
+            if (cwd) {
+              projectPath = cwd
+              break
+            }
           }
+        }
+        if(!projectPath) {
+          logger.warn(`No valid cwd found in sessions for project ${projectDirName}`, 'store')
+          continue
         }
         
         const project: ClaudeProject = {
@@ -194,6 +231,7 @@ export class DataStore {
           const event = JSON.parse(line)
           // Claude Code 会话文件中的 cwd 在 user 或 assistant 类型的消息中
           if (event.cwd) {
+            logger.debug("###cwd", event.cwd)
             return event.cwd
           }
         } catch (e) {
@@ -260,7 +298,7 @@ export class DataStore {
     return `Session ${sessionNumber || 1}`
   }
 
-  // 获取所有项目（只有Claude项目）
+  // 获取所有项目（Claude项目 + 新建项目）
   getAllProjects(): Project[] {
     const claudeProjects = this.getClaudeProjects()
     
@@ -285,6 +323,18 @@ export class DataStore {
         }))
       }
     })
+
+    // 添加新建项目（暂时没有会话的项目）
+    const newProjects = this.getAllNewProjects()
+    logger.info(`Found ${newProjects.length} new projects`, 'store')
+    
+    for (const newProject of newProjects) {
+      projects.push({
+        path: newProject.directory,
+        name: path.basename(newProject.directory),
+        sessions: [] // 新项目暂时没有会话
+      })
+    }
     
     return projects
   }

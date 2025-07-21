@@ -16,6 +16,7 @@ export interface LogEntry {
   component?: string
   error?: Error
   meta?: Record<string, any>
+  caller?: string
 }
 
 export class Logger {
@@ -99,6 +100,7 @@ export class Logger {
         level: LogLevel[entry.level],
         component: entry.component || 'main',
         message: entry.message,
+        caller: entry.caller,
         error: entry.error ? {
           name: entry.error.name,
           message: entry.error.message,
@@ -117,14 +119,37 @@ export class Logger {
     const timestamp = new Date(entry.timestamp).toLocaleTimeString()
     const level = LogLevel[entry.level].padEnd(5)
     const component = entry.component ? `[${entry.component}]` : '[main]'
+    const caller = entry.caller ? `(${entry.caller})` : ''
     
-    let message = `${timestamp} ${level} ${component} ${entry.message}`
+    let message = `${timestamp} ${level} ${component} ${caller} ${entry.message}`
     
     if (entry.meta && Object.keys(entry.meta).length > 0) {
       message += ` ${JSON.stringify(entry.meta)}`
     }
     
     return message
+  }
+
+  private getCallerInfo(): string {
+    const stack = new Error().stack
+    if (!stack) return 'unknown'
+    
+    const lines = stack.split('\n')
+    // Skip Error, getCallerInfo, log method, and the actual logger method call
+    for (let i = 4; i < lines.length; i++) {
+      const line = lines[i]
+      if (line && !line.includes('node_modules') && !line.includes('logger.ts')) {
+        // Extract file path and line number
+        const match = line.match(/\s+at\s+.*\s+\((.+):(\d+):(\d+)\)/) || line.match(/\s+at\s+(.+):(\d+):(\d+)/)
+        if (match) {
+          const filePath = match[1]
+          const lineNumber = match[2]
+          const fileName = filePath.split('/').pop() || filePath
+          return `${fileName}:${lineNumber}`
+        }
+      }
+    }
+    return 'unknown'
   }
 
   private log(level: LogLevel, message: string, component?: string, error?: Error, meta?: Record<string, any>): void {
@@ -138,7 +163,8 @@ export class Logger {
       message,
       component,
       error,
-      meta
+      meta,
+      caller: this.getCallerInfo()
     }
 
     // Write to file

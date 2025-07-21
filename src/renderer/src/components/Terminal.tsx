@@ -84,17 +84,28 @@ const Terminal: React.FC<TerminalProps> = ({ sessionId }) => {
     })
 
     // Listen for terminal output
+    let removeListener: (() => void) | undefined
     if (window.api?.onTerminalData) {
       const dataListener = (data: { sessionId: string; data: string } | string) => {
+        logger.info('Received terminal data', { data, sessionId, currentSessionId: sessionId })
+        console.log('Terminal component received data:', data, 'for session:', sessionId)
         if (xtermRef.current === terminal) {
           if (typeof data === 'string') {
             terminal.write(data)
           } else if (data.sessionId === sessionId) {
+            logger.info('Writing data to terminal', { dataLength: data.data.length })
             terminal.write(data.data)
+          } else {
+            logger.warn('Data sessionId mismatch', { 
+              receivedSessionId: data.sessionId, 
+              expectedSessionId: sessionId 
+            })
           }
         }
       }
-      window.api.onTerminalData(dataListener)
+      removeListener = window.api.onTerminalData(dataListener)
+      logger.info('Terminal data listener registered', { sessionId })
+      console.log('Terminal data listener registered for session:', sessionId)
     }
 
     // Handle window resize
@@ -125,6 +136,9 @@ const Terminal: React.FC<TerminalProps> = ({ sessionId }) => {
     // Cleanup
     return () => {
       window.removeEventListener('resize', handleResize)
+      if (removeListener) {
+        removeListener()
+      }
       terminal.dispose()
     }
   }, [sessionId])

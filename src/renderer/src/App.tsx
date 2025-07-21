@@ -11,6 +11,9 @@ interface Session {
   projectPath: string
   createdAt: string
   lastActiveAt: string
+  filePath: string
+  claudeProjectId?: string
+  claudeProjectDir?: string
 }
 
 interface Project {
@@ -36,6 +39,7 @@ const App: React.FC = () => {
       logger.info('Loading projects from main process')
       // Load projects directly from main process (includes Claude projects)
       const allProjects = await window.api.getAllProjects()
+      console.log('###allProjects', allProjects)  
       setProjects(allProjects)
       
       logger.info('Projects loaded successfully', { 
@@ -64,18 +68,18 @@ const App: React.FC = () => {
 
       logger.info('Selected project directory', { projectPath })
 
-      // Store project path in localStorage
-      const storedProjects = JSON.parse(localStorage.getItem('cc-copilot-projects') || '[]')
-      if (!storedProjects.includes(projectPath)) {
-        storedProjects.push(projectPath)
-        localStorage.setItem('cc-copilot-projects', JSON.stringify(storedProjects))
-      }
+      // Create new project using the API
+      const project = await window.api.createProject(projectPath)
+      logger.info('Project created successfully', { project })
 
       // Create a new session for this project
-      const session = await window.api.createSession(projectPath, 'New Session')
+      const session = await window.api.createSession(project.path, 'New Session')
       setActiveSessionId(session.id)
       
-      logger.info('Project and session created successfully', { sessionId: session.id })
+      logger.info('Project and session created successfully', { 
+        projectId: project.id, 
+        sessionId: session.id 
+      })
       
       // Reload projects
       await loadProjects()
@@ -98,7 +102,7 @@ const App: React.FC = () => {
 
   const handleActivateSession = async (sessionId: string) => {
     try {
-      // Find the session to check if it's a Claude session
+      // Find the session
       let session: Session | undefined
       for (const project of projects) {
         session = project.sessions.find(s => s.id === sessionId)
@@ -107,18 +111,17 @@ const App: React.FC = () => {
 
       logger.info('Activating session', { 
         sessionId, 
-        isClaudeSession: session?.isClaudeSession,
         projectPath: session?.projectPath
       })
 
-      if (session?.isClaudeSession && session.filePath) {
-        // For Claude sessions, use resume with the file path
+      if (session?.filePath) {
+        // For existing Claude sessions, use resume with the file path
         await window.api.resumeSession(sessionId, session.projectPath)
         logger.info('Claude session resumed', { sessionId, filePath: session.filePath })
       } else {
-        // For local sessions, use normal activate
+        // For new sessions, use normal activate
         await window.api.activateSession(sessionId)
-        logger.info('Local session activated', { sessionId })
+        logger.info('Session activated', { sessionId })
       }
       
       setActiveSessionId(sessionId)
@@ -142,8 +145,7 @@ const App: React.FC = () => {
           details: deletionResult.details 
         })
       } else {
-        logger.warn('Session deletion failed or incomplete', { 
-          sessionId,
+        logger.info('Session deletion failed or incomplete', { 
           error: deletionResult.error,
           details: deletionResult.details
         })
