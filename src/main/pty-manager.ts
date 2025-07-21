@@ -24,6 +24,8 @@ export class PtyManager {
   private claudeInstalled: boolean = false
   private shouldAutoStartClaude: boolean = false
   private shellReady: boolean = false
+  private readyPromise: Promise<void> | null = null
+  private readyResolve: (() => void) | null = null
 
   constructor(mainWindow: BrowserWindow, sessionId: string) {
     this.mainWindow = mainWindow
@@ -36,6 +38,12 @@ export class PtyManager {
       logger.info('Process already running', 'pty-manager')
       return
     }
+
+    // Create ready promise that will be resolved when shell is ready
+    this.readyPromise = new Promise<void>((resolve) => {
+      this.readyResolve = resolve
+    })
+    logger.info(`[${this.sessionId}] Created ready promise`, 'pty-manager')
 
     try {
       logger.info('Starting process...', 'pty-manager')
@@ -152,6 +160,12 @@ export class PtyManager {
           }
         })
       }
+      
+      // Wait for shell to be ready before returning from start()
+      logger.info(`[${this.sessionId}] Waiting for shell to be ready...`, 'pty-manager')
+      await this.waitUntilReady()
+      logger.info(`[${this.sessionId}] Shell is ready, start() completed`, 'pty-manager')
+      
     } catch (error) {
       logger.error('Failed to start', 'pty-manager', error as Error)
       throw error
@@ -203,6 +217,14 @@ export class PtyManager {
       logger.info(`Resized to ${cols}x${rows}`, 'pty-manager')
     } else {
       logger.warn('Cannot resize - process not running', 'pty-manager')
+    }
+  }
+
+  public sendCurrentState(): void {
+    if (this.ptyProcess && this.shellReady) {
+      // Send a newline to get current prompt
+      this.ptyProcess.write('\r')
+      logger.info(`Sent current state request for session ${this.sessionId}`, 'pty-manager')
     }
   }
 
@@ -357,6 +379,30 @@ export class PtyManager {
     return this.ptyProcess !== null
   }
 
+  public async waitUntilReady(timeoutMs: number = 10000): Promise<void> {
+    logger.info(`[${this.sessionId}] waitUntilReady called, readyPromise exists: ${!!this.readyPromise}, shellReady: ${this.shellReady}`, 'pty-manager')
+    
+    if (!this.readyPromise || this.shellReady) {
+      logger.info(`[${this.sessionId}] Shell already ready or no promise needed`, 'pty-manager')
+      return // Already ready or not started
+    }
+
+    const timeoutPromise = new Promise<void>((_, reject) => {
+      setTimeout(() => {
+        reject(new Error(`Shell ready timeout after ${timeoutMs}ms for session ${this.sessionId}`))
+      }, timeoutMs)
+    })
+
+    try {
+      logger.info(`[${this.sessionId}] Waiting for shell to be ready...`, 'pty-manager')
+      await Promise.race([this.readyPromise, timeoutPromise])
+      logger.info(`[${this.sessionId}] Shell is ready and session can proceed`, 'pty-manager')
+    } catch (error) {
+      logger.error(`[${this.sessionId}] Shell ready timeout`, 'pty-manager', error as Error)
+      throw error
+    }
+  }
+
   private sendClaudeNotFoundMessage(): void {
     setTimeout(() => {
       if (this.ptyProcess) {
@@ -438,7 +484,7 @@ export class PtyManager {
             }
             
             // For which/where check - any path output means claude is found
-            if (currentMethodIndex === 2 && output.trim() && !output.includes('not found')) {
+            if (currentMethodIndex === 1 && output.trim() && !output.includes('not found')) {
               hasValidOutput = true
             }
           })
@@ -454,7 +500,7 @@ export class PtyManager {
               .trim()
             
             const success = hasValidOutput || (code === 0 && cleanOutput && !cleanOutput.includes('not found'))
-            finishMethod(success, `code=${code}`)
+            finishMethod(success as boolean, `code=${code}`)
           })
           
           childProcess.on('error', (error) => {
@@ -494,6 +540,16 @@ export class PtyManager {
       if (!this.shellReady && this.isShellReady(data)) {
         this.shellReady = true
         logger.info(`[${this.sessionId}] Shell is ready`, 'pty-manager')
+        
+        // Resolve ready promise when shell is ready
+        if (this.readyResolve) {
+          logger.info(`[${this.sessionId}] Resolving ready promise - shell is ready`, 'pty-manager')
+          this.readyResolve()
+          this.readyResolve = null
+          this.readyPromise = null
+        } else {
+          logger.warn(`[${this.sessionId}] Shell ready but no readyResolve function`, 'pty-manager')
+        }
         
         // Start Claude if auto-start is enabled and Claude is installed
         if (this.shouldAutoStartClaude && this.claudeInstalled) {

@@ -109,6 +109,23 @@ function setupIpcHandlers(mainWindow: BrowserWindow): void {
     }
   })
 
+  ipcMain.handle('terminal:request-data', async (_, sessionId: string) => {
+    logger.info(`Requesting session data for: ${sessionId}`, 'main')
+    const manager = ptyManagers.get(sessionId)
+    if (manager && manager.isRunning()) {
+      // Send a status message to indicate the terminal is ready
+      mainWindow?.webContents.send('terminal:data', {
+        sessionId: sessionId,
+        data: '\x1b[90m[Terminal connected]\x1b[0m\r\n'
+      })
+      // Request current shell state
+      manager.sendCurrentState()
+      logger.info(`Sent reconnection message and requested current state for session: ${sessionId}`, 'main')
+    } else {
+      logger.warn(`No running PTY manager found for session: ${sessionId}`, 'main')
+    }
+  })
+
   // Project management
   ipcMain.handle('project:create', async (_, workingDirectory: string) => {
     const projectId = `new-${Date.now()}`
@@ -171,11 +188,11 @@ function setupIpcHandlers(mainWindow: BrowserWindow): void {
       }
     }
     
-    // Create PtyManager and start claude
+    // Create PtyManager and start claude - start() will wait for shell to be ready
     const manager = getOrCreatePtyManager(sessionId, mainWindow)
     await manager.start({ workingDirectory, autoStartClaude: true })
     
-    logger.info(`Started new Claude session in directory: ${workingDirectory}`, 'main')
+    logger.info(`Claude session ready in directory: ${workingDirectory}`, 'main')
     return { id: sessionId, projectPath: workingDirectory, name: name || 'New Claude Session' }
   })
 

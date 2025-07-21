@@ -26,6 +26,7 @@ const App: React.FC = () => {
   const [projects, setProjects] = useState<Project[]>([])
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
+  const [showSettings, setShowSettings] = useState(false)
 
   // Load initial data
   useEffect(() => {
@@ -53,10 +54,6 @@ const App: React.FC = () => {
     }
   }
 
-  const extractProjectName = (path: string): string => {
-    return path.split('/').pop() || path
-  }
-
   const handleCreateProject = async () => {
     try {
       logger.info('Creating new project')
@@ -74,15 +71,20 @@ const App: React.FC = () => {
 
       // Create a new session for this project
       const session = await window.api.createSession(project.path, 'New Session')
+      
+      // Explicitly activate the session to ensure proper IPC setup
+      await window.api.activateSession(session.id)
+      
       setActiveSessionId(session.id)
       
-      logger.info('Project and session created successfully', { 
+      logger.info('Project and session created and activated successfully', { 
         projectId: project.id, 
         sessionId: session.id 
       })
       
-      // Reload projects
-      await loadProjects()
+      // Don't reload projects immediately - let the terminal show first
+      // Will reload projects later when Claude creates actual session files
+      logger.info('New project session is active, terminal should be displayed', { sessionId: session.id })
     } catch (error) {
       logger.error('Failed to create project', error as Error)
     }
@@ -92,9 +94,16 @@ const App: React.FC = () => {
     try {
       logger.info('Creating new session', { projectPath })
       const session = await window.api.createSession(projectPath)
+      
+      // Explicitly activate the session to ensure proper IPC setup
+      await window.api.activateSession(session.id)
+      
       setActiveSessionId(session.id)
-      logger.info('Session created successfully', { sessionId: session.id })
-      await loadProjects()
+      logger.info('Session created and activated successfully', { sessionId: session.id })
+      
+      // Don't reload projects immediately for new sessions
+      // The session will eventually appear in Claude projects after Claude creates session files
+      logger.info('New session is active, terminal should be displayed', { sessionId: session.id })
     } catch (error) {
       logger.error('Failed to create session', error as Error)
     }
@@ -160,6 +169,10 @@ const App: React.FC = () => {
     }
   }
 
+  const handleOpenSettings = () => {
+    setShowSettings(true)
+  }
+
   if (loading) {
     return (
       <div className="flex h-screen bg-gray-900 text-white items-center justify-center">
@@ -182,13 +195,19 @@ const App: React.FC = () => {
               onCreateSession={handleCreateSession}
               onActivateSession={handleActivateSession}
               onDeleteSession={handleDeleteSession}
+              onOpenSettings={handleOpenSettings}
             />
           </div>
           
           {/* Right Content - Terminal */}
           <div className="flex-1 flex flex-col">
             {activeSessionId ? (
-              <Terminal sessionId={activeSessionId} />
+              <>
+                <div className="text-xs text-gray-500 p-2 border-b border-gray-700">
+                  Active Session: {activeSessionId}
+                </div>
+                <Terminal sessionId={activeSessionId} />
+              </>
             ) : (
               <div className="flex-1 flex items-center justify-center text-gray-400">
                 <div className="text-center">
@@ -202,6 +221,61 @@ const App: React.FC = () => {
         
         {/* Bottom Status Bar */}
         <StatusBar activeSessionId={activeSessionId} />
+        
+        {/* Settings Modal */}
+        {showSettings && (
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+            <div className="bg-gray-800 rounded-lg p-6 w-96 max-w-full max-h-full overflow-auto">
+              <div className="flex items-center justify-between mb-4">
+                <h2 className="text-xl font-semibold">Settings</h2>
+                <button
+                  onClick={() => setShowSettings(false)}
+                  className="text-gray-400 hover:text-white text-xl"
+                >
+                  ×
+                </button>
+              </div>
+              
+              <div className="space-y-4">
+                <div>
+                  <h3 className="text-sm font-medium mb-2">Claude CLI</h3>
+                  <p className="text-xs text-gray-400 mb-2">
+                    Claude CLI is required for terminal sessions. Install it using:
+                  </p>
+                  <code className="block bg-gray-900 p-2 rounded text-xs text-green-400">
+                    npm install -g @anthropic-ai/claude-code
+                  </code>
+                </div>
+                
+                <div>
+                  <h3 className="text-sm font-medium mb-2">Project Management</h3>
+                  <p className="text-xs text-gray-400">
+                    Projects are automatically discovered from your Claude projects directory.
+                    Create new sessions within projects to start coding.
+                  </p>
+                </div>
+                
+                <div>
+                  <h3 className="text-sm font-medium mb-2">Keyboard Shortcuts</h3>
+                  <div className="text-xs text-gray-400 space-y-1">
+                    <div>Ctrl/Cmd + C: Copy in terminal</div>
+                    <div>Ctrl/Cmd + V: Paste in terminal</div>
+                    <div>Ctrl/Cmd + L: Clear terminal</div>
+                  </div>
+                </div>
+              </div>
+              
+              <div className="mt-6 flex justify-end">
+                <button
+                  onClick={() => setShowSettings(false)}
+                  className="px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded transition-colors"
+                >
+                  Close
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </ErrorBoundary>
   )

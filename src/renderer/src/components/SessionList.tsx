@@ -23,6 +23,7 @@ interface SessionListProps {
   onCreateSession: (projectPath: string) => void
   onActivateSession: (sessionId: string) => void
   onDeleteSession: (sessionId: string) => void
+  onOpenSettings?: () => void
 }
 
 const SessionList: React.FC<SessionListProps> = ({
@@ -31,7 +32,8 @@ const SessionList: React.FC<SessionListProps> = ({
   onCreateProject,
   onCreateSession,
   onActivateSession,
-  onDeleteSession
+  onDeleteSession,
+  onOpenSettings
 }) => {
   const [expandedProjects, setExpandedProjects] = useState<Set<string>>(new Set())
 
@@ -55,13 +57,24 @@ const SessionList: React.FC<SessionListProps> = ({
       <div className="p-4 border-b border-gray-700">
         <div className="flex items-center justify-between">
           <h2 className="text-lg font-semibold">Projects</h2>
-          <button
-            onClick={onCreateProject}
-            className="px-3 py-1 bg-blue-600 hover:bg-blue-700 rounded text-sm transition-colors"
-            title="Add New Project"
-          >
-            +
-          </button>
+          <div className="flex gap-2">
+            <button
+              onClick={onCreateProject}
+              className="px-3 py-1 bg-blue-600 hover:bg-blue-700 rounded text-sm transition-colors"
+              title="Add New Project"
+            >
+              +
+            </button>
+            {onOpenSettings && (
+              <button
+                onClick={onOpenSettings}
+                className="px-3 py-1 bg-gray-600 hover:bg-gray-700 rounded text-sm transition-colors"
+                title="Settings"
+              >
+                ⚙️
+              </button>
+            )}
+          </div>
         </div>
       </div>
 

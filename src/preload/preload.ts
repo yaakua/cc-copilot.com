@@ -18,14 +18,25 @@ const api = {
   // Terminal APIs
   sendTerminalInput: (data: string, sessionId?: string) => ipcRenderer.invoke('terminal:input', data, sessionId),
   resizeTerminal: (cols: number, rows: number, sessionId?: string) => ipcRenderer.invoke('terminal:resize', cols, rows, sessionId),
+  requestSessionData: (sessionId: string) => ipcRenderer.invoke('terminal:request-data', sessionId),
   onTerminalData: (callback: (data: { sessionId: string; data: string } | string) => void) => {
     console.log('Registering terminal data listener in preload')
     const listener = (_event: any, data: any) => {
       console.log('Preload received terminal data:', data)
-      callback(data)
+      console.log('Preload calling callback with data')
+      try {
+        callback(data)
+        console.log('Preload callback executed successfully')
+      } catch (error) {
+        console.error('Preload callback execution failed:', error)
+      }
     }
     ipcRenderer.on('terminal:data', listener)
-    return () => ipcRenderer.removeListener('terminal:data', listener)
+    console.log('Preload terminal:data listener registered')
+    return () => {
+      console.log('Preload removing terminal:data listener')
+      ipcRenderer.removeListener('terminal:data', listener)
+    }
   },
   
   // Session APIs

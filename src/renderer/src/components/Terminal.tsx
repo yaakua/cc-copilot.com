@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react'
+import React, { useEffect, useRef } from 'react'
 import { Terminal as XTerm } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import '@xterm/xterm/css/xterm.css'
@@ -10,17 +10,22 @@ interface TerminalProps {
 
 const Terminal: React.FC<TerminalProps> = ({ sessionId }) => {
   const terminalRef = useRef<HTMLDivElement>(null)
-  const xtermRef = useRef<XTerm | null>(null)
-  const fitAddonRef = useRef<FitAddon | null>(null)
-  const [isConnected, setIsConnected] = useState(false)
+  const xtermInstanceRef = useRef<XTerm | null>(null)
 
   useEffect(() => {
     logger.setComponent('Terminal')
-    if (!terminalRef.current) return
+    logger.info('Terminal effect started', { sessionId })
 
-    // Clean up existing terminal
-    if (xtermRef.current) {
-      xtermRef.current.dispose()
+    // 确保 DOM 元素已经准备好
+    if (!terminalRef.current) {
+      logger.warn('Terminal container ref is not available yet.')
+      return
+    }
+
+    // 如果已经有终端实例，先销毁旧的，这通常在 sessionId 改变时发生
+    if (xtermInstanceRef.current) {
+      xtermInstanceRef.current.dispose()
+      xtermInstanceRef.current = null
     }
 
     // Initialize xterm.js
@@ -53,107 +58,98 @@ const Terminal: React.FC<TerminalProps> = ({ sessionId }) => {
       cursorBlink: true,
       cursorStyle: 'block',
       scrollback: 1000,
-      rows: 30,
-      cols: 80,
       allowProposedApi: true
     })
+    
+    // 保存实例到 Ref 中
+    xtermInstanceRef.current = terminal
 
     const fitAddon = new FitAddon()
     terminal.loadAddon(fitAddon)
+
+    // 将终端挂载到 DOM
     terminal.open(terminalRef.current)
+    logger.info('xterm opened in container', { sessionId })
 
-    // Store references
-    xtermRef.current = terminal
-    fitAddonRef.current = fitAddon
-
-    // Fit terminal to container
-    setTimeout(() => {
+    // 调整终端大小以适应容器
+    requestAnimationFrame(() => {
       try {
         fitAddon.fit()
-        setIsConnected(true)
-      } catch (error) {
-        logger.warn('Failed to fit terminal', error as Error)
+        logger.info('Terminal fitted to container', { sessionId })
+      } catch (e) {
+        logger.error('Failed to fit terminal', e as Error)
       }
-    }, 0)
+    })
 
-    // Handle terminal input
-    terminal.onData((data) => {
+    // 1. 监听用户输入并发送到后端
+    const onDataDisposable = terminal.onData((data) => {
       if (window.api?.sendTerminalInput) {
         window.api.sendTerminalInput(data, sessionId)
       }
     })
 
-    // Listen for terminal output
-    let removeListener: (() => void) | undefined
-    if (window.api?.onTerminalData) {
-      const dataListener = (data: { sessionId: string; data: string } | string) => {
-        logger.info('Received terminal data', { data, sessionId, currentSessionId: sessionId })
-        console.log('Terminal component received data:', data, 'for session:', sessionId)
-        if (xtermRef.current === terminal) {
-          if (typeof data === 'string') {
-            terminal.write(data)
-          } else if (data.sessionId === sessionId) {
-            logger.info('Writing data to terminal', { dataLength: data.data.length })
-            terminal.write(data.data)
-          } else {
-            logger.warn('Data sessionId mismatch', { 
-              receivedSessionId: data.sessionId, 
-              expectedSessionId: sessionId 
-            })
-          }
-        }
+    // 2. 监听从后端来的数据并写入终端
+    const removeDataListener = window.api?.onTerminalData((eventData: { sessionId: string; data: string }) => {
+      // 确保是当前会话的数据，并且终端实例仍然存在
+      if (xtermInstanceRef.current && eventData.sessionId === sessionId) {
+        xtermInstanceRef.current.write(eventData.data)
+      } else if (eventData.sessionId !== sessionId) {
+        logger.warn('Received data for another session', {
+            expected: sessionId,
+            received: eventData.sessionId,
+        })
       }
-      removeListener = window.api.onTerminalData(dataListener)
-      logger.info('Terminal data listener registered', { sessionId })
-      console.log('Terminal data listener registered for session:', sessionId)
-    }
+    })
 
-    // Handle window resize
+    // 3. 监听窗口大小变化
     const handleResize = () => {
       try {
         fitAddon.fit()
-        if (window.api?.resizeTerminal) {
+        if (window.api?.resizeTerminal && terminal) {
           window.api.resizeTerminal(terminal.cols, terminal.rows, sessionId)
         }
-      } catch (error) {
-        logger.warn('Failed to resize terminal', error as Error)
+      } catch (e) {
+        logger.warn('Failed to resize terminal on window resize', e as Error)
       }
     }
     window.addEventListener('resize', handleResize)
 
-    // Show connection message
+    // 显示欢迎信息
     terminal.write('\x1b[36mCC Copilot Terminal\x1b[0m\r\n')
     terminal.write(`\x1b[32m✓ Session: ${sessionId}\x1b[0m\r\n\r\n`)
 
-    // Focus terminal
+    // 聚焦并通知后端大小
     setTimeout(() => {
-      terminal.focus()
-      if (window.api?.resizeTerminal) {
-        window.api.resizeTerminal(terminal.cols, terminal.rows, sessionId)
-      }
+        terminal.focus()
+        if (window.api?.resizeTerminal) {
+            window.api.resizeTerminal(terminal.cols, terminal.rows, sessionId)
+        }
+        // 请求该会话可能存在的历史缓冲数据
+        if ((window.api as any)?.requestSessionData) {
+            (window.api as any).requestSessionData(sessionId)
+        }
     }, 100)
 
-    // Cleanup
+    // 清理函数
     return () => {
+      logger.info('Cleaning up terminal effect', { sessionId })
       window.removeEventListener('resize', handleResize)
-      if (removeListener) {
-        removeListener()
+      onDataDisposable.dispose()
+      if (removeDataListener) {
+        removeDataListener()
       }
-      terminal.dispose()
+      // 销毁终端实例
+      if (xtermInstanceRef.current) {
+        xtermInstanceRef.current.dispose()
+        xtermInstanceRef.current = null
+      }
     }
-  }, [sessionId])
+  }, [sessionId]) // 依赖项只有 sessionId，确保会话切换时能重建终端
 
-  if (!isConnected) {
-    return (
-      <div className="flex items-center justify-center h-full bg-black text-white">
-        <div>Connecting to terminal...</div>
-      </div>
-    )
-  }
-
+  // 始终渲染终端的容器，useEffect 会负责将 xterm 实例填入
   return (
     <div className="h-full bg-black">
-      <div ref={terminalRef} className="h-full w-full p-4" />
+      <div ref={terminalRef} className="h-full w-full" />
     </div>
   )
 }
