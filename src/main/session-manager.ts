@@ -130,9 +130,13 @@ export class SessionManager {
     }
 
     logger.info('Syncing with Claude directory...', 'SessionManager');
+    
+    // Clear existing data and reload from Claude directory
+    this.data.projects = [];
+    this.data.sessions = [];
+    
     let projectsSynced = 0;
     let sessionsSynced = 0;
-    let dataChanged = false;
 
     // Sync Projects and Sessions from ~/.claude/projects/
     if (fs.existsSync(projectsDir)) {
@@ -167,6 +171,7 @@ export class SessionManager {
                 projectPath = entryWithCwd.cwd;
                 projectName = path.basename(projectPath||"");
                 earliestTimestamp = entryWithCwd.timestamp;
+                logger.info(`Found project info in folder ${projectFolder}: ${projectName} at ${projectPath}`, 'SessionManager');
                 break;
               }
             } catch (error) {
@@ -174,23 +179,30 @@ export class SessionManager {
             }
           }
           
-          // Create or find project if we found project info
+          // Create project if we found project info
           if (projectPath && projectName) {
+            // Since we cleared data, check if project already exists (in case of duplicate cwd paths)
             project = this.data.projects.find(p => p.path === projectPath);
             if (!project) {
+              let createdAt: string;
+              try {
+                createdAt = earliestTimestamp ? new Date(earliestTimestamp).toISOString() : new Date().toISOString();
+              } catch (error) {
+                createdAt = new Date().toISOString();
+              }
+              
               project = {
                 id: uuidv4(),
                 name: projectName,
                 path: projectPath,
-                createdAt: new Date(earliestTimestamp || Date.now()).toISOString(),
+                createdAt: createdAt,
               };
               this.data.projects.push(project);
               projectsSynced++;
-              dataChanged = true;
-            } else if (project.name !== projectName) {
-              project.name = projectName;
-              dataChanged = true;
+              logger.info(`Created project: ${projectName} (${project.id}) from ${projectPath}`, 'SessionManager');
             }
+          } else {
+            logger.warn(`No project info found in folder: ${projectFolder}`, 'SessionManager');
           }
           
           // Second pass: process each session file for sessions
@@ -216,16 +228,50 @@ export class SessionManager {
                 
                 let sessionName = `Session ${claudeSessionId}`;
                 if (firstUserMessage && firstUserMessage.message && firstUserMessage.message.content) {
-                  sessionName = firstUserMessage.message.content.substring(0, 50).replace(/\n/g, ' ').trim();
+                  let content: string;
+                  if (typeof firstUserMessage.message.content === 'string') {
+                    content = firstUserMessage.message.content;
+                  } else if (Array.isArray(firstUserMessage.message.content)) {
+                    // Handle content array format
+                    const textContent = firstUserMessage.message.content.find((item: any) => item.type === 'text');
+                    content = textContent ? textContent.text : String(firstUserMessage.message.content);
+                  } else {
+                    content = String(firstUserMessage.message.content);
+                  }
+                  
+                  // Clean up content and create session name
+                  content = content.replace(/cd\s+"[^"]*"|cd\s+\S+/g, '').trim(); // Remove cd commands
+                  content = content.replace(/\n|\r/g, ' ').trim(); // Replace newlines with spaces
+                  if (content.length > 3) {
+                    sessionName = content.substring(0, 50).trim();
+                  }
                 }
-                const lastActiveAt = lastMessage ? new Date(lastMessage.timestamp).toISOString() : new Date(firstEntry.timestamp).toISOString();
                 
+                logger.info(`Session name for ${claudeSessionId}: "${sessionName}"`, 'SessionManager');
+                
+                let lastActiveAt: string;
+                try {
+                  lastActiveAt = lastMessage && lastMessage.timestamp 
+                    ? new Date(lastMessage.timestamp).toISOString() 
+                    : new Date(firstEntry.timestamp).toISOString();
+                } catch (error) {
+                  lastActiveAt = new Date().toISOString();
+                }
+                
+                // Since we cleared data, create all sessions as new (but check for duplicates by claudeSessionId)
                 if (!session) {
+                  let createdAt: string;
+                  try {
+                    createdAt = firstEntry.timestamp ? new Date(firstEntry.timestamp).toISOString() : new Date().toISOString();
+                  } catch (error) {
+                    createdAt = new Date().toISOString();
+                  }
+                  
                   session = {
                     id: uuidv4(),
                     name: sessionName,
                     projectId: project.id,
-                    createdAt: new Date(firstEntry.timestamp).toISOString(),
+                    createdAt: createdAt,
                     lastActiveAt: lastActiveAt,
                     claudeSessionId: claudeSessionId,
                     isTemporary: false,
@@ -233,21 +279,6 @@ export class SessionManager {
                   };
                   this.data.sessions.push(session);
                   sessionsSynced++;
-                  dataChanged = true;
-                } else {
-                  let sessionUpdated = false;
-                  if (session.name !== sessionName) {
-                    session.name = sessionName;
-                    sessionUpdated = true;
-                  }
-                  if (session.lastActiveAt !== lastActiveAt) {
-                    session.lastActiveAt = lastActiveAt;
-                    sessionUpdated = true;
-                  }
-                  if (sessionUpdated) {
-                    this.updateSession(session.id, session);
-                    dataChanged = true;
-                  }
                 }
               }
             } catch (error) {
@@ -260,12 +291,8 @@ export class SessionManager {
       }
     }
 
-    if (dataChanged) {
-      this.save(this.data);
-      logger.info(`Sync complete. Synced ${projectsSynced} projects and ${sessionsSynced} sessions.`, 'SessionManager');
-    } else {
-      logger.info('Sync complete. No changes detected.', 'SessionManager');
-    }
+    this.save(this.data);
+    logger.info(`Sync complete. Loaded ${projectsSynced} projects and ${sessionsSynced} sessions from Claude directory.`, 'SessionManager');
   }
 
   public deleteSession(sessionId: string): void {
