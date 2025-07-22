@@ -15,7 +15,6 @@ export class ProxyServer {
   private proxyAgent: HttpsProxyAgent<any> | HttpProxyAgent<any> | null = null
   private currentProvider: ServiceProvider | null = null
   private currentAccount: ClaudeAccount | ThirdPartyAccount | null = null
-  private lastProxyUrl: string | null = null
 
   constructor(settingsManager: SettingsManager) {
     this.app = express()
@@ -39,6 +38,7 @@ export class ProxyServer {
     }
   }
 
+
   private getAccountDisplayName(): string {
     if (!this.currentAccount) return 'None'
     if (this.currentProvider?.type === 'claude_official') {
@@ -48,57 +48,72 @@ export class ProxyServer {
     }
   }
 
-  private processRequestHeaders(proxyReq: http.ClientRequest) {
-    // 1. 安全地获取所有请求头用于日志记录和处理
-    // CORRECTED: 使用 proxyReq.headers 属性，它是一个对象。
-    // 使用扩展运算符创建一个浅拷贝，这是一个好习惯，可以避免意外修改原始对象。
-    const headers = { ...proxyReq.headers };
-    logger.info(`[REQUEST HEADERS]\n${JSON.stringify(headers, null, 2)}`, 'proxy');
-    
-    // 2. 拦截并保存 Authorization
-    if (this.currentProvider?.type === 'claude_official' && this.currentAccount) {
-      const currentClaudeAccount = this.currentAccount as ClaudeAccount;
-      logger.info(`正在为账号 ${currentClaudeAccount.emailAddress} 检查authorization头`, 'proxy');
-
-      const authHeaderKey = Object.keys(headers).find(key => key.toLowerCase() === 'authorization');
-      if (authHeaderKey && headers[authHeaderKey]) {
-        const authorization = headers[authHeaderKey] as string;
-        logger.info(`找到authorization头: ${authHeaderKey} = ${authorization.substring(0, 20)}...`, 'proxy');
-
-        if (!currentClaudeAccount.authorization || currentClaudeAccount.authorization !== authorization) {
-          logger.info(`检测到并准备保存Claude官方账号的authorization值: ${currentClaudeAccount.emailAddress}`, 'proxy');
-          this.settingsManager.updateClaudeAccountAuthorization(currentClaudeAccount.emailAddress, authorization);
-          currentClaudeAccount.authorization = authorization;
-        } else {
-          logger.info('Authorization值未发生变化，跳过保存', 'proxy');
-        }
-      } else {
-        logger.info(`未在请求头中找到authorization`, 'proxy');
-      }
-    }
-
-    // 3. 修改请求头
+  private getProxyHeaders(): Record<string, string> | undefined {
     if (!this.currentProvider || !this.currentAccount) {
-      logger.warn('没有活动的服务提供方或账号，跳过请求头修改', 'proxy');
-      return;
+      logger.info('未选择账号信息，无法获取代理头部', 'proxy')
+      return undefined
     }
     
     if (this.currentProvider.type === 'claude_official') {
       const claudeAccount = this.currentAccount as ClaudeAccount;
       if (claudeAccount.authorization) {
-        proxyReq.setHeader('authorization', claudeAccount.authorization);
-        logger.debug(`使用保存的authorization认证Claude账号: ${claudeAccount.emailAddress}`, 'proxy');
-      } else {
-        proxyReq.setHeader('x-claude-account-uuid', claudeAccount.accountUuid);
-        proxyReq.setHeader('x-claude-organization-uuid', claudeAccount.organizationUuid);
-        logger.warn(`Claude账号 ${claudeAccount.emailAddress} 缺少authorization值，使用UUID方式`, 'proxy');
-      }
+        logger.info(`当前选择的claude 账号 ${claudeAccount.emailAddress} authorization值:${claudeAccount.authorization.slice(-20)}...`)
+        return {
+          'authorization': claudeAccount.authorization
+        }
+      } 
+      logger.info('当前选择的claude 账号无法获取到authorization', 'proxy')
     } else {
       const thirdPartyAccount = this.currentAccount as ThirdPartyAccount;
-      proxyReq.setHeader('authorization', `Bearer ${thirdPartyAccount.apiKey}`);
-      logger.debug(`设置第三方账号API Key认证: ${thirdPartyAccount.name}`, 'proxy');
+      return {
+        'authorization': `Bearer ${thirdPartyAccount.apiKey}`
+      }
     }
   }
+
+  private detectAndSaveAuthorization(req: http.IncomingMessage) {
+    // 仅检测并保存Claude官方账号的authorization
+    if (this.currentProvider?.type !== 'claude_official' || !this.currentAccount || 
+      (this.currentProvider.type === 'claude_official' && (this.currentAccount as ClaudeAccount).authorization)
+    ) {
+
+      return;
+    }
+
+    const currentClaudeAccount = this.currentAccount as ClaudeAccount;
+    logger.info(`正在为账号 ${currentClaudeAccount.emailAddress} 检查authorization头`, 'proxy');
+
+    const headers = { ...req.headers };
+    const authHeaderKey = Object.keys(headers).find(key => key.toLowerCase() === 'authorization');
+    
+    if (authHeaderKey && headers[authHeaderKey]) {
+      const authorization = headers[authHeaderKey] as string;
+      logger.info(`找到authorization头: ${authHeaderKey} = ${authorization.substring(0, 20)}...`, 'proxy');
+
+      // 检查当前账号的authorization是否需要更新
+      if (!currentClaudeAccount.authorization || currentClaudeAccount.authorization !== authorization) {
+        
+        // 检查这个authorization是否已被其他Claude账号使用
+        const existingAccount = this.settingsManager.findClaudeAccountByAuthorization(authorization);
+        if (existingAccount && existingAccount.emailAddress !== currentClaudeAccount.emailAddress) {
+          logger.warn(`Authorization值已被其他账号 ${existingAccount.emailAddress} 使用，无法分配给当前账号 ${currentClaudeAccount.emailAddress}`, 'proxy');
+          logger.warn('建议检查账号配置或切换到正确的账号', 'proxy');
+          return;
+        }
+
+        logger.info(`检测到并准备保存Claude官方账号的authorization值: ${currentClaudeAccount.emailAddress}`, 'proxy');
+        this.settingsManager.updateClaudeAccountAuthorization(currentClaudeAccount.emailAddress, authorization);
+        currentClaudeAccount.authorization = authorization;
+        // 更新代理配置以使用新的authorization
+        this.updateProxySettings();
+      } else {
+        logger.info('Authorization值未发生变化，跳过保存', 'proxy');
+      }
+    } else {
+      logger.info(`未在请求头中找到authorization`, 'proxy');
+    }
+  }
+
 
 
   private setupEventListeners() {
@@ -129,8 +144,6 @@ export class ProxyServer {
   private setupRoutes() {
     this.initializeProxyAgent()
     this.createProxyMiddleware()
-    const proxyConfig = this.settingsManager.getProxyConfig()
-    this.lastProxyUrl = this.shouldUseProxy() ? proxyConfig.url : null
   }
 
   private createProxyMiddleware() {
@@ -152,11 +165,12 @@ export class ProxyServer {
           this.currentTarget = 'https://api.anthropic.com'
         }
         logger.info(`[Router] 动态路由到: ${this.currentTarget} for ${req.method} ${req.url}`, 'proxy');
-        return this.currentTarget;
+        return this.currentTarget+req.url;
       },
       agent: this.shouldUseProxy() && this.proxyAgent ? this.proxyAgent : undefined,
+      headers: this.getProxyHeaders(),
       on: {
-        proxyReq: (proxyReq, req, res) => {
+        proxyReq: (_proxyReq:http.ClientRequest, req:http.IncomingMessage) => {
           const usingUpstreamProxy = this.shouldUseProxy() && this.proxyAgent
           const accountInfo = this.getAccountDisplayName()
           const providerName = this.currentProvider?.name || 'Unknown'
@@ -166,13 +180,15 @@ export class ProxyServer {
           logger.info(`  - 服务提供方: ${providerName}`, 'proxy')
           logger.info(`  - 账号: ${accountInfo}`, 'proxy')
           logger.info(`  - 目标: ${this.currentTarget}`, 'proxy')
-          
-          this.processRequestHeaders(proxyReq);
+          const headers = { ...req.headers };
+          logger.info(`  - 请求头authorization: ${headers["authorization"]}`, 'proxy')
+          // 仅用于authorization检测和保存，不修改头部
+          this.detectAndSaveAuthorization(req);
         },
-        proxyRes: (proxyRes, req, res) => {
+        proxyRes: (proxyRes, req, _res) => {
           logger.info(`[代理响应] ${proxyRes.statusCode} ${req.method} ${req.url}`, 'proxy')
         },
-        error: (err, req, res) => {
+        error: (err, req, _res) => {
           logger.error(`[代理错误] ${req.method} ${req.url}`, 'proxy', err as Error)
           logger.error(`  - 错误消息: ${err.message}`, 'proxy')
           logger.error(`  - 错误代码: ${(err as any).code || 'unknown'}`, 'proxy')
@@ -240,7 +256,6 @@ export class ProxyServer {
       ;(this.app as any)._router = null
       this.initializeProxyAgent()
       this.createProxyMiddleware()
-      this.lastProxyUrl = currentProxyUrl
       logger.info('代理设置更新成功（已重建中间件）' + (currentProxyUrl || '直连'), 'proxy')
     } catch (error) {
       logger.error('代理设置更新失败', 'proxy', error as Error)

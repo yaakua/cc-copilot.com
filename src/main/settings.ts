@@ -370,6 +370,17 @@ export class SettingsManager extends EventEmitter {
     }
   }
 
+  // 根据authorization值查找Claude账号
+  findClaudeAccountByAuthorization(authorization: string): ClaudeAccount | null {
+    const providers = this.getServiceProviders()
+    const claudeProvider = providers.find(p => p.type === 'claude_official')
+    
+    if (!claudeProvider) return null
+    
+    const accounts = claudeProvider.accounts as ClaudeAccount[]
+    return accounts.find(acc => acc.authorization === authorization) || null
+  }
+
   // 获取项目过滤配置
   getProjectFilterConfig() {
     return this.store.get('projectFilter', defaultSettings.projectFilter)
