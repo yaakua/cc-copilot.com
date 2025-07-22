@@ -78,6 +78,25 @@ const StatusBar: React.FC<StatusBarProps> = ({ activeSessionId }) => {
 
   const handleProviderChange = async (providerId: string) => {
     try {
+      // 检查是否是Claude官方账号，并且是否需要检查authorization
+      const targetProvider = serviceProviders.find(p => p.id === providerId)
+      if (targetProvider?.type === 'claude_official') {
+        // 检查当前要切换到的提供方是否有账号
+        if (targetProvider.accounts && targetProvider.accounts.length > 0) {
+          const firstAccount = targetProvider.accounts[0]
+          
+          // 检查第一个账号是否有authorization，如果没有则提醒用户
+          if (!firstAccount.authorization) {
+            // 弹窗提醒用户，但不阻止切换
+            window.alert(
+              `提醒：Claude官方账号 "${firstAccount.emailAddress}" 尚未激活。\n\n` +
+              `请先选择任意一个历史会话来激活此账号，否则可能无法正常使用。`
+            )
+            logger.warn(`切换到未激活的Claude官方账号: ${firstAccount.emailAddress}`)
+          }
+        }
+      }
+      
       await window.api.setActiveProvider(providerId)
       
       // 重新加载数据
@@ -98,6 +117,24 @@ const StatusBar: React.FC<StatusBarProps> = ({ activeSessionId }) => {
 
   const handleAccountChange = async (providerId: string, accountId: string) => {
     try {
+      // 检查是否是Claude官方账号，并且是否需要检查authorization
+      const targetProvider = serviceProviders.find(p => p.id === providerId)
+      if (targetProvider?.type === 'claude_official') {
+        // 找到要切换的具体账号
+        const targetAccount = targetProvider.accounts?.find(account => 
+          targetProvider.type === 'claude_official' ? account.emailAddress === accountId : account.id === accountId
+        )
+        
+        if (targetAccount && !targetAccount.authorization) {
+          // 弹窗提醒用户，但不阻止切换
+          window.alert(
+            `提醒：Claude官方账号 "${targetAccount.emailAddress}" 尚未激活。\n\n` +
+            `请先选择任意一个历史会话来激活此账号，否则可能无法正常使用。`
+          )
+          logger.warn(`切换到未激活的Claude官方账号: ${accountId}`)
+        }
+      }
+      
       await window.api.setActiveAccount(providerId, accountId)
       
       // 重新加载活动账号信息
@@ -228,8 +265,25 @@ const StatusBar: React.FC<StatusBarProps> = ({ activeSessionId }) => {
                             }
                           }}
                         >
-                          <span>{getAccountDisplayName(account, provider.type)}</span>
-                          {isActive && <span style={{ fontSize: '10px' }}>✓</span>}
+                          <div className="flex items-center justify-between w-full">
+                            <span>{getAccountDisplayName(account, provider.type)}</span>
+                            <div className="flex items-center gap-1">
+                              {/* 显示账号激活状态（仅对Claude官方账号） */}
+                              {provider.type === 'claude_official' && (
+                                <span 
+                                  style={{ 
+                                    fontSize: '10px',
+                                    color: account.authorization ? 'var(--status-green)' : 'var(--status-orange)',
+                                    opacity: 0.8
+                                  }}
+                                  title={account.authorization ? '已激活' : '未激活 - 需要先使用一个历史会话来激活'}
+                                >
+                                  {account.authorization ? '●' : '○'}
+                                </span>
+                              )}
+                              {isActive && <span style={{ fontSize: '10px' }}>✓</span>}
+                            </div>
+                          </div>
                         </div>
                       )
                     })

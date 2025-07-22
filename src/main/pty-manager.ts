@@ -73,13 +73,17 @@ export class PtyManager {
         ANTHROPIC_BASE_URL: env.ANTHROPIC_BASE_URL || 'http://127.0.0.1:31299',
         CLAUDE_PROJECT_DIR: workingDirectory,
       }
+      
+      // 记录关键环境变量以便调试
+      logger.info(`环境变量设置: ANTHROPIC_BASE_URL=${mergedEnv.ANTHROPIC_BASE_URL}, CLAUDE_PROJECT_DIR=${mergedEnv.CLAUDE_PROJECT_DIR}`, 'pty-manager')
+      
       // ==========================================================
       // ===== 核心改动：直接启动 claude，而不是 shell =========
       // ==========================================================
       const command = 'claude' // 直接是要执行的命令
       const args: string[] = options.args || [] // claude 的参数，例如 [--resume, sessionId] 等，如果需要的话
 
-      logger.info(`创建专用 PTY 进程: command=${command}, args=${args.join(' ')}, cwd=${workingDirectory}`, 'pty-manager')
+      logger.info(`创建专用 PTY 进程: command=${command}, args=[${args.join(', ')}], cwd=${workingDirectory}`, 'pty-manager')
       
       this.ptyProcess = pty.spawn(command, args, {
         name: 'xterm-color',
@@ -176,7 +180,17 @@ export class PtyManager {
     if (!this.ptyProcess) return
     logger.info('为专用 Claude PTY 进程设置事件处理器', 'pty-manager')
     
+    let outputBuffer = '' // 用于收集输出以便错误分析
+    
     this.ptyProcess.onData((data: string) => {
+      // 收集输出用于错误分析
+      outputBuffer += data
+      
+      // 检查是否包含错误信息
+      if (data.includes('Error') || data.includes('error') || data.includes('ERROR')) {
+        logger.warn(`[${this.sessionId}] Claude输出包含错误信息: "${data.replace(/\r\n/g, ' ')}"`, 'pty-manager')
+      }
+      
       // Check if a new claude session was created
       const match = data.match(/Session created: (\S+\.jsonl)/);
       if (match && match[1]) {
@@ -198,7 +212,39 @@ export class PtyManager {
 
     this.ptyProcess.onExit((exitInfo) => {
       const { exitCode, signal } = exitInfo
-      logger.error(`Claude PTY 进程退出，代码: ${exitCode}，信号: ${signal}，会话 ${this.sessionId}`, 'pty-manager')
+      
+      // 记录详细的退出信息
+      if (exitCode !== 0) {
+        logger.error(`Claude PTY 进程异常退出，代码: ${exitCode}，信号: ${signal}，会话 ${this.sessionId}`, 'pty-manager')
+        
+        // 如果有输出缓冲区内容，记录最后的输出
+        if (outputBuffer.trim()) {
+          const lastOutput = outputBuffer.slice(-500) // 记录最后500个字符
+          logger.error(`最后的输出内容: ${lastOutput.replace(/\r\n/g, ' ')}`, 'pty-manager')
+        }
+        
+        // 根据退出代码提供更详细的错误信息
+        let errorReason = '未知错误'
+        switch (exitCode) {
+          case 1:
+            errorReason = 'Claude CLI执行失败或命令错误'
+            break
+          case 126:
+            errorReason = 'Claude CLI命令无法执行'
+            break
+          case 127:
+            errorReason = 'Claude CLI命令未找到'
+            break
+          case 130:
+            errorReason = 'Claude CLI被Ctrl+C中断'
+            break
+          default:
+            errorReason = `Claude CLI退出代码: ${exitCode}`
+        }
+        logger.error(`退出原因分析: ${errorReason}`, 'pty-manager')
+      } else {
+        logger.info(`Claude PTY 进程正常退出，代码: ${exitCode}，信号: ${signal}，会话 ${this.sessionId}`, 'pty-manager')
+      }
       
       this.ptyProcess = null
       

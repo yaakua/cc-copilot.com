@@ -193,24 +193,91 @@ async function detectClaudeAuthorization(accountEmail: string): Promise<{ succes
       needRestoreAccount = true
     }
     
-    // 创建临时目录和临时会话用于检测
-    const tempDir = fs.mkdtempSync(os.tmpdir() + '/claude-auth-detect-')
-    const tempSessionId = `detect-${Date.now()}`
+    // 选择一个已有的非临时会话作为检测的工作目录
+    const allSessions = sessionManager.getAllSessions()
+    const nonTempSession = allSessions.find(s => !s.isTemporary)
     
-    logger.info(`创建临时检测会话: ${tempSessionId}`, 'main')
-    logger.info(`使用临时目录: ${tempDir}`, 'main')
+    let detectDir: string
+    let useExistingSession = false
+    let existingSessionId: string | null = null
+    let originalActiveSessionId = currentActiveSessionId
     
-    // 创建临时PTY管理器
-    const detectionPtyManager = new PtyManager(BrowserWindow.getFocusedWindow()!, tempSessionId)
+    if (nonTempSession) {
+      // 使用已有会话的项目目录
+      const project = sessionManager.getProjectById(nonTempSession.projectId)
+      if (project && fs.existsSync(project.path)) {
+        detectDir = project.path
+        useExistingSession = true
+        existingSessionId = nonTempSession.id
+        logger.info(`使用已有会话 ${nonTempSession.id} 的工作目录进行检测: ${detectDir}`, 'main')
+        
+        // 临时激活这个会话进行检测 - 直接调用激活逻辑
+        logger.info(`临时激活会话 ${nonTempSession.id} 进行检测`, 'main')
+        
+        // 使用与 session:activate 完全相同的逻辑
+        currentActiveSessionId = nonTempSession.id
+        const ptyManager = getOrCreatePtyManager(nonTempSession.id, BrowserWindow.getFocusedWindow()!)
+        if (!ptyManager.isRunning()) {
+          const claudeArgs = []
+          if (nonTempSession.claudeSessionId) {
+            claudeArgs.push('--resume', nonTempSession.claudeSessionId)
+            logger.info(`使用resume参数恢复Claude会话: ${nonTempSession.claudeSessionId}`, 'main')
+          }
+
+          await ptyManager.start({
+            workingDirectory: detectDir,
+            args: claudeArgs,
+          })
+          logger.info(`会话已激活进行检测: ${nonTempSession.id}`, 'main')
+        } else {
+          logger.info(`使用已运行的会话进行检测: ${nonTempSession.id}`, 'main')
+        }
+      } else {
+        // 备用方案：使用用户主目录
+        const homeDir = os.homedir()
+        detectDir = path.join(homeDir, '.claude-auth-detect')
+        if (!fs.existsSync(detectDir)) {
+          fs.mkdirSync(detectDir, { recursive: true })
+        }
+        logger.info(`未找到有效的项目目录，使用备用检测目录: ${detectDir}`, 'main')
+      }
+    } else {
+      // 备用方案：没有非临时会话时使用专用检测目录
+      const homeDir = os.homedir()
+      detectDir = path.join(homeDir, '.claude-auth-detect')
+      if (!fs.existsSync(detectDir)) {
+        fs.mkdirSync(detectDir, { recursive: true })
+      }
+      logger.info(`未找到非临时会话，使用专用检测目录: ${detectDir}`, 'main')
+    }
+    
+    const tempSessionId = useExistingSession ? existingSessionId! : `detect-${Date.now()}`
+    
+    logger.info(`检测会话ID: ${tempSessionId}`, 'main')
+    logger.info(`使用检测目录: ${detectDir}`, 'main')
+    
+    // 如果没有使用已有会话，创建临时PTY管理器并启动
+    if (!useExistingSession) {
+      const detectionPtyManager = new PtyManager(BrowserWindow.getFocusedWindow()!, tempSessionId)
+      logger.info(`创建新的临时PTY管理器: ${tempSessionId}`, 'main')
+      
+      try {
+        // 启动Claude CLI进行检测
+        await detectionPtyManager.start({
+          workingDirectory: detectDir,
+          args: [],
+        })
+        
+        logger.info('临时Claude CLI检测会话已启动，开始监控authorization值', 'main')
+      } catch (error) {
+        logger.error('启动临时检测会话失败', 'main', error as Error)
+        throw error
+      }
+    } else {
+      logger.info('已有会话已激活，开始监控authorization值', 'main')
+    }
     
     try {
-      // 启动Claude CLI进行检测
-      await detectionPtyManager.start({
-        workingDirectory: tempDir,
-        args: ['-p', 'test'] // 简单的测试命令
-      })
-      
-      logger.info('Claude CLI检测会话已启动，开始监控authorization值', 'main')
       
       return new Promise((resolve) => {
         let checkCount = 0
@@ -231,13 +298,23 @@ async function detectClaudeAuthorization(accountEmail: string): Promise<{ succes
             
             logger.info(`成功检测到Claude账号 ${targetAccount.emailAddress} 的authorization值`, 'main')
             
-            // 停止检测会话并清理
-            detectionPtyManager.stop().then(async () => {
-              try {
-                fs.rmSync(tempDir, { recursive: true, force: true })
-                logger.debug('临时目录清理成功', 'main')
-              } catch (error) {
-                logger.warn('清理临时目录失败', 'main', error as Error)
+            // 停止检测会话（如果是临时创建的）
+            let stopPromise = Promise.resolve()
+            if (!useExistingSession) {
+              // 获取临时PTY管理器并停止
+              const tempPtyManager = ptyManagers.get(tempSessionId)
+              if (tempPtyManager) {
+                stopPromise = tempPtyManager.stop().then(() => {
+                  ptyManagers.delete(tempSessionId)
+                })
+              }
+            }
+            stopPromise.then(async () => {
+              
+              // 恢复原来的活动会话
+              if (originalActiveSessionId && originalActiveSessionId !== tempSessionId) {
+                currentActiveSessionId = originalActiveSessionId
+                logger.info(`恢复原来的活动会话: ${originalActiveSessionId}`, 'main')
               }
               
               // 恢复原来的活动账号
@@ -257,13 +334,23 @@ async function detectClaudeAuthorization(accountEmail: string): Promise<{ succes
             
             logger.warn(`检测超时（${maxChecks * 2}秒），未获取到authorization值`, 'main')
             
-            // 停止检测会话并清理
-            detectionPtyManager.stop().then(async () => {
-              try {
-                fs.rmSync(tempDir, { recursive: true, force: true })
-                logger.debug('临时目录清理成功', 'main')
-              } catch (error) {
-                logger.warn('清理临时目录失败', 'main', error as Error)
+            // 停止检测会话（如果是临时创建的）
+            let stopPromise = Promise.resolve()
+            if (!useExistingSession) {
+              // 获取临时PTY管理器并停止
+              const tempPtyManager = ptyManagers.get(tempSessionId)
+              if (tempPtyManager) {
+                stopPromise = tempPtyManager.stop().then(() => {
+                  ptyManagers.delete(tempSessionId)
+                })
+              }
+            }
+            stopPromise.then(async () => {
+              
+              // 恢复原来的活动会话
+              if (originalActiveSessionId && originalActiveSessionId !== tempSessionId) {
+                currentActiveSessionId = originalActiveSessionId
+                logger.info(`恢复原来的活动会话: ${originalActiveSessionId}`, 'main')
               }
               
               // 恢复原来的活动账号
@@ -291,12 +378,19 @@ async function detectClaudeAuthorization(accountEmail: string): Promise<{ succes
     } catch (error) {
       logger.error('启动检测会话失败', 'main', error as Error)
       
-      // 清理临时目录
-      try {
-        fs.rmSync(tempDir, { recursive: true, force: true })
-        logger.debug('临时目录清理成功', 'main')
-      } catch (cleanupError) {
-        logger.warn('清理临时目录失败', 'main', cleanupError as Error)
+      // 清理临时PTY管理器（如果存在）
+      if (!useExistingSession) {
+        const tempPtyManager = ptyManagers.get(tempSessionId)
+        if (tempPtyManager) {
+          await tempPtyManager.stop()
+          ptyManagers.delete(tempSessionId)
+        }
+      }
+      
+      // 恢复原来的活动会话
+      if (originalActiveSessionId && originalActiveSessionId !== tempSessionId) {
+        currentActiveSessionId = originalActiveSessionId
+        logger.info(`恢复原来的活动会话: ${originalActiveSessionId}`, 'main')
       }
       
       // 恢复原来的活动账号
