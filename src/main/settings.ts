@@ -213,7 +213,29 @@ export class SettingsManager extends EventEmitter {
       }
     }
     
-    claudeProvider.accounts = accounts
+    // 保留所有现有账号，只新增不存在的账号
+    const existingAccounts = claudeProvider.accounts as ClaudeAccount[]
+    const updatedAccounts = [...existingAccounts]
+    
+    // 添加新账号（不存在的账号）
+    accounts.forEach(newAccount => {
+      const existingIndex = updatedAccounts.findIndex(existing => 
+        existing.emailAddress === newAccount.emailAddress
+      )
+      
+      if (existingIndex >= 0) {
+        // 更新现有账号的基本信息，保留authorization
+        updatedAccounts[existingIndex] = {
+          ...newAccount,
+          authorization: updatedAccounts[existingIndex].authorization || newAccount.authorization
+        }
+      } else {
+        // 添加新账号
+        updatedAccounts.push(newAccount)
+      }
+    })
+    
+    claudeProvider.accounts = updatedAccounts
     
     // 如果当前活动账号不存在了，清空或设置为第一个
     if (!accounts.find(acc => acc.emailAddress === claudeProvider.activeAccountId)) {
@@ -279,6 +301,7 @@ export class SettingsManager extends EventEmitter {
     if (provider) {
       provider.activeAccountId = accountId
       this.addServiceProvider(provider)
+      this.setActiveServiceProvider(providerId)
       this.emit('active-account:changed', { providerId, accountId })
     }
   }

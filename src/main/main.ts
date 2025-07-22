@@ -2,12 +2,13 @@ import { app, shell, BrowserWindow, ipcMain, dialog } from 'electron'
 import { join } from 'path'
 import * as path from 'path'
 import * as os from 'os'
+import * as fs from 'fs'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import { ProxyServer } from './proxy'
 import { PtyManager } from './pty-manager'
-import { SessionManager, Session, Project } from './session-manager'
+import { SessionManager, Session } from './session-manager'
 import { v4 as uuidv4 } from 'uuid';
-import { SettingsManager } from './settings'
+import { SettingsManager, ClaudeAccount, ThirdPartyAccount } from './settings'
 import { logger } from './logger'
 import { claudeDetector, ClaudeDetectionResult } from './claude-detector'
 
@@ -74,11 +75,11 @@ function createWindow(): void {
     
     try {
       // Start proxy server when window is ready
-      logger.info('启动代理服务器', 'main')
+      logger.info('启动本地代理服务器', 'main')
       await proxyServer.start()
-      logger.info('代理服务器启动成功', 'main')
+      logger.info('本地代理服务器启动成功', 'main')
     } catch (error) {
-      logger.error('启动代理服务器失败', 'main', error as Error)
+      logger.error('启动本地代理服务器失败', 'main', error as Error)
     }
 
     // Start Claude detection
@@ -146,6 +147,182 @@ function getOrCreatePtyManager(sessionId: string, mainWindow: BrowserWindow): Pt
   const manager = new PtyManager(mainWindow, sessionId, onSessionReady);
   ptyManagers.set(sessionId, manager);
   return manager;
+}
+
+// Claude账号authorization检测函数
+async function detectClaudeAuthorization(accountEmail: string): Promise<{ success: boolean, error?: string }> {
+  try {
+    // 查找指定的Claude官方账号
+    const providers = settingsManager.getServiceProviders()
+    const claudeProvider = providers.find(p => p.type === 'claude_official')
+    if (!claudeProvider) {
+      const error = '未找到Claude官方服务提供方'
+      logger.warn(`检测失败: ${error}`, 'main')
+      return { success: false, error }
+    }
+
+    const targetAccount = claudeProvider.accounts.find(
+      (acc) => (acc as ClaudeAccount).emailAddress === accountEmail
+    ) as ClaudeAccount | undefined
+
+    if (!targetAccount) {
+      const error = `未找到账号: ${accountEmail}`
+      logger.warn(`检测失败: ${error}`, 'main')
+      return { success: false, error }
+    }
+
+    logger.info(`开始检测Claude账号 ${targetAccount.emailAddress} 的authorization值`, 'main')
+    
+    // 检查是否已经有authorization值
+    if (targetAccount.authorization) {
+      logger.info(`账号 ${targetAccount.emailAddress} 已有authorization值`, 'main')
+      return { success: true }
+    }
+    
+    // 保存当前活动账号，以便检测完成后恢复
+    const originalActiveResult = settingsManager.getCurrentActiveAccount()
+    let needRestoreAccount = false
+    
+    // 临时切换到目标账号进行检测
+    if (!originalActiveResult || 
+        originalActiveResult.provider.id !== claudeProvider.id || 
+        (originalActiveResult.account as ClaudeAccount).emailAddress !== accountEmail) {
+      logger.info(`临时切换到账号 ${accountEmail} 进行检测`, 'main')
+      settingsManager.setActiveServiceProvider(claudeProvider.id)
+      settingsManager.setActiveAccount(claudeProvider.id, targetAccount.accountUuid)
+      needRestoreAccount = true
+    }
+    
+    // 创建临时目录和临时会话用于检测
+    const tempDir = fs.mkdtempSync(os.tmpdir() + '/claude-auth-detect-')
+    const tempSessionId = `detect-${Date.now()}`
+    
+    logger.info(`创建临时检测会话: ${tempSessionId}`, 'main')
+    logger.info(`使用临时目录: ${tempDir}`, 'main')
+    
+    // 创建临时PTY管理器
+    const detectionPtyManager = new PtyManager(BrowserWindow.getFocusedWindow()!, tempSessionId)
+    
+    try {
+      // 启动Claude CLI进行检测
+      await detectionPtyManager.start({
+        workingDirectory: tempDir,
+        args: ['-p', 'test'] // 简单的测试命令
+      })
+      
+      logger.info('Claude CLI检测会话已启动，开始监控authorization值', 'main')
+      
+      return new Promise((resolve) => {
+        let checkCount = 0
+        const maxChecks = 8 // 最多检查8次，每次间隔2秒 = 16秒超时
+        
+        const checkInterval = setInterval(() => {
+          checkCount++
+          
+          // 重新获取账号信息检查authorization值
+          const providers = settingsManager.getServiceProviders()
+          const claudeProvider = providers.find(p => p.type === 'claude_official')
+          const updatedAccount = claudeProvider?.accounts.find(
+            (acc) => (acc as ClaudeAccount).emailAddress === targetAccount.emailAddress
+          ) as ClaudeAccount | undefined
+          
+          if (updatedAccount?.authorization) {
+            clearInterval(checkInterval)
+            
+            logger.info(`成功检测到Claude账号 ${targetAccount.emailAddress} 的authorization值`, 'main')
+            
+            // 停止检测会话并清理
+            detectionPtyManager.stop().then(async () => {
+              try {
+                fs.rmSync(tempDir, { recursive: true, force: true })
+                logger.debug('临时目录清理成功', 'main')
+              } catch (error) {
+                logger.warn('清理临时目录失败', 'main', error as Error)
+              }
+              
+              // 恢复原来的活动账号
+              if (needRestoreAccount && originalActiveResult) {
+                logger.info('恢复原来的活动账号', 'main')
+                settingsManager.setActiveAccount(originalActiveResult.provider.id, 
+                  originalActiveResult.provider.type === 'claude_official' 
+                    ? (originalActiveResult.account as ClaudeAccount).accountUuid
+                    : (originalActiveResult.account as ThirdPartyAccount).id
+                )
+              }
+            })
+            
+            resolve({ success: true })
+          } else if (checkCount >= maxChecks) {
+            clearInterval(checkInterval)
+            
+            logger.warn(`检测超时（${maxChecks * 2}秒），未获取到authorization值`, 'main')
+            
+            // 停止检测会话并清理
+            detectionPtyManager.stop().then(async () => {
+              try {
+                fs.rmSync(tempDir, { recursive: true, force: true })
+                logger.debug('临时目录清理成功', 'main')
+              } catch (error) {
+                logger.warn('清理临时目录失败', 'main', error as Error)
+              }
+              
+              // 恢复原来的活动账号
+              if (needRestoreAccount && originalActiveResult) {
+                logger.info('恢复原来的活动账号', 'main')
+                settingsManager.setActiveServiceProvider(originalActiveResult.provider.id)
+                settingsManager.setActiveAccount(originalActiveResult.provider.id, 
+                  originalActiveResult.provider.type === 'claude_official' 
+                    ? (originalActiveResult.account as ClaudeAccount).accountUuid
+                    : (originalActiveResult.account as ThirdPartyAccount).id
+                )
+              }
+            })
+            
+            resolve({ 
+              success: false, 
+              error: `检测超时（${maxChecks * 2}秒），未获取到authorization值` 
+            })
+          } else {
+            logger.debug(`第 ${checkCount} 次检查，尚未获取到authorization值`, 'main')
+          }
+        }, 2000) // 每2秒检查一次
+      })
+      
+    } catch (error) {
+      logger.error('启动检测会话失败', 'main', error as Error)
+      
+      // 清理临时目录
+      try {
+        fs.rmSync(tempDir, { recursive: true, force: true })
+        logger.debug('临时目录清理成功', 'main')
+      } catch (cleanupError) {
+        logger.warn('清理临时目录失败', 'main', cleanupError as Error)
+      }
+      
+      // 恢复原来的活动账号
+      if (needRestoreAccount && originalActiveResult) {
+        logger.info('恢复原来的活动账号', 'main')
+        settingsManager.setActiveServiceProvider(originalActiveResult.provider.id)
+        settingsManager.setActiveAccount(originalActiveResult.provider.id, 
+          originalActiveResult.provider.type === 'claude_official' 
+            ? (originalActiveResult.account as ClaudeAccount).accountUuid
+            :(originalActiveResult.account as ThirdPartyAccount).id
+        )
+      }
+      
+      return { 
+        success: false, 
+        error: `启动Claude CLI检测失败: ${(error as Error).message}` 
+      }
+    }
+    
+  } catch (error) {
+    logger.error('检测authorization过程中出错', 'main', error as Error)
+    return { 
+      success: false, 
+      error: `检测过程中出错: ${(error as Error).message}` 
+    }
+  }
 }
 
 function setupIpcHandlers(mainWindow: BrowserWindow): void {
@@ -470,10 +647,10 @@ function setupIpcHandlers(mainWindow: BrowserWindow): void {
     settingsManager.setProviderProxyUsage(providerId, useProxy)
   })
 
-  ipcMain.handle('accounts:detect-claude-authorization', async () => {
+  ipcMain.handle('accounts:detect-claude-authorization', async (_, accountEmail: string) => {
     try {
-      logger.info('开始检测Claude账号authorization', 'main')
-      const result = await proxyServer.detectClaudeAuthorization()
+      logger.info(`开始检测Claude账号 ${accountEmail} 的authorization`, 'main')
+      const result = await detectClaudeAuthorization(accountEmail)
       logger.info(`检测Claude authorization结果: ${result.success ? '成功' : '失败'}`, 'main')
       return result
     } catch (error) {

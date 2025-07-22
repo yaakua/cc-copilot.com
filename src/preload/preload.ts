@@ -110,7 +110,7 @@ const api = {
   addThirdPartyAccount: (providerId: string, account: any) => ipcRenderer.invoke('accounts:add-third-party', providerId, account),
   removeThirdPartyAccount: (providerId: string, accountId: string) => ipcRenderer.invoke('accounts:remove-third-party', providerId, accountId),
   setProviderProxy: (providerId: string, useProxy: boolean) => ipcRenderer.invoke('accounts:set-provider-proxy', providerId, useProxy),
-  detectClaudeAuthorization: () => ipcRenderer.invoke('accounts:detect-claude-authorization'),
+  detectClaudeAuthorization: (accountEmail: string) => ipcRenderer.invoke('accounts:detect-claude-authorization', accountEmail),
   
   // Status APIs
   getCurrentStatus: () => ipcRenderer.invoke('status:get-current'),

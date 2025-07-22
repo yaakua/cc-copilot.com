@@ -67,7 +67,7 @@ declare global {
       addThirdPartyAccount: (providerId: string, account: any) => Promise<void>
       removeThirdPartyAccount: (providerId: string, accountId: string) => Promise<void>
       setProviderProxy: (providerId: string, useProxy: boolean) => Promise<void>
-      detectClaudeAuthorization: () => Promise<{ success: boolean, error?: string }>
+      detectClaudeAuthorization: (accountEmail: string) => Promise<{ success: boolean, error?: string }>
       
       // Status APIs
       getCurrentStatus: () => Promise<any>

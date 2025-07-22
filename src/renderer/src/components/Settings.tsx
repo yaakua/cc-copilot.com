@@ -22,6 +22,25 @@ interface ProxySettings {
   password?: string
 }
 
+interface ClaudeAccount {
+  accountUuid: string
+  emailAddress: string
+  organizationUuid: string
+  organizationRole: string
+  workspaceRole: string | null
+  organizationName: string
+  authorization?: string
+}
+
+interface ServiceProvider {
+  id: string
+  type: 'claude_official' | 'third_party'
+  name: string
+  accounts: ClaudeAccount[]
+  activeAccountId: string
+  useProxy: boolean
+}
+
 interface SettingsProps {
   claudeDetectionResult: ClaudeDetectionResult | null
   claudeDetecting: boolean
@@ -40,7 +59,9 @@ const Settings: React.FC<SettingsProps> = ({
     enabled: false,
     url: 'http://127.0.0.1:1087'
   })
-  const [activeTab, setActiveTab] = useState<'general' | 'providers' | 'proxy'>('general')
+  const [serviceProviders, setServiceProviders] = useState<ServiceProvider[]>([])
+  const [detectingAuth, setDetectingAuth] = useState<Record<string, boolean>>({})
+  const [activeTab, setActiveTab] = useState<'general' | 'accounts' | 'providers' | 'proxy'>('general')
 
   useEffect(() => {
     loadSettings()
@@ -56,6 +77,10 @@ const Settings: React.FC<SettingsProps> = ({
         username: settings?.proxyConfig?.auth?.username,
         password: settings?.proxyConfig?.auth?.password
       })
+      
+      // Load service providers
+      const providers = await window.api.getServiceProviders()
+      setServiceProviders(providers || [])
     } catch (error) {
       console.error('Failed to load settings:', error)
     }
@@ -107,9 +132,47 @@ const Settings: React.FC<SettingsProps> = ({
     setProxySettings(updatedSettings)
   }
 
+  const detectAuthorization = async (accountEmail: string) => {
+    try {
+      setDetectingAuth(prev => ({ ...prev, [accountEmail]: true }))
+      console.log(`开始检测账号: ${accountEmail}`)
+      
+      const result = await window.api.detectClaudeAuthorization(accountEmail)
+      console.log('检测结果:', result)
+      
+      if (result.success) {
+        // Reload service providers to get updated authorization
+        await loadSettings() // 重新加载所有设置，包括更新的authorization值
+        
+        // Show success message
+        console.log('账号检测成功')
+        // You could add a toast notification here instead of console.log
+      } else {
+        console.error('账号检测失败:', result.error)
+        
+        // Provide more user-friendly error messages
+        let userMessage = '账号检测失败'
+        if (result.error?.includes('超时')) {
+          userMessage = '检测超时，请确保Claude CLI正常工作并重试'
+        } else if (result.error?.includes('命令失败')) {
+          userMessage = 'Claude命令执行失败，请检查Claude CLI是否正确安装'
+        } else if (result.error?.includes('未选择')) {
+          userMessage = '请确保已选择正确的Claude账号'
+        }
+        
+        alert(`${userMessage}\n\n详细信息: ${result.error}`)
+      }
+    } catch (error) {
+      console.error('检测账号时出错:', error)
+      alert('检测时出现网络或系统错误，请检查应用状态并重试')
+    } finally {
+      setDetectingAuth(prev => ({ ...prev, [accountEmail]: false }))
+    }
+  }
+
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-      <div className="bg-gray-800 rounded-lg w-[600px] max-w-full max-h-[80vh] overflow-hidden flex flex-col">
+      <div className="bg-gray-800 rounded-lg w-[900px] max-w-[95vw] max-h-[90vh] overflow-hidden flex flex-col">
         <div className="flex items-center justify-between p-6 border-b border-gray-700">
           <h2 className="text-xl font-semibold">Settings</h2>
           <button
@@ -122,7 +185,7 @@ const Settings: React.FC<SettingsProps> = ({
 
         <div className="flex flex-1 overflow-hidden">
           {/* Tab Navigation */}
-          <div className="w-48 bg-gray-900 border-r border-gray-700 p-4">
+          <div className="w-56 bg-gray-900 border-r border-gray-700 p-4">
             <nav className="space-y-2">
               <button
                 onClick={() => setActiveTab('general')}
@@ -133,6 +196,16 @@ const Settings: React.FC<SettingsProps> = ({
                 }`}
               >
                 General
+              </button>
+              <button
+                onClick={() => setActiveTab('accounts')}
+                className={`w-full text-left px-3 py-2 rounded text-sm ${
+                  activeTab === 'accounts' 
+                    ? 'bg-blue-600 text-white' 
+                    : 'text-gray-300 hover:bg-gray-700'
+                }`}
+              >
+                Accounts
               </button>
               <button
                 onClick={() => setActiveTab('providers')}
@@ -234,6 +307,116 @@ const Settings: React.FC<SettingsProps> = ({
                     <div>Ctrl/Cmd + V: Paste in terminal</div>
                     <div>Ctrl/Cmd + L: Clear terminal</div>
                   </div>
+                </div>
+              </div>
+            )}
+
+            {activeTab === 'accounts' && (
+              <div className="space-y-6">
+                <h3 className="text-lg font-medium">Claude Official Accounts</h3>
+                
+                {serviceProviders
+                  .filter(provider => provider.type === 'claude_official')
+                  .map(provider => (
+                    <div key={provider.id} className="space-y-4">
+                      <div className="flex items-center justify-between">
+                        <h4 className="font-medium text-blue-400">{provider.name}</h4>
+                        <span className="text-sm text-gray-400">
+                          {provider.accounts.length} account{provider.accounts.length !== 1 ? 's' : ''}
+                        </span>
+                      </div>
+                      
+                      {provider.accounts.length === 0 ? (
+                        <div className="text-center py-8 text-gray-400">
+                          <p>No Claude accounts found</p>
+                          <p className="text-sm mt-1">Please login with 'claude login' first</p>
+                        </div>
+                      ) : (
+                        <div className="space-y-3">
+                          {provider.accounts.map((account) => (
+                            <div key={account.accountUuid} className="bg-gray-700 p-4 rounded-lg">
+                              <div className="flex items-start justify-between">
+                                <div className="flex-1">
+                                  <div className="flex items-center gap-3">
+                                    <h5 className="font-medium">{account.emailAddress}</h5>
+                                    <div className="flex items-center gap-2">
+                                      <span className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${
+                                        account.authorization 
+                                          ? 'bg-green-100 text-green-800' 
+                                          : 'bg-red-100 text-red-800'
+                                      }`}>
+                                        {account.authorization ? '✓ Account Available' : '✗ Need Detection'}
+                                      </span>
+                                    </div>
+                                  </div>
+                                  
+                                  <div className="mt-2 space-y-1 text-sm text-gray-300">
+                                    <div>Organization: {account.organizationName}</div>
+                                    <div>Role: {account.organizationRole}</div>
+                                    {account.workspaceRole && (
+                                      <div>Workspace Role: {account.workspaceRole}</div>
+                                    )}
+                                  </div>
+                                  
+                                  {account.authorization && (
+                                    <div className="mt-2 text-xs text-green-400">
+                                      ✓ Account verified and ready to use
+                                    </div>
+                                  )}
+                                </div>
+                                
+                                <div className="ml-4">
+                                  <button
+                                    onClick={() => detectAuthorization(account.emailAddress)}
+                                    disabled={detectingAuth[account.emailAddress]}
+                                    className={`px-3 py-2 text-sm rounded transition-colors ${
+                                      account.authorization
+                                        ? 'bg-blue-600 hover:bg-blue-700 disabled:bg-gray-600'
+                                        : 'bg-orange-600 hover:bg-orange-700 disabled:bg-gray-600'
+                                    }`}
+                                  >
+                                    {detectingAuth[account.emailAddress] 
+                                      ? 'Detecting...' 
+                                      : account.authorization 
+                                        ? 'Re-detect' 
+                                        : 'Detect Account'
+                                    }
+                                  </button>
+                                </div>
+                              </div>
+                              
+                              {!account.authorization && (
+                                <div className="mt-3 p-3 bg-yellow-900/30 border border-yellow-700/50 rounded text-sm text-yellow-300">
+                                  <p className="font-medium">Account Detection Required</p>
+                                  <p className="mt-1">
+                                    Click "Detect Account" to verify this account is properly configured 
+                                    and available for use with Claude Code.
+                                  </p>
+                                </div>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  ))
+                }
+                
+                {serviceProviders.filter(p => p.type === 'claude_official').length === 0 && (
+                  <div className="text-center py-8 text-gray-400">
+                    <p>No Claude official accounts configured</p>
+                    <p className="text-sm mt-1">Please login with 'claude login' first</p>
+                  </div>
+                )}
+                
+                <div className="mt-6 p-4 bg-blue-900/30 border border-blue-700/50 rounded">
+                  <h4 className="font-medium text-blue-300 mb-2">How to add Claude accounts:</h4>
+                  <ol className="text-sm text-blue-200 space-y-1 list-decimal list-inside">
+                    <li>Open terminal and run: <code className="bg-gray-800 px-1 rounded">claude login</code></li>
+                    <li>Complete the login process in your browser</li>
+                    <li>Restart this application to see the new account</li>
+                    <li>Click "Detect Account" to verify the account is available</li>
+                  </ol>
                 </div>
               </div>
             )}

@@ -23,7 +23,7 @@ export class Logger {
   private static instance: Logger
   private logDir: string
   private currentLogFile: string
-  private minLevel: LogLevel = LogLevel.DEBUG
+  private minLevel: LogLevel = LogLevel.INFO
   private maxFileSize: number = 10 * 1024 * 1024 // 10MB
   private maxFiles: number = 5
 

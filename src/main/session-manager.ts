@@ -202,7 +202,7 @@ export class SessionManager {
                 projectPath = entryWithCwd.cwd;
                 projectName = path.basename(projectPath||"");
                 earliestTimestamp = entryWithCwd.timestamp;
-                logger.info(`Found project info in folder ${projectFolder}: ${projectName} at ${projectPath}`, 'SessionManager');
+                logger.debug(`Found project info in folder ${projectFolder}: ${projectName} at ${projectPath}`, 'SessionManager');
                 break;
               }
             } catch (error) {
@@ -236,7 +236,7 @@ export class SessionManager {
               };
               this.data.projects.push(project);
               projectsSynced++;
-              logger.info(`Created project: ${projectName} (${project.id}) from ${projectPath}`, 'SessionManager');
+              logger.debug(`Created project: ${projectName} (${project.id}) from ${projectPath}`, 'SessionManager');
             }
           } else {
             logger.warn(`No project info found in folder: ${projectFolder}`, 'SessionManager');
@@ -284,7 +284,7 @@ export class SessionManager {
                   }
                 }
                 
-                logger.info(`Session name for ${claudeSessionId}: "${sessionName}"`, 'SessionManager');
+                logger.debug(`Session name for ${claudeSessionId}: "${sessionName}"`, 'SessionManager');
                 
                 let lastActiveAt: string;
                 try {

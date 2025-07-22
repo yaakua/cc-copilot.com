@@ -251,8 +251,10 @@ const StatusBar: React.FC<StatusBarProps> = ({ activeSessionId }) => {
         </div>
         
         {/* Proxy Info */}
-        {statusInfo && statusInfo.proxy && statusInfo.proxy !== 'Disabled' && (
-          <span>Proxy: {statusInfo.proxy === 'None' ? 'Disabled' : 'Enabled'}</span>
+        {statusInfo && (
+          <span>
+            Proxy: {statusInfo.proxy === 'Disabled' ? 'Off' : statusInfo.proxy}
+          </span>
         )}
       </div>
       
