@@ -4,7 +4,7 @@ import * as os from 'os'
 import * as fs from 'fs'
 import { logger } from './logger'
 import path from 'path'
-import { spawn } from 'child_process'
+import { claudePathManager } from './claude-path-manager'
 
 export interface PtyOptions {
   workingDirectory?: string
@@ -285,30 +285,20 @@ export class PtyManager {
    * 获取Claude命令的完整路径
    */
   private async getClaudeCommandPath(): Promise<string> {
-    return new Promise((resolve, reject) => {
-      // 根据平台使用不同的which命令
-      const whichCommand = os.platform() === 'win32' ? 'where' : 'which';
-
-      spawn(whichCommand, ['claude'], { stdio: 'pipe' })
-        .on('close', (code, signal) => {
-          if (code === 0) {
-            resolve('claude'); // 如果which成功，直接返回'claude'
-          } else {
-            logger.error(`无法找到claude命令: ${whichCommand} claude 返回代码 ${code}, 信号 ${signal}`, 'pty-manager');
-            reject(new Error('Claude CLI command not found in PATH'));
-          }
-        })
-        .on('error', (error) => {
-          logger.error('执行which/where命令失败', 'pty-manager', error);
-          reject(error);
-        })
-        .stdout?.on('data', (data) => {
-          const claudePath = data.toString().trim().split('\n')[0]; // 获取第一行结果
-          if (claudePath) {
-            resolve(claudePath);
-          }
-        });
-    });
+    try {
+      const claudePath = await claudePathManager.getClaudePath();
+      if (claudePath) {
+        logger.info(`使用统一路径管理器获取到Claude路径: ${claudePath}`, 'pty-manager');
+        return claudePath;
+      } else {
+        const error = 'Claude CLI command not found in PATH';
+        logger.error(error, 'pty-manager');
+        throw new Error(error);
+      }
+    } catch (error) {
+      logger.error('通过路径管理器获取Claude路径失败', 'pty-manager', error as Error);
+      throw error;
+    }
   }
 
   /**

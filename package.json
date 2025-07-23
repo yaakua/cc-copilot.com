@@ -11,17 +11,24 @@
   },
   "author": {
     "name": "yangkui",
-    "email": "your-email@example.com"
+    "email": "yaakua@126.com"
   },
   "license": "MIT",
   "build": {
     "directories": {
       "buildResources": "resources"
-    }
+    },
+    "electronDownload": {
+      "mirror": "https://npmmirror.com/mirrors/electron/"
+    },
+    "files": [
+      "dist/**/*",
+      "!src",
+      "!.git",
+      "!docs",
+      "!.vscode"
+    ]
   },
-  "files": [
-    "dist"
-  ],
   "scripts": {
     "dev": "electron-vite dev",
     "build": "electron-vite build",

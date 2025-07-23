@@ -9,7 +9,7 @@ import { SessionManager, Session } from './session-manager'
 import { v4 as uuidv4 } from 'uuid';
 import { SettingsManager, ClaudeAccount, ThirdPartyAccount } from './settings'
 import { logger } from './logger'
-import { claudeDetector, ClaudeDetectionResult } from './claude-detector'
+import { claudePathManager } from './claude-path-manager'
 
 // Global instances
 let sessionManager: SessionManager
@@ -71,22 +71,41 @@ function createWindow(): void {
     }
     
 
-    // Start Claude detection
+    // Initialize Claude path manager first
     try {
-      logger.info('开始Claude CLI检测', 'main')
-      const result = await claudeDetector.detect()
-      if (result.isInstalled) {
-        logger.info(`Claude CLI检测成功: ${result.version}`, 'main')
-      } else {
-        logger.warn(`Claude CLI未找到: ${result.error}`, 'main')
-      }
-      
-      // Notify renderer about detection result
-      mainWindow.webContents.send('claude:detection-result', result)
+      logger.info('初始化Claude路径管理器', 'main')
+      await claudePathManager.detectClaudePath()
+      logger.info('Claude路径管理器初始化完成', 'main')
     } catch (error) {
-      logger.error('Claude CLI检测失败', 'main', error as Error)
+      logger.error('Claude路径管理器初始化失败', 'main', error as Error)
+    }
+
+    // Start Claude detection (now handled by path manager initialization above)
+    try {
+      const pathResult = claudePathManager.getCachedResult()
+      if (pathResult) {
+        // 转换为旧的接口格式以保持兼容性
+        const detectionResult = {
+          isInstalled: pathResult.isFound,
+          version: pathResult.version,
+          path: pathResult.path,
+          error: pathResult.error,
+          timestamp: pathResult.timestamp
+        }
+        
+        if (pathResult.isFound) {
+          logger.info(`Claude CLI检测成功: ${pathResult.version}`, 'main')
+        } else {
+          logger.warn(`Claude CLI未找到: ${pathResult.error}`, 'main')
+        }
+        
+        // Notify renderer about detection result
+        mainWindow.webContents.send('claude:detection-result', detectionResult)
+      }
+    } catch (error) {
+      logger.error('获取Claude CLI检测结果失败', 'main', error as Error)
       // Send failure result to renderer
-      const failureResult: ClaudeDetectionResult = {
+      const failureResult = {
         isInstalled: false,
         error: `检测失败: ${(error as Error).message}`,
         timestamp: Date.now()
@@ -569,7 +588,14 @@ function setupIpcHandlers(mainWindow: BrowserWindow): void {
 
   // Claude detection management
   ipcMain.handle('claude:get-detection-result', async () => {
-    const result = claudeDetector.getLastResult()
+    const pathResult = claudePathManager.getCachedResult()
+    const result = pathResult ? {
+      isInstalled: pathResult.isFound,
+      version: pathResult.version,
+      path: pathResult.path,
+      error: pathResult.error,
+      timestamp: pathResult.timestamp
+    } : null
     logger.info('获取Claude检测结果', 'main', {result:result})
     return result
   })
@@ -577,7 +603,16 @@ function setupIpcHandlers(mainWindow: BrowserWindow): void {
   ipcMain.handle('claude:redetect', async () => {
     try {
       logger.info('重新检测Claude CLI', 'main')
-      const result = await claudeDetector.detect(true) // 强制重新检测
+      const pathResult = await claudePathManager.detectClaudePath(true) // 强制重新检测
+      
+      // 转换为旧的接口格式以保持兼容性
+      const result = {
+        isInstalled: pathResult.isFound,
+        version: pathResult.version,
+        path: pathResult.path,
+        error: pathResult.error,
+        timestamp: pathResult.timestamp
+      }
       
       // Notify all windows about new detection result
       BrowserWindow.getAllWindows().forEach(window => {
@@ -587,7 +622,7 @@ function setupIpcHandlers(mainWindow: BrowserWindow): void {
       return result
     } catch (error) {
       logger.error('重新检测Claude CLI失败', 'main', error as Error)
-      const failureResult: ClaudeDetectionResult = {
+      const failureResult = {
         isInstalled: false,
         error: `重新检测失败: ${(error as Error).message}`,
         timestamp: Date.now()
@@ -603,7 +638,8 @@ function setupIpcHandlers(mainWindow: BrowserWindow): void {
   })
 
   ipcMain.handle('claude:is-available', async () => {
-    return claudeDetector.isClaudeAvailable()
+    const pathResult = claudePathManager.getCachedResult()
+    return pathResult?.isFound === true
   })
 
   ipcMain.handle('session:resume', async (_, sessionId: string, projectPath: string) => {

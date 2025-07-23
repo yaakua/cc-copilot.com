@@ -13,7 +13,7 @@ The application is built using Electron, with a main process and a renderer proc
 **Main Process (Node.js - `src/main/`)**
 - `main.ts`: Entry point for the main process. Initializes the application, creates the main window, and sets up IPC handlers.
 - `session-manager.ts`: Manages project and session data. Handles loading, creating, deleting, and activating sessions. It is responsible for reading and writing to `.claude/sessions.jsonl` and individual session log files.
-- `claude-detector.ts`: Detects the installation and version of the Claude CLI tool.
+- `claude-path-manager.ts`: Manages Claude CLI path detection and caching. Detects the installation and version of the Claude CLI tool using multiple methods including direct file system checks and PATH expansion.
 - `pty-manager.ts`: Manages pseudoterminals (pty) for running the Claude CLI in sessions.
 - `proxy.ts`: (Future implementation) Will handle API requests and responses.
 - `logger.ts`: Configures the application's logging system (using `electron-log`).
