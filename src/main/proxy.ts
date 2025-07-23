@@ -20,7 +20,6 @@ export class ProxyServer {
     this.app = express()
     this.settingsManager = settingsManager
     this.initializeAccountInfo()
-    this.setupEventListeners()
     this.setupRoutes()
   }
 
@@ -104,8 +103,6 @@ export class ProxyServer {
         logger.info(`检测到并准备保存Claude官方账号的authorization值: ${currentClaudeAccount.emailAddress}`, 'proxy');
         this.settingsManager.updateClaudeAccountAuthorization(currentClaudeAccount.emailAddress, authorization);
         currentClaudeAccount.authorization = authorization;
-        // 更新代理配置以使用新的authorization
-        this.updateProxySettings();
       } else {
         logger.info('Authorization值未发生变化，跳过保存', 'proxy');
       }
@@ -116,30 +113,6 @@ export class ProxyServer {
 
 
 
-  private setupEventListeners() {
-    this.settingsManager.on('proxy:config-updated', () => {
-      logger.info('接收到代理配置更新事件，重新初始化代理', 'proxy')
-      this.updateProxySettings()
-    })
-    this.settingsManager.on('settings:updated', (updatedSettings) => {
-      if (updatedSettings.proxyConfig) {
-        logger.info('接收到设置更新事件（包含代理配置），重新初始化代理', 'proxy')
-        this.updateProxySettings()
-      }
-    })
-    this.settingsManager.on('active-service-provider:changed', () => {
-      logger.info('接收到服务提供方切换事件，更新账号信息', 'proxy')
-      this.updateAccountInfo()
-    })
-    this.settingsManager.on('active-account:changed', () => {
-      logger.info('接收到账号切换事件，更新账号信息', 'proxy')
-      this.updateAccountInfo()
-    })
-    this.settingsManager.on('provider-proxy:changed', () => {
-      logger.info('接收到提供方代理设置变更事件，重新初始化代理', 'proxy')
-      this.updateProxySettings()
-    })
-  }
 
   private setupRoutes() {
     this.initializeProxyAgent()
@@ -148,12 +121,18 @@ export class ProxyServer {
 
   private createProxyMiddleware() {
     const proxyConfig = this.settingsManager.getProxyConfig()
+    const currentHeaders = this.getProxyHeaders()
+    logger.info(`创建代理中间件时的headers: ${JSON.stringify(currentHeaders)}`, 'proxy')
 
     const proxyOptions: Options = {
       changeOrigin: true,
       secure: true,
       followRedirects: false,
       xfwd: false,
+      // 禁用 keep-alive 来避免 headers 已发送的问题
+      headers: {
+        'Connection': 'close'
+      },
       pathRewrite: {
         '^/': '/'
       },
@@ -168,9 +147,14 @@ export class ProxyServer {
         return this.currentTarget+req.url;
       },
       agent: this.shouldUseProxy() && this.proxyAgent ? this.proxyAgent : undefined,
-      headers: this.getProxyHeaders(),
       on: {
-        proxyReq: (_proxyReq:http.ClientRequest, req:http.IncomingMessage) => {
+        proxyReqWs:(proxyReqWs:http.ClientRequest, req:http.IncomingMessage)=>{
+          logger.info("###开启了ws访问#####")
+            const headers = { ...req.headers };
+          logger.info(`  - Claude CLI WS 请求authorization: ${headers["authorization"]}`, 'proxy')
+          
+        },
+        proxyReq: (proxyReq:http.ClientRequest, req:http.IncomingMessage) => {
           const usingUpstreamProxy = this.shouldUseProxy() && this.proxyAgent
           const accountInfo = this.getAccountDisplayName()
           const providerName = this.currentProvider?.name || 'Unknown'
@@ -180,10 +164,30 @@ export class ProxyServer {
           logger.info(`  - 服务提供方: ${providerName}`, 'proxy')
           logger.info(`  - 账号: ${accountInfo}`, 'proxy')
           logger.info(`  - 目标: ${this.currentTarget}`, 'proxy')
+          
           const headers = { ...req.headers };
-          logger.info(`  - 请求头authorization: ${headers["authorization"]}`, 'proxy')
-          // 仅用于authorization检测和保存，不修改头部
+          logger.info(`  - Claude CLI原始请求authorization: ${headers["authorization"]}`, 'proxy')
+          
+          // 检测并保存Claude CLI请求中的authorization（如果当前账号没有的话）
           this.detectAndSaveAuthorization(req);
+          
+          // 动态设置authorization header
+          const dynamicHeaders = this.getProxyHeaders()
+          if (dynamicHeaders?.authorization) {
+            try {
+              // 检查是否可以设置headers（headers还没有发送）
+              if (!proxyReq.headersSent) {
+                proxyReq.setHeader('authorization', dynamicHeaders.authorization)
+                logger.info(`  - 成功设置当前活动账号authorization: ${dynamicHeaders.authorization.slice(0, 20)}...`, 'proxy')
+              } else {
+                logger.warn(`  - 警告: Headers已发送，无法修改authorization`, 'proxy')
+              }
+            } catch (error) {
+              logger.error(`  - 设置authorization header失败: ${(error as Error).message}`, 'proxy')
+            }
+          } else {
+            logger.warn(`  - 警告: 无法获取当前活动账号的authorization header`, 'proxy')
+          }
         },
         proxyRes: (proxyRes, req, _res) => {
           logger.info(`[代理响应] ${proxyRes.statusCode} ${req.method} ${req.url}`, 'proxy')
@@ -207,12 +211,6 @@ export class ProxyServer {
     this.app.use('/', createProxyMiddleware(proxyOptions))
   }
 
-  // --- UNCHANGED CODE BELOW THIS LINE ---
-
-  private updateAccountInfo() {
-    this.initializeAccountInfo()
-    logger.info('账号信息已更新，代理中间件将使用新的路由配置', 'proxy')
-  }
 
   private shouldUseProxy(): boolean {
     const proxyConfig = this.settingsManager.getProxyConfig()
@@ -249,19 +247,6 @@ export class ProxyServer {
     }
   }
 
-  public updateProxySettings(): void {
-    try {
-      const proxyConfig = this.settingsManager.getProxyConfig()
-      const currentProxyUrl = proxyConfig.url as string
-      ;(this.app as any)._router = null
-      this.initializeProxyAgent()
-      this.createProxyMiddleware()
-      logger.info('代理设置更新成功（已重建中间件）' + (currentProxyUrl || '直连'), 'proxy')
-    } catch (error) {
-      logger.error('代理设置更新失败', 'proxy', error as Error)
-      throw error
-    }
-  }
 
   public start(): Promise<void> {
     return new Promise((resolve, reject) => {
@@ -284,11 +269,6 @@ export class ProxyServer {
 
   public stop(): Promise<void> {
     return new Promise((resolve) => {
-      this.settingsManager.removeAllListeners('proxy:config-updated')
-      this.settingsManager.removeAllListeners('settings:updated')
-      this.settingsManager.removeAllListeners('active-service-provider:changed')
-      this.settingsManager.removeAllListeners('active-account:changed')
-      this.settingsManager.removeAllListeners('provider-proxy:changed')
       if (this.server) {
         this.server.close(() => {
           logger.info('服务器已停止', 'proxy')

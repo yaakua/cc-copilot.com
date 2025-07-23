@@ -4,7 +4,6 @@ import * as path from 'path'
 import * as os from 'os'
 import * as fs from 'fs'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
-import { ProxyServer } from './proxy'
 import { PtyManager } from './pty-manager'
 import { SessionManager, Session } from './session-manager'
 import { v4 as uuidv4 } from 'uuid';
@@ -13,7 +12,6 @@ import { logger } from './logger'
 import { claudeDetector, ClaudeDetectionResult } from './claude-detector'
 
 // Global instances
-let proxyServer: ProxyServer
 let sessionManager: SessionManager
 let settingsManager: SettingsManager
 
@@ -41,7 +39,6 @@ function createWindow(): void {
   // Initialize services
   settingsManager = new SettingsManager()
   sessionManager = new SessionManager(settingsManager)
-  proxyServer = new ProxyServer(settingsManager)
 
   // Sync with .claude directory on startup
   try {
@@ -73,14 +70,6 @@ function createWindow(): void {
       logger.error('初始化Claude账号失败', 'main', error as Error)
     }
     
-    try {
-      // Start proxy server when window is ready
-      logger.info('启动本地代理服务器', 'main')
-      await proxyServer.start()
-      logger.info('本地代理服务器启动成功', 'main')
-    } catch (error) {
-      logger.error('启动本地代理服务器失败', 'main', error as Error)
-    }
 
     // Start Claude detection
     try {
@@ -419,6 +408,7 @@ async function detectClaudeAuthorization(accountEmail: string): Promise<{ succes
   }
 }
 
+
 function setupIpcHandlers(mainWindow: BrowserWindow): void {
   // Logger IPC handlers
   ipcMain.handle('logger:log', (_, logEntry: any) => {
@@ -616,10 +606,6 @@ function setupIpcHandlers(mainWindow: BrowserWindow): void {
     return claudeDetector.isClaudeAvailable()
   })
 
-
-
-
-
   ipcMain.handle('session:resume', async (_, sessionId: string, projectPath: string) => {
     currentActiveSessionId = sessionId
     const manager = getOrCreatePtyManager(sessionId, mainWindow)
@@ -652,12 +638,8 @@ function setupIpcHandlers(mainWindow: BrowserWindow): void {
     return settingsManager.getSettings()
   })
 
-  ipcMain.handle('settings:update', (_, settings: any) => {
+  ipcMain.handle('settings:update', async (_, settings: any) => {
     settingsManager.updateSettings(settings)
-    // Update proxy if needed
-    if (settings.proxyConfig) {
-      proxyServer.updateProxySettings()
-    }
     // If project filter settings changed, trigger a resync
     if (settings.projectFilter) {
       try {
@@ -712,11 +694,11 @@ function setupIpcHandlers(mainWindow: BrowserWindow): void {
     return settingsManager.getCurrentActiveAccount()
   })
 
-  ipcMain.handle('accounts:set-active-provider', (_, providerId: string) => {
+  ipcMain.handle('accounts:set-active-provider', async (_, providerId: string) => {
     settingsManager.setActiveServiceProvider(providerId)
   })
 
-  ipcMain.handle('accounts:set-active-account', (_, providerId: string, accountId: string) => {
+  ipcMain.handle('accounts:set-active-account', async (_, providerId: string, accountId: string) => {
     settingsManager.setActiveAccount(providerId, accountId)
   })
 
@@ -737,7 +719,7 @@ function setupIpcHandlers(mainWindow: BrowserWindow): void {
     settingsManager.removeThirdPartyAccount(providerId, accountId)
   })
 
-  ipcMain.handle('accounts:set-provider-proxy', (_, providerId: string, useProxy: boolean) => {
+  ipcMain.handle('accounts:set-provider-proxy', async (_, providerId: string, useProxy: boolean) => {
     settingsManager.setProviderProxyUsage(providerId, useProxy)
   })
 
@@ -762,16 +744,35 @@ function setupIpcHandlers(mainWindow: BrowserWindow): void {
 
     const project = sessionManager.getProjectById(session.projectId);
 
-    // 使用新的代理状态获取方法
-    const proxyStatus = proxyServer ? proxyServer.getCurrentStatus() : null;
+    // 直接从settings manager获取状态信息
+    const activeResult = settingsManager.getCurrentActiveAccount();
+    const proxyConfig = settingsManager.getProxyConfig();
+    const shouldUseProxy = settingsManager.shouldUseProxyForCurrentProvider();
+
+    let provider = 'None';
+    let account = 'None';
+    let target = 'Unknown';
+
+    if (activeResult) {
+      provider = activeResult.provider.name;
+      if (activeResult.provider.type === 'claude_official') {
+        account = (activeResult.account as any).emailAddress;
+        target = 'api.anthropic.com';
+      } else {
+        account = (activeResult.account as ThirdPartyAccount).name;
+        target = (activeResult.account as ThirdPartyAccount).baseUrl;
+      }
+    }
+
+    const proxyEnabled = proxyConfig.enabled && shouldUseProxy;
 
     return {
       sessionId: currentActiveSessionId,
       projectPath: project?.path || '',
-      provider: proxyStatus?.provider || 'None',
-      account: proxyStatus?.account || 'None', 
-      proxy: proxyStatus?.proxyEnabled ? proxyStatus.proxyUrl : 'Disabled',
-      target: proxyStatus?.target || 'Unknown'
+      provider,
+      account, 
+      proxy: proxyEnabled ? proxyConfig.url : 'Disabled',
+      target
     };
   });
 }
@@ -803,10 +804,6 @@ app.on('window-all-closed', async () => {
   }
   ptyManagers.clear()
   
-  if (proxyServer) {
-    logger.info('停止代理服务器', 'main')
-    await proxyServer.stop()
-  }
   
   logger.info('清理完成', 'main')
   

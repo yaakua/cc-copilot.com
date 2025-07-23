@@ -52,17 +52,17 @@ export interface AppSettings {
     apiKey: string
   }>
   activeProviderId: string
-  
+
   // 新的服务提供方架构
   serviceProviders: ServiceProvider[]
   activeServiceProviderId: string // 当前激活的服务提供方ID
-  
+
   terminal: {
     fontSize: number
     fontFamily: string
     theme: 'dark' | 'light'
   }
-  
+
   // 项目过滤配置
   projectFilter: {
     hiddenDirectories: string[] // 要在项目列表中隐藏的目录名列表
@@ -163,13 +163,13 @@ export class SettingsManager extends EventEmitter {
   addServiceProvider(provider: ServiceProvider): void {
     const providers = this.getServiceProviders()
     const existingIndex = providers.findIndex(p => p.id === provider.id)
-    
+
     if (existingIndex >= 0) {
       providers[existingIndex] = provider
     } else {
       providers.push(provider)
     }
-    
+
     this.store.set('serviceProviders', providers)
     this.emit('service-providers:updated', providers)
   }
@@ -177,12 +177,12 @@ export class SettingsManager extends EventEmitter {
   removeServiceProvider(providerId: string): void {
     const providers = this.getServiceProviders().filter(p => p.id !== providerId)
     this.store.set('serviceProviders', providers)
-    
+
     // 如果删除的是当前活动的提供方，清空活动ID
     if (this.store.get('activeServiceProviderId') === providerId) {
       this.store.set('activeServiceProviderId', '')
     }
-    
+
     this.emit('service-providers:updated', providers)
   }
 
@@ -201,7 +201,7 @@ export class SettingsManager extends EventEmitter {
   updateClaudeAccounts(accounts: ClaudeAccount[]): void {
     const providers = this.getServiceProviders()
     let claudeProvider = providers.find(p => p.type === 'claude_official')
-    
+
     if (!claudeProvider) {
       claudeProvider = {
         id: 'claude_official',
@@ -212,17 +212,17 @@ export class SettingsManager extends EventEmitter {
         useProxy: true // 默认使用代理
       }
     }
-    
+
     // 保留所有现有账号，只新增不存在的账号
     const existingAccounts = claudeProvider.accounts as ClaudeAccount[]
     const updatedAccounts = [...existingAccounts]
-    
+
     // 添加新账号（不存在的账号）
     accounts.forEach(newAccount => {
-      const existingIndex = updatedAccounts.findIndex(existing => 
+      const existingIndex = updatedAccounts.findIndex(existing =>
         existing.emailAddress === newAccount.emailAddress
       )
-      
+
       if (existingIndex >= 0) {
         // 更新现有账号的基本信息，保留authorization
         updatedAccounts[existingIndex] = {
@@ -234,14 +234,14 @@ export class SettingsManager extends EventEmitter {
         updatedAccounts.push(newAccount)
       }
     })
-    
+
     claudeProvider.accounts = updatedAccounts
-    
+
     // 如果当前活动账号不存在了，清空或设置为第一个
     if (!accounts.find(acc => acc.emailAddress === claudeProvider.activeAccountId)) {
       claudeProvider.activeAccountId = accounts.length > 0 ? accounts[0].emailAddress : ''
     }
-    
+
     this.addServiceProvider(claudeProvider)
   }
 
@@ -249,7 +249,7 @@ export class SettingsManager extends EventEmitter {
   addThirdPartyAccount(providerId: string, account: ThirdPartyAccount): void {
     const providers = this.getServiceProviders()
     let provider = providers.find(p => p.id === providerId)
-    
+
     if (!provider) {
       provider = {
         id: providerId,
@@ -260,44 +260,44 @@ export class SettingsManager extends EventEmitter {
         useProxy: true // 默认使用代理
       }
     }
-    
+
     const accounts = provider.accounts as ThirdPartyAccount[]
     const existingIndex = accounts.findIndex(acc => acc.id === account.id)
-    
+
     if (existingIndex >= 0) {
       accounts[existingIndex] = account
     } else {
       accounts.push(account)
     }
-    
+
     if (!provider.activeAccountId && accounts.length > 0) {
       provider.activeAccountId = accounts[0].id
     }
-    
+
     this.addServiceProvider(provider)
   }
 
   removeThirdPartyAccount(providerId: string, accountId: string): void {
     const providers = this.getServiceProviders()
     const provider = providers.find(p => p.id === providerId)
-    
+
     if (!provider) return
-    
+
     const accounts = provider.accounts as ThirdPartyAccount[]
     provider.accounts = accounts.filter(acc => acc.id !== accountId)
-    
+
     // 如果删除的是当前活动账号，设置为第一个或清空
     if (provider.activeAccountId === accountId) {
       provider.activeAccountId = provider.accounts.length > 0 ? (provider.accounts[0] as ThirdPartyAccount).id : ''
     }
-    
+
     this.addServiceProvider(provider)
   }
 
   setActiveAccount(providerId: string, accountId: string): void {
     const providers = this.getServiceProviders()
     const provider = providers.find(p => p.id === providerId)
-    
+
     if (provider) {
       provider.activeAccountId = accountId
       this.addServiceProvider(provider)
@@ -329,7 +329,7 @@ export class SettingsManager extends EventEmitter {
   setProviderProxyUsage(providerId: string, useProxy: boolean): void {
     const providers = this.getServiceProviders()
     const provider = providers.find(p => p.id === providerId)
-    
+
     if (provider) {
       provider.useProxy = useProxy
       this.addServiceProvider(provider)
@@ -357,12 +357,12 @@ export class SettingsManager extends EventEmitter {
   updateClaudeAccountAuthorization(emailAddress: string, authorization: string): void {
     const providers = this.getServiceProviders()
     const claudeProvider = providers.find(p => p.type === 'claude_official')
-    
+
     if (!claudeProvider) return
-    
+
     const accounts = claudeProvider.accounts as ClaudeAccount[]
     const account = accounts.find(acc => acc.emailAddress === emailAddress)
-    
+
     if (account) {
       account.authorization = authorization
       this.addServiceProvider(claudeProvider)
@@ -374,9 +374,9 @@ export class SettingsManager extends EventEmitter {
   findClaudeAccountByAuthorization(authorization: string): ClaudeAccount | null {
     const providers = this.getServiceProviders()
     const claudeProvider = providers.find(p => p.type === 'claude_official')
-    
+
     if (!claudeProvider) return null
-    
+
     const accounts = claudeProvider.accounts as ClaudeAccount[]
     return accounts.find(acc => acc.authorization === authorization) || null
   }
@@ -398,16 +398,16 @@ export class SettingsManager extends EventEmitter {
   shouldHideDirectory(directoryPath: string): boolean {
     const config = this.getProjectFilterConfig()
     const directoryName = require('path').basename(directoryPath)
-    
+
     // 检查是否在隐藏列表中
-    return config.hiddenDirectories.includes(directoryName) || 
-           config.hiddenDirectories.some(pattern => {
-             // 支持简单的模式匹配，以点开头的目录
-             if (pattern.startsWith('.') && directoryName.startsWith('.')) {
-               return directoryName === pattern
-             }
-             return directoryName === pattern
-           })
+    return config.hiddenDirectories.includes(directoryName) ||
+      config.hiddenDirectories.some(pattern => {
+        // 支持简单的模式匹配，以点开头的目录
+        if (pattern.startsWith('.') && directoryName.startsWith('.')) {
+          return directoryName === pattern
+        }
+        return directoryName === pattern
+      })
   }
 
   // 读取Claude配置文件
@@ -415,16 +415,16 @@ export class SettingsManager extends EventEmitter {
     const os = require('os')
     const fs = require('fs').promises
     const path = require('path')
-    
+
     try {
       const claudeConfigPath = path.join(os.homedir(), '.claude.json')
       const configData = await fs.readFile(claudeConfigPath, 'utf-8')
       const config = JSON.parse(configData)
-      
+
       if (config.oauthAccount) {
         return [config.oauthAccount as ClaudeAccount]
       }
-      
+
       return []
     } catch (error) {
       console.warn('无法读取Claude配置文件:', error)

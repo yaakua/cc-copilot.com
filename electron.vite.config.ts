@@ -8,7 +8,11 @@ export default defineConfig({
     build: {
       outDir: 'dist/main',
       rollupOptions: {
-        external: ['uuid']
+        external: ['uuid'],
+        input: {
+          main: resolve('src/main/main.ts'),
+          'claude-interceptor': resolve('src/main/claude-interceptor.js')
+        }
       }
     }
   },
