@@ -196,6 +196,17 @@ export class PtyManager {
       // 收集输出用于错误分析
       outputBuffer += data
 
+      // 日志前缀过滤处理，获取处理后的数据
+      const processedData = this.processInterceptorLogs(data)
+      
+      // 如果所有内容都被过滤了，不继续处理
+      if (!processedData.trim()) {
+        return
+      }
+      
+      // 使用处理后的数据继续后续逻辑
+      // data = processedData
+
       // 检查是否包含错误信息
       if (data.includes('Error') || data.includes('error') || data.includes('ERROR')) {
         logger.warn(`[${this.sessionId}] Claude输出包含错误信息: "${data.replace(/\r\n/g, ' ')}"`, 'pty-manager')
@@ -298,6 +309,43 @@ export class PtyManager {
           }
         });
     });
+  }
+
+  /**
+   * 处理拦截器日志，根据前缀决定是否过滤输出
+   * @param data PTY输出的数据
+   * @returns 处理后的数据，如果完全被过滤则返回空字符串
+   */
+  private processInterceptorLogs(data: string): string {
+    const lines = data.split('\n')
+    const processedLines: string[] = []
+
+    for (const line of lines) {
+      // 检查是否包含拦截器日志前缀
+      if (line.includes('[TERMINAL]') || line.includes('[SILENT]')) {
+        // 提取日志信息（去除前缀）
+        const logContent = line.replace(/\[TERMINAL\]\s*/, '').replace(/\[SILENT\]\s*/, '')
+        
+        // 决定日志级别
+        let logLevel: 'debug' | 'info' | 'warn' | 'error' = 'info'
+        if (logContent.includes('ERROR') || logContent.includes('error') || logContent.includes('失败')) {
+          logLevel = 'error'
+        } else if (logContent.includes('WARN') || logContent.includes('warn') || logContent.includes('警告')) {
+          logLevel = 'warn'
+        } else if (logContent.includes('DEBUG') || logContent.includes('debug')) {
+          logLevel = 'debug'
+        }
+
+        // 保存到日志文件
+        logger[logLevel](`[INTERCEPTOR] ${logContent}`, 'claude-interceptor')
+        // SILENT前缀的日志不输出到终端，直接跳过
+      } else {
+        // 非拦截器日志，保持原样
+        processedLines.push(line)
+      }
+    }
+
+    return processedLines.join('\n')
   }
 
 }
