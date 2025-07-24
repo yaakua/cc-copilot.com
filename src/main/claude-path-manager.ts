@@ -12,6 +12,18 @@ export interface ClaudePathResult {
   timestamp: number
 }
 
+export enum InstallationType {
+  System = 'system',
+  Custom = 'custom'
+}
+
+export interface ClaudeInstallation {
+  path: string
+  version?: string
+  source: string
+  installationType: InstallationType
+}
+
 /**
  * 统一的Claude路径管理器
  * 在应用启动时检测并缓存Claude CLI的路径，供其他模块使用
@@ -91,27 +103,31 @@ export class ClaudePathManager {
     }
 
     try {
-      // 1. 优先进行直接文件系统检查
-      const directPath = await this.directFileSystemCheck()
-      if (directPath) {
-        logger.info(`通过直接文件检查找到Claude: ${directPath}`, 'claude-path-manager')
-        result.isFound = true
-        result.path = directPath
-        result.version = await this.getVersionSafely(directPath)
+      // 发现所有可用的Claude安装
+      const installations = await this.discoverAllInstallations()
+      
+      if (installations.length === 0) {
+        result.error = '在所有已知路径中都未找到Claude CLI'
+        logger.warn(result.error, 'claude-path-manager')
         return result
       }
 
-      // 2. 使用which/where命令查找
-      const whichPath = await this.findWithWhichCommand()
-      if (whichPath) {
-        logger.info(`通过which/where命令找到Claude: ${whichPath}`, 'claude-path-manager')
+      // 记录所有找到的安装
+      for (const installation of installations) {
+        logger.info(`找到Claude安装: path=${installation.path}, version=${installation.version || 'unknown'}, source=${installation.source}`, 'claude-path-manager')
+      }
+
+      // 选择最佳安装
+      const bestInstallation = this.selectBestInstallation(installations)
+      if (bestInstallation) {
+        logger.info(`选择Claude安装: path=${bestInstallation.path}, version=${bestInstallation.version || 'unknown'}, source=${bestInstallation.source}`, 'claude-path-manager')
         result.isFound = true
-        result.path = whichPath
-        result.version = await this.getVersionSafely(whichPath)
+        result.path = bestInstallation.path
+        result.version = bestInstallation.version
         return result
       }
 
-      result.error = '在所有已知路径和PATH中都未找到Claude CLI'
+      result.error = '未找到有效的Claude CLI安装'
       logger.warn(result.error, 'claude-path-manager')
       return result
 
@@ -122,102 +138,317 @@ export class ClaudePathManager {
     }
   }
 
-  private async directFileSystemCheck(): Promise<string | null> {
-    const possiblePaths = [
-      '/usr/local/bin/claude',
-      '/opt/homebrew/bin/claude',
-      '/usr/bin/claude',
-      '/bin/claude',
-      path.join(process.env.HOME || '', '.local/bin/claude'),
-      path.join(process.env.HOME || '', 'bin/claude'),
-      '/opt/local/bin/claude'
+  private async discoverAllInstallations(): Promise<ClaudeInstallation[]> {
+    const installations: ClaudeInstallation[] = []
+
+    // 1. 尝试which命令
+    const whichInstallation = await this.tryWhichCommand()
+    if (whichInstallation) {
+      installations.push(whichInstallation)
+    }
+
+    // 2. 检查NVM路径
+    const nvmInstallations = await this.findNvmInstallations()
+    installations.push(...nvmInstallations)
+
+    // 3. 检查标准路径
+    const standardInstallations = await this.findStandardInstallations()
+    installations.push(...standardInstallations)
+
+    // 4. 检查PATH中的claude命令
+    const pathInstallation = await this.checkPathCommand()
+    if (pathInstallation) {
+      installations.push(pathInstallation)
+    }
+
+    // 去重（按路径）
+    const uniquePaths = new Set<string>()
+    return installations.filter(install => {
+      if (uniquePaths.has(install.path)) {
+        return false
+      }
+      uniquePaths.add(install.path)
+      return true
+    })
+  }
+
+  private async tryWhichCommand(): Promise<ClaudeInstallation | null> {
+    logger.debug('尝试使用which命令查找Claude...', 'claude-path-manager')
+    
+    const command = os.platform() === 'win32' ? 'where' : 'which'
+    const expandedEnv = this.getExpandedEnvironment()
+
+    return new Promise((resolve) => {
+      const childProcess = spawn(command, ['claude'], {
+        shell: true,
+        env: expandedEnv,
+        stdio: 'pipe'
+      })
+
+      let outputPath = ''
+      
+      childProcess.stdout?.on('data', (data) => {
+        outputPath += data.toString()
+      })
+
+      childProcess.on('close', async (code) => {
+        if (code === 0 && outputPath.trim()) {
+          const output = outputPath.trim()
+          
+          // 处理别名输出: "claude: aliased to /path/to/claude"
+          let claudePath: string
+          if (output.includes('aliased to')) {
+            const match = output.match(/aliased to\s+(.+)$/)
+            if (match) {
+              claudePath = match[1].trim()
+            } else {
+              resolve(null)
+              return
+            }
+          } else {
+            claudePath = output.split(/[\r\n]+/)[0].trim()
+          }
+
+          // 验证路径存在
+          if (!await this.fileExists(claudePath)) {
+            logger.warn(`which命令返回的路径不存在: ${claudePath}`, 'claude-path-manager')
+            resolve(null)
+            return
+          }
+
+          const version = await this.getVersionSafely(claudePath)
+          resolve({
+            path: claudePath,
+            version: version !== 'detected' && version !== 'unknown' ? version : undefined,
+            source: 'which',
+            installationType: InstallationType.System
+          })
+        } else {
+          resolve(null)
+        }
+      })
+
+      childProcess.on('error', () => {
+        resolve(null)
+      })
+    })
+  }
+
+  private async findNvmInstallations(): Promise<ClaudeInstallation[]> {
+    const installations: ClaudeInstallation[] = []
+    const homeDir = process.env.HOME
+    
+    if (!homeDir) {
+      return installations
+    }
+
+    const nvmDir = path.join(homeDir, '.nvm', 'versions', 'node')
+    logger.debug(`检查NVM目录: ${nvmDir}`, 'claude-path-manager')
+
+    if (!await this.directoryExists(nvmDir)) {
+      return installations
+    }
+
+    try {
+      const entries = await fs.promises.readdir(nvmDir)
+      
+      for (const entry of entries) {
+        const entryPath = path.join(nvmDir, entry)
+        const stats = await fs.promises.stat(entryPath).catch(() => null)
+        
+        if (stats?.isDirectory()) {
+          const claudePath = path.join(entryPath, 'bin', 'claude')
+          
+          if (await this.fileExists(claudePath)) {
+            logger.debug(`在NVM节点${entry}中找到Claude: ${claudePath}`, 'claude-path-manager')
+            
+            const version = await this.getVersionSafely(claudePath)
+            installations.push({
+              path: claudePath,
+              version: version !== 'detected' && version !== 'unknown' ? version : undefined,
+              source: `nvm (${entry})`,
+              installationType: InstallationType.System
+            })
+          }
+        }
+      }
+    } catch (error) {
+      logger.debug(`读取NVM目录失败: ${error}`, 'claude-path-manager')
+    }
+
+    return installations
+  }
+
+  private async findStandardInstallations(): Promise<ClaudeInstallation[]> {
+    const installations: ClaudeInstallation[] = []
+    const homeDir = process.env.HOME
+
+    const pathsToCheck: Array<{path: string, source: string}> = [
+      { path: '/usr/local/bin/claude', source: 'system' },
+      { path: '/opt/homebrew/bin/claude', source: 'homebrew' },
+      { path: '/usr/bin/claude', source: 'system' },
+      { path: '/bin/claude', source: 'system' }
     ]
 
-    // macOS特定路径
-    if (os.platform() === 'darwin') {
-      possiblePaths.push(
-        '/usr/local/lib/node_modules/.bin/claude',
-        '/opt/homebrew/lib/node_modules/.bin/claude',
-        path.join(process.env.HOME || '', '.npm-global/bin/claude'),
-        path.join(process.env.HOME || '', 'Applications/claude')
+    // 用户特定路径
+    if (homeDir) {
+      pathsToCheck.push(
+        { path: path.join(homeDir, '.claude/local/claude'), source: 'claude-local' },
+        { path: path.join(homeDir, '.local/bin/claude'), source: 'local-bin' },
+        { path: path.join(homeDir, '.npm-global/bin/claude'), source: 'npm-global' },
+        { path: path.join(homeDir, '.yarn/bin/claude'), source: 'yarn' },
+        { path: path.join(homeDir, '.bun/bin/claude'), source: 'bun' },
+        { path: path.join(homeDir, 'bin/claude'), source: 'home-bin' },
+        { path: path.join(homeDir, 'node_modules/.bin/claude'), source: 'node-modules' },
+        { path: path.join(homeDir, '.config/yarn/global/node_modules/.bin/claude'), source: 'yarn-global' }
       )
     }
 
-    // Windows路径
-    if (os.platform() === 'win32') {
-      possiblePaths.push(
-        'C:\\Program Files\\nodejs\\claude.exe',
-        path.join('C:\\Users', process.env.USERNAME || 'User', 'AppData\\Local\\npm\\claude.exe'),
-        path.join('C:\\Users', process.env.USERNAME || 'User', 'AppData\\Roaming\\npm\\claude.exe')
-      )
-    }
-
-    // 展开通配符路径并检查所有可能的路径
-    const expandedPaths = await this.expandWildcardPaths(possiblePaths)
-
-    for (const claudePath of expandedPaths) {
-      try {
-        const stats = await fs.promises.stat(claudePath)
-        if (stats.isFile()) {
-          // 检查执行权限 (在Unix系统上)
-          if (os.platform() !== 'win32') {
-            try {
-              await fs.promises.access(claudePath, fs.constants.X_OK)
-            } catch {
-              logger.debug(`文件存在但无执行权限: ${claudePath}`, 'claude-path-manager')
-              continue
-            }
-          }
-          return claudePath
-        }
-      } catch {
-        // 文件不存在或无法访问，继续检查下一个路径
-        continue
+    for (const {path: claudePath, source} of pathsToCheck) {
+      if (await this.fileExists(claudePath)) {
+        logger.debug(`在标准路径找到Claude: ${claudePath} (${source})`, 'claude-path-manager')
+        
+        const version = await this.getVersionSafely(claudePath)
+        installations.push({
+          path: claudePath,
+          version: version !== 'detected' && version !== 'unknown' ? version : undefined,
+          source,
+          installationType: InstallationType.System
+        })
       }
     }
 
-    return null
+    return installations
   }
 
-  private async expandWildcardPaths(paths: string[]): Promise<string[]> {
-    const expandedPaths: string[] = []
-    
-    for (const pathPattern of paths) {
-      if (pathPattern.includes('*')) {
-        try {
-          // 简单的通配符展开（主要处理nvm路径）
-          const parts = pathPattern.split('*')
-          if (parts.length === 3) {
-            const prefix = parts[0]
-            const suffix = parts[2]
-            
-            try {
-              const middleDir = path.dirname(prefix + 'dummy' + suffix)
-              const parentDir = path.dirname(middleDir)
-              
-              if (await this.directoryExists(parentDir)) {
-                const entries = await fs.promises.readdir(parentDir)
-                for (const entry of entries) {
-                  const candidatePath = path.join(parentDir, entry, path.basename(suffix))
-                  if (await this.fileExists(candidatePath)) {
-                    expandedPaths.push(candidatePath)
-                  }
-                }
-              }
-            } catch {
-              // 忽略展开失败的路径
-            }
-          }
-        } catch {
-          // 忽略通配符展开失败
+  private async checkPathCommand(): Promise<ClaudeInstallation | null> {
+    // 检查claude命令是否在PATH中可用
+    return new Promise((resolve) => {
+      const childProcess = spawn('claude', ['--version'], {
+        stdio: 'pipe',
+        env: this.getExpandedEnvironment()
+      })
+
+      let output = ''
+
+      childProcess.stdout?.on('data', (data) => {
+        output += data.toString()
+      })
+
+      childProcess.stderr?.on('data', (data) => {
+        output += data.toString()
+      })
+
+      childProcess.on('close', (code) => {
+        if (code === 0) {
+          logger.debug('claude命令在PATH中可用', 'claude-path-manager')
+          const version = this.extractVersion(output)
+          resolve({
+            path: 'claude',
+            version: version !== 'detected' && version !== 'unknown' ? version : undefined,
+            source: 'PATH',
+            installationType: InstallationType.System
+          })
+        } else {
+          resolve(null)
         }
-      } else {
-        expandedPaths.push(pathPattern)
+      })
+
+      childProcess.on('error', () => {
+        resolve(null)
+      })
+    })
+  }
+
+  private selectBestInstallation(installations: ClaudeInstallation[]): ClaudeInstallation | null {
+    if (installations.length === 0) {
+      return null
+    }
+
+    // 按版本和来源优先级排序
+    const sorted = installations.sort((a, b) => {
+      // 首先比较版本
+      if (a.version && b.version) {
+        const versionComparison = this.compareVersions(a.version, b.version)
+        if (versionComparison !== 0) {
+          return versionComparison > 0 ? -1 : 1 // 版本高的优先
+        }
+      } else if (a.version && !b.version) {
+        return -1 // 有版本信息的优先
+      } else if (!a.version && b.version) {
+        return 1
+      }
+
+      // 版本相同或都没有版本，按来源优先级
+      const aPriority = this.getSourcePriority(a.source)
+      const bPriority = this.getSourcePriority(b.source)
+      
+      if (aPriority !== bPriority) {
+        return aPriority - bPriority // 优先级数字小的优先
+      }
+
+      // 最后，避免选择仅仅是"claude"的PATH查找结果
+      if (a.path === 'claude' && b.path !== 'claude') {
+        return 1
+      } else if (a.path !== 'claude' && b.path === 'claude') {
+        return -1
+      }
+
+      return 0
+    })
+
+    return sorted[0]
+  }
+
+  private getSourcePriority(source: string): number {
+    const priorities: Record<string, number> = {
+      'which': 1,
+      'homebrew': 2,
+      'system': 3,
+      'local-bin': 5,
+      'claude-local': 6,
+      'npm-global': 7,
+      'yarn': 8,
+      'yarn-global': 8,
+      'bun': 9,
+      'node-modules': 10,
+      'home-bin': 11,
+      'PATH': 12
+    }
+
+    // NVM sources
+    if (source.startsWith('nvm')) {
+      return 4
+    }
+
+    return priorities[source] || 13
+  }
+
+  private compareVersions(version1: string, version2: string): number {
+    const parseVersion = (v: string) => {
+      return v.split('.').map(part => {
+        // 处理像"1.0.17-beta"这样的版本，只取数字部分
+        const numMatch = part.match(/^\d+/)
+        return numMatch ? parseInt(numMatch[0], 10) : 0
+      })
+    }
+
+    const v1Parts = parseVersion(version1)
+    const v2Parts = parseVersion(version2)
+    const maxLength = Math.max(v1Parts.length, v2Parts.length)
+
+    for (let i = 0; i < maxLength; i++) {
+      const v1Part = v1Parts[i] || 0
+      const v2Part = v2Parts[i] || 0
+      
+      if (v1Part !== v2Part) {
+        return v1Part - v2Part
       }
     }
-    
-    return expandedPaths
+
+    return 0
   }
+
 
   private async directoryExists(dirPath: string): Promise<boolean> {
     try {
@@ -237,41 +468,24 @@ export class ClaudePathManager {
     }
   }
 
-  private async findWithWhichCommand(): Promise<string | null> {
-    const expandedEnv = this.getExpandedEnvironment()
-    const command = os.platform() === 'win32' ? 'where' : 'which'
-
-    return new Promise((resolve) => {
-      const childProcess = spawn(command, ['claude'], {
-        shell: true,
-        env: expandedEnv,
-        stdio: 'pipe'
-      })
-
-      let outputPath = ''
-      
-      childProcess.stdout?.on('data', (data) => {
-        outputPath += data.toString()
-      })
-
-      childProcess.on('close', (code) => {
-        if (code === 0 && outputPath.trim()) {
-          // 获取第一行结果并去除换行符
-          const foundPath = outputPath.split(/[\r\n]+/)[0].trim()
-          resolve(foundPath || null)
-        } else {
-          resolve(null)
-        }
-      })
-
-      childProcess.on('error', () => {
-        resolve(null)
-      })
-    })
-  }
 
   private getExpandedEnvironment(): NodeJS.ProcessEnv {
     const env = { ...process.env }
+    
+    // 继承关键环境变量
+    const essentialEnvVars = [
+      'PATH', 'HOME', 'USER', 'SHELL', 'LANG', 'NODE_PATH', 
+      'NVM_DIR', 'NVM_BIN', 'HOMEBREW_PREFIX', 'HOMEBREW_CELLAR'
+    ]
+    
+    // 确保关键变量被继承
+    for (const [key, value] of Object.entries(process.env)) {
+      if (essentialEnvVars.includes(key) || key.startsWith('LC_')) {
+        if (value) {
+          env[key] = value
+        }
+      }
+    }
     
     // 常见的二进制文件安装路径
     const commonPaths = [
@@ -282,6 +496,8 @@ export class ClaudePathManager {
       process.env.HOME + '/.local/bin',
       process.env.HOME + '/bin',
       process.env.HOME + '/.bun/bin',
+      process.env.HOME + '/.npm-global/bin',
+      process.env.HOME + '/.yarn/bin',
       '/opt/local/bin'
     ].filter(Boolean)
 

@@ -312,7 +312,9 @@ async function detectClaudeAuthorization(accountEmail: string): Promise<{ succes
               // 获取临时PTY管理器并停止
               const tempPtyManager = ptyManagers.get(tempSessionId)
               if (tempPtyManager) {
-                stopPromise = tempPtyManager.stop().then(() => {
+                stopPromise = Promise.resolve().then(async () => {
+                  tempPtyManager.destroy()
+                  await tempPtyManager.stop()
                   ptyManagers.delete(tempSessionId)
                 })
               }
@@ -348,7 +350,9 @@ async function detectClaudeAuthorization(accountEmail: string): Promise<{ succes
               // 获取临时PTY管理器并停止
               const tempPtyManager = ptyManagers.get(tempSessionId)
               if (tempPtyManager) {
-                stopPromise = tempPtyManager.stop().then(() => {
+                stopPromise = Promise.resolve().then(async () => {
+                  tempPtyManager.destroy()
+                  await tempPtyManager.stop()
                   ptyManagers.delete(tempSessionId)
                 })
               }
@@ -390,6 +394,7 @@ async function detectClaudeAuthorization(accountEmail: string): Promise<{ succes
       if (!useExistingSession) {
         const tempPtyManager = ptyManagers.get(tempSessionId)
         if (tempPtyManager) {
+          tempPtyManager.destroy()
           await tempPtyManager.stop()
           ptyManagers.delete(tempSessionId)
         }
@@ -654,7 +659,12 @@ function setupIpcHandlers(mainWindow: BrowserWindow): void {
 
     const manager = ptyManagers.get(sessionId);
     if (manager) {
-      await manager.stop();
+      try {
+        manager.destroy();
+        await manager.stop();
+      } catch (error) {
+        logger.error(`停止PTY管理器失败: ${sessionId}`, 'main', error as Error);
+      }
       ptyManagers.delete(sessionId);
     }
     if (currentActiveSessionId === sessionId) {
@@ -836,10 +846,16 @@ app.on('window-all-closed', async () => {
   // Clean up PTY managers
   for (const [sessionId, manager] of ptyManagers) {
     logger.info(`停止会话的PTY管理器: ${sessionId}`, 'main')
-    await manager.stop()
+    try {
+      // First destroy to prevent further IPC communication
+      manager.destroy()
+      // Then stop the process
+      await manager.stop()
+    } catch (error) {
+      logger.error(`清理PTY管理器失败: ${sessionId}`, 'main', error as Error)
+    }
   }
   ptyManagers.clear()
-  
   
   logger.info('清理完成', 'main')
   

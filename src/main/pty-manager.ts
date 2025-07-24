@@ -21,6 +21,11 @@ export class PtyManager {
   private mainWindow: BrowserWindow | null = null
   private currentEnv: Record<string, string | undefined> = {}
   private sessionId: string
+  private lastInterceptorScript: string = ''
+  private lastClaudeCommand: string = ''
+  private lastWorkingDirectory: string = ''
+  private lastArgs: string[] = []
+  private isDestroyed: boolean = false
 
   constructor(
     mainWindow: BrowserWindow,
@@ -69,21 +74,43 @@ export class PtyManager {
         throw new Error(`Invalid working directory: ${workingDirectory} - ${(error as Error).message}`)
       }
 
-      const mergedEnv = {
-        ...this.currentEnv,
-        ...env,
-        CLAUDE_PROJECT_DIR: workingDirectory,
+      // ==========================================================
+      // ===== 核心改动：获取并合并完整的 Shell 环境 ==============
+      // ==========================================================
+
+      // 异步获取用户登录 shell 的 PATH
+      let userShellPath: string;
+      try {
+        // 使用动态导入来加载 ES 模块
+        const { shellPath } = await import('shell-path');
+        userShellPath = await shellPath();
+        logger.info(`成功获取用户 Shell PATH: ${userShellPath}`, 'pty-manager');
+      } catch (error) {
+        logger.warn(`获取Shell PATH失败，使用当前进程PATH: ${error}`, 'pty-manager');
+        userShellPath = process.env.PATH || '';
       }
+
+      const mergedEnv = {
+        ...this.currentEnv, // 这是 Electron 进程的基础 env
+        ...env,             // 这是从 options 传入的自定义 env
+        CLAUDE_PROJECT_DIR: workingDirectory,
+        // 关键一步：使用完整的 Shell PATH 覆盖/增强现有的 PATH
+        // 我们将它放在前面，以确保用户自定义的路径（如 Homebrew, nvm, bun）优先被搜索
+        PATH: userShellPath ? `${userShellPath}:${process.env.PATH || ''}` : process.env.PATH,
+        // 确保 HOME 目录也被正确设置，很多 CLI 工具依赖它
+        HOME: os.homedir(),
+      };
 
       // 记录关键环境变量以便调试
       logger.info(`环境变量设置: CLAUDE_PROJECT_DIR=${mergedEnv.CLAUDE_PROJECT_DIR}`, 'pty-manager')
+      logger.debug(`合并后的完整 PATH: ${mergedEnv.PATH}`, 'pty-manager')
 
       // ==========================================================
       // ===== 核心改动：使用 node --require 方式启动 claude ========
       // ==========================================================
 
-      // 获取拦截器脚本路径
-      const interceptorScript = path.resolve(__dirname, 'claude-interceptor.js');
+      // 获取拦截器脚本路径（需要处理 asar 包的情况）
+      const interceptorScript = await this.getInterceptorScriptPath();
 
       // 先获取claude命令的实际路径
       const claudeCommand = await this.getClaudeCommandPath();
@@ -91,6 +118,12 @@ export class PtyManager {
       // 使用 node --require 启动 claude
       const command = 'node';
       const args = ['--require', interceptorScript, claudeCommand, ...(options.args || [])];
+
+      // 保存启动参数用于错误诊断
+      this.lastInterceptorScript = interceptorScript;
+      this.lastClaudeCommand = claudeCommand;
+      this.lastWorkingDirectory = workingDirectory;
+      this.lastArgs = options.args || [];
 
       logger.info(`创建专用 PTY 进程: command=${command}, args=[${args.join(', ')}], cwd=${workingDirectory}`, 'pty-manager')
       logger.info(`使用拦截器脚本: ${interceptorScript}`, 'pty-manager')
@@ -142,6 +175,9 @@ export class PtyManager {
 
     logger.info('停止进程...', 'pty-manager')
 
+    // Mark as destroyed to prevent further IPC communication
+    this.isDestroyed = true
+
     try {
       // Send exit command based on platform
       if (os.platform() === 'win32') {
@@ -161,6 +197,7 @@ export class PtyManager {
       logger.error('停止过程中出错', 'pty-manager', error as Error)
     } finally {
       this.ptyProcess = null
+      this.mainWindow = null
       logger.info('进程已停止', 'pty-manager')
     }
   }
@@ -184,6 +221,11 @@ export class PtyManager {
 
   public isRunning(): boolean {
     return this.ptyProcess !== null
+  }
+
+  public destroy(): void {
+    this.isDestroyed = true
+    this.mainWindow = null
   }
 
   private setupEventHandlers(): void {
@@ -225,10 +267,17 @@ export class PtyManager {
 
       logger.debug(`[${this.sessionId}] 从 Claude PTY 接收数据: "${data.slice(0, 100).replace(/\r\n/g, ' ')}${data.length > 100 ? '...' : ''}"`, 'pty-manager')
 
-      this.mainWindow?.webContents.send('terminal:data', {
-        sessionId: this.sessionId,
-        data
-      })
+      // Check if manager is destroyed or window is destroyed before sending IPC
+      if (!this.isDestroyed && this.mainWindow && !this.mainWindow.isDestroyed()) {
+        try {
+          this.mainWindow.webContents.send('terminal:data', {
+            sessionId: this.sessionId,
+            data
+          })
+        } catch (error) {
+          logger.warn(`无法发送终端数据到渲染进程: ${(error as Error).message}`, 'pty-manager')
+        }
+      }
     })
 
     this.ptyProcess.onExit((exitInfo) => {
@@ -238,10 +287,16 @@ export class PtyManager {
       if (exitCode !== 0) {
         logger.error(`Claude PTY 进程异常退出，代码: ${exitCode}，信号: ${signal}，会话 ${this.sessionId}`, 'pty-manager')
 
+        // 详细的错误诊断信息
+        logger.error(`启动命令: node --require ${this.lastInterceptorScript} ${this.lastClaudeCommand} ${this.lastArgs.join(' ')}`, 'pty-manager')
+        logger.error(`工作目录: ${this.lastWorkingDirectory}`, 'pty-manager')
+        
         // 如果有输出缓冲区内容，记录最后的输出
         if (outputBuffer.trim()) {
           const lastOutput = outputBuffer.slice(-500) // 记录最后500个字符
           logger.error(`最后的输出内容: ${lastOutput.replace(/\r\n/g, ' ')}`, 'pty-manager')
+        } else {
+          logger.error('没有捕获到任何输出内容', 'pty-manager')
         }
 
         // 根据退出代码提供更详细的错误信息
@@ -269,16 +324,73 @@ export class PtyManager {
 
       this.ptyProcess = null
 
-      const exitMessage = `\r\n\x1b[36m[Claude session ended. Terminal closed.]\x1b[0m\r\n`
-      this.mainWindow?.webContents.send('terminal:data', {
-        sessionId: this.sessionId,
-        data: exitMessage
-      })
+      // Check if manager is destroyed or window is destroyed before sending IPC
+      if (!this.isDestroyed && this.mainWindow && !this.mainWindow.isDestroyed()) {
+        try {
+          const exitMessage = `\r\n\x1b[36m[Claude session ended. Terminal closed.]\x1b[0m\r\n`
+          this.mainWindow.webContents.send('terminal:data', {
+            sessionId: this.sessionId,
+            data: exitMessage
+          })
 
-      setTimeout(() => {
-        this.mainWindow?.webContents.send('terminal:closed', { sessionId: this.sessionId, error: exitCode !== 0 })
-      }, 500)
+          setTimeout(() => {
+            // Double check again before sending terminal:closed
+            if (!this.isDestroyed && this.mainWindow && !this.mainWindow.isDestroyed()) {
+              try {
+                this.mainWindow.webContents.send('terminal:closed', { sessionId: this.sessionId, error: exitCode !== 0 })
+              } catch (error) {
+                logger.warn(`无法发送terminal:closed事件到渲染进程: ${(error as Error).message}`, 'pty-manager')
+              }
+            }
+          }, 500)
+        } catch (error) {
+          logger.warn(`无法发送退出消息到渲染进程: ${(error as Error).message}`, 'pty-manager')
+        }
+      }
     })
+  }
+
+  /**
+   * 获取拦截器脚本路径，处理 asar 包的情况
+   */
+  private async getInterceptorScriptPath(): Promise<string> {
+    const originalPath = path.resolve(__dirname, 'claude-interceptor.js');
+    
+    // 检查是否在 asar 包中
+    if (originalPath.includes('.asar')) {
+      // 在 asar 包中，需要将文件复制到临时目录
+      const tmpDir = os.tmpdir();
+      const tmpInterceptorPath = path.join(tmpDir, 'claude-interceptor.js');
+      
+      try {
+        // 检查临时文件是否已存在且是最新的
+        const originalStats = await fs.promises.stat(originalPath);
+        let needsCopy = true;
+        
+        try {
+          const tmpStats = await fs.promises.stat(tmpInterceptorPath);
+          // 如果临时文件存在且修改时间不早于原文件，则不需要复制
+          needsCopy = tmpStats.mtime < originalStats.mtime;
+        } catch {
+          // 临时文件不存在，需要复制
+          needsCopy = true;
+        }
+        
+        if (needsCopy) {
+          const interceptorContent = await fs.promises.readFile(originalPath, 'utf8');
+          await fs.promises.writeFile(tmpInterceptorPath, interceptorContent, 'utf8');
+          logger.info(`已将拦截器脚本复制到临时目录: ${tmpInterceptorPath}`, 'pty-manager');
+        }
+        
+        return tmpInterceptorPath;
+      } catch (error) {
+        logger.error('复制拦截器脚本到临时目录失败', 'pty-manager', error as Error);
+        throw new Error(`无法复制拦截器脚本: ${(error as Error).message}`);
+      }
+    } else {
+      // 不在 asar 包中，直接使用原路径
+      return originalPath;
+    }
   }
 
   /**
