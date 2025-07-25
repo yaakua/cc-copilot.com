@@ -3,16 +3,7 @@ import { Terminal as XTerm } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import '@xterm/xterm/css/xterm.css'
 import { logger } from '../utils/logger'
-interface Session {
-  id: string
-  name: string
-  projectPath: string
-  createdAt: string
-  lastActiveAt: string
-  filePath: string
-  claudeProjectId?: string
-  claudeProjectDir?: string
-}
+import { Session } from '../../../shared/types'
 interface TerminalProps {
   sessionId: string
   isActive: boolean

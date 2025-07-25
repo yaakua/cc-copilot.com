@@ -127,6 +127,31 @@ const api = {
     return () => {
       ipcRenderer.removeListener('claude:detection-result', listener)
     }
+  },
+
+  // Settings event listeners
+  onServiceProvidersUpdated: (callback: (providers: any[]) => void) => {
+    const listener = (_event: any, providers: any) => callback(providers)
+    ipcRenderer.on('service-providers:updated', listener)
+    return () => ipcRenderer.removeListener('service-providers:updated', listener)
+  },
+  
+  onActiveServiceProviderChanged: (callback: (providerId: string) => void) => {
+    const listener = (_event: any, providerId: string) => callback(providerId)
+    ipcRenderer.on('active-service-provider:changed', listener)
+    return () => ipcRenderer.removeListener('active-service-provider:changed', listener)
+  },
+  
+  onActiveAccountChanged: (callback: (data: { providerId: string, accountId: string }) => void) => {
+    const listener = (_event: any, data: any) => callback(data)
+    ipcRenderer.on('active-account:changed', listener)
+    return () => ipcRenderer.removeListener('active-account:changed', listener)
+  },
+  
+  onSettingsUpdated: (callback: (settings: any) => void) => {
+    const listener = (_event: any, settings: any) => callback(settings)
+    ipcRenderer.on('settings:updated', listener)
+    return () => ipcRenderer.removeListener('settings:updated', listener)
   }
 }
 

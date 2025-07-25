@@ -64,7 +64,29 @@ const StatusBar: React.FC<StatusBarProps> = ({ activeSessionId }) => {
       }
     }, 5000)
     
-    return () => clearInterval(interval)
+    // Listen for settings changes
+    const unsubscribeServiceProviders = window.api.onServiceProvidersUpdated((providers) => {
+      setServiceProviders(providers)
+    })
+    
+    const unsubscribeActiveProvider = window.api.onActiveServiceProviderChanged(async () => {
+      // Reload active provider data when it changes
+      const active = await window.api.getActiveProvider()
+      setActiveProvider(active)
+    })
+    
+    const unsubscribeActiveAccount = window.api.onActiveAccountChanged(async () => {
+      // Reload active provider data when active account changes
+      const active = await window.api.getActiveProvider()
+      setActiveProvider(active)
+    })
+    
+    return () => {
+      clearInterval(interval)
+      unsubscribeServiceProviders()
+      unsubscribeActiveProvider()
+      unsubscribeActiveAccount()
+    }
   }, [activeSessionId])
 
   const formatPath = (path: string) => {
@@ -121,7 +143,7 @@ const StatusBar: React.FC<StatusBarProps> = ({ activeSessionId }) => {
       const targetProvider = serviceProviders.find(p => p.id === providerId)
       if (targetProvider?.type === 'claude_official') {
         // 找到要切换的具体账号
-        const targetAccount = targetProvider.accounts?.find(account => 
+        const targetAccount = targetProvider.accounts?.find((account: any) => 
           targetProvider.type === 'claude_official' ? account.emailAddress === accountId : account.id === accountId
         )
         
@@ -148,11 +170,12 @@ const StatusBar: React.FC<StatusBarProps> = ({ activeSessionId }) => {
     }
   }
 
-  const handleRefreshClaudeAccounts = async () => {
+  const handleRefreshAccounts = async () => {
     try {
+      // Refresh Claude official accounts from .claude.json
       await window.api.refreshClaudeAccounts()
       
-      // 重新加载数据
+      // Reload all service providers (both Claude official and third-party)
       const [providers, active] = await Promise.all([
         window.api.getServiceProviders(),
         window.api.getActiveProvider()
@@ -161,9 +184,9 @@ const StatusBar: React.FC<StatusBarProps> = ({ activeSessionId }) => {
       setServiceProviders(providers)
       setActiveProvider(active)
       
-      logger.info('Claude账号已刷新')
+      logger.info('所有账号已刷新')
     } catch (error) {
-      logger.error('刷新Claude账号失败', error as Error)
+      logger.error('刷新账号失败', error as Error)
     }
   }
 
@@ -219,9 +242,9 @@ const StatusBar: React.FC<StatusBarProps> = ({ activeSessionId }) => {
                 <button 
                   className="text-xs px-2 py-1 rounded hover:opacity-80"
                   style={{ backgroundColor: 'var(--bg-secondary)', color: 'var(--text-secondary)' }}
-                  onClick={handleRefreshClaudeAccounts}
+                  onClick={handleRefreshAccounts}
                 >
-                  Refresh Claude
+                  Refresh Accounts
                 </button>
               </div>
               
@@ -312,13 +335,34 @@ const StatusBar: React.FC<StatusBarProps> = ({ activeSessionId }) => {
         )}
       </div>
       
-      {/* Right side - Git/Project info */}
-      <div style={{ color: 'var(--text-tertiary)' }}>
-        {statusInfo && statusInfo.projectPath ? (
-          <span>main*</span>
-        ) : (
-          <span>CLI Assistant</span>
-        )}
+      {/* Right side - Git/Project info and Help */}
+      <div className="flex items-center gap-4" style={{ color: 'var(--text-tertiary)' }}>
+        <div>
+          {statusInfo && statusInfo.projectPath ? (
+            <span>main*</span>
+          ) : (
+            <span></span>
+          )}
+        </div>
+        <button 
+          onClick={() => window.open('https://cc-copilot.com?ref=cc-copilot', '_blank')}
+          className="flex items-center gap-1 px-2 py-1 rounded hover:opacity-80 transition-opacity"
+          style={{ color: 'var(--text-tertiary)' }}
+          onMouseEnter={(e) => {
+            e.currentTarget.style.backgroundColor = 'var(--hover-bg)'
+            e.currentTarget.style.color = 'var(--text-primary)'
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.backgroundColor = 'transparent'
+            e.currentTarget.style.color = 'var(--text-tertiary)'
+          }}
+          title="Click to open website"
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 16 16" strokeWidth="1.5" stroke="currentColor" className="w-3 h-3">
+            <path strokeLinecap="round" strokeLinejoin="round" d="M13.828 10.172a4 4 0 0 0-5.656-5.656l-4 4a4 4 0 1 0 5.656 5.656l1.102-1.101m-.758-4.899a4 4 0 0 0-5.656 5.656l4-4Z"/>
+          </svg>
+          <span className="text-xs">cc-copilot.com</span>
+        </button>
       </div>
       
       {/* Click outside to close menu */}

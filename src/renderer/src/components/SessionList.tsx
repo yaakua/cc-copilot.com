@@ -153,11 +153,29 @@ const SessionList: React.FC<SessionListProps> = ({
     <div className="flex flex-col h-full">
       {/* Header with Logo */}
       <div className="flex items-center gap-3 p-4 shrink-0">
-        <svg className="w-8 h-8" style={{ color: 'var(--accent)' }} viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <img 
+          src="./cc-copilot-logo.avif" 
+          alt="CC Copilot Logo" 
+          className="w-8 h-8"
+          onError={(e) => {
+            // Fallback to SVG if image fails to load
+            e.currentTarget.style.display = 'none';
+            const svg = e.currentTarget.nextElementSibling;
+            //@ts-ignore
+            if (svg) svg.style.display = 'block';
+          }}
+        />
+        <svg 
+          className="w-8 h-8" 
+          style={{ display: 'none', color: 'var(--accent)' }} 
+          viewBox="0 0 24 24" 
+          fill="none" 
+          xmlns="http://www.w3.org/2000/svg"
+        >
           <path d="M6.5 10.5L12 15.5L17.5 10.5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"></path>
           <path d="M5.5 5.5H18.5V18.5H5.5V5.5Z" stroke="currentColor" strokeWidth="2"></path>
         </svg>
-        <h1 className="text-xl font-bold">CLI Assistant</h1>
+        <h1 className="text-xl font-bold">CC Copilot</h1>
       </div>
 
       {/* Project List */}

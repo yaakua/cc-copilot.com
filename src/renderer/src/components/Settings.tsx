@@ -70,7 +70,6 @@ const Settings: React.FC<SettingsProps> = ({
   const loadSettings = async () => {
     try {
       const settings = await window.api.getSettings()
-      setAiProviders(settings?.apiProviders || [])
       setProxySettings({
         enabled: settings?.proxyConfig?.enabled || false,
         url: settings?.proxyConfig?.url || 'http://127.0.0.1:1087',
@@ -81,6 +80,35 @@ const Settings: React.FC<SettingsProps> = ({
       // Load service providers
       const providers = await window.api.getServiceProviders()
       setServiceProviders(providers || [])
+      
+      // Convert third-party service providers to AI providers for the UI
+      // Only load providers that were created from AI provider settings (have third_party_ prefix)
+      const thirdPartyProviders = providers?.filter(p => 
+        p.type === 'third_party' && p.id.startsWith('third_party_')
+      ) || []
+      const aiProvidersFromService = thirdPartyProviders.map(provider => {
+        // Get the first account as the provider info
+        const account = provider.accounts?.[0]
+        return {
+          id: account?.id || provider.id.replace('third_party_', ''),
+          name: provider.name || account?.name || 'Unnamed Provider',
+          apiUrl: account?.baseUrl || '',
+          apiKey: account?.apiKey || ''
+        }
+      })
+      
+      // Also load legacy apiProviders for backward compatibility
+      const legacyProviders = settings?.apiProviders || []
+      
+      // Combine both sources, preferring service providers
+      const combinedProviders = [...aiProvidersFromService]
+      legacyProviders.forEach(legacy => {
+        if (!combinedProviders.some(p => p.id === legacy.id)) {
+          combinedProviders.push(legacy)
+        }
+      })
+      
+      setAiProviders(combinedProviders)
     } catch (error) {
       console.error('Failed to load settings:', error)
     }
@@ -88,8 +116,8 @@ const Settings: React.FC<SettingsProps> = ({
 
   const saveSettings = async () => {
     try {
+      // Save proxy settings
       const settingsToSave = {
-        apiProviders: aiProviders,
         proxyConfig: {
           enabled: proxySettings.enabled,
           url: proxySettings.url,
@@ -100,6 +128,19 @@ const Settings: React.FC<SettingsProps> = ({
         }
       }
       await window.api.updateSettings(settingsToSave)
+
+      // Save AI providers as third-party service providers
+      for (const provider of aiProviders) {
+        const providerId = `third_party_${provider.id}`
+        const account = {
+          id: provider.id,
+          name: provider.name,
+          apiKey: provider.apiKey,
+          baseUrl: provider.apiUrl,
+          description: `API Provider: ${provider.name}`
+        }
+        await window.api.addThirdPartyAccount(providerId, account)
+      }
     } catch (error) {
       console.error('Failed to save settings:', error)
     }
@@ -122,9 +163,26 @@ const Settings: React.FC<SettingsProps> = ({
     setAiProviders(updatedProviders)
   }
 
-  const removeAIProvider = (id: string) => {
-    const updatedProviders = aiProviders.filter(provider => provider.id !== id)
-    setAiProviders(updatedProviders)
+  const removeAIProvider = async (id: string) => {
+    try {
+      // Remove from service providers if it exists there
+      const providers = await window.api.getServiceProviders()
+      const providerId = `third_party_${id}`
+      const existingProvider = providers.find(p => p.id === providerId && p.type === 'third_party')
+      if (existingProvider && existingProvider.accounts.length > 0) {
+        const account = existingProvider.accounts[0]
+        await window.api.removeThirdPartyAccount(providerId, account.id)
+      }
+      
+      // Remove from local state
+      const updatedProviders = aiProviders.filter(provider => provider.id !== id)
+      setAiProviders(updatedProviders)
+    } catch (error) {
+      console.error('Failed to remove AI provider:', error)
+      // Still remove from local state even if API call fails
+      const updatedProviders = aiProviders.filter(provider => provider.id !== id)
+      setAiProviders(updatedProviders)
+    }
   }
 
   const updateProxySettings = (field: keyof ProxySettings, value: any) => {
@@ -562,20 +620,20 @@ const Settings: React.FC<SettingsProps> = ({
 
         <div className="p-6 border-t border-gray-700 flex justify-between">
           <button
+            onClick={onClose}
+            className="px-6 py-2 bg-gray-600 hover:bg-gray-700 rounded transition-colors"
+          >
+            Cancel
+          </button>
+          <button
             onClick={async () => {
               // Save all settings before closing
               await saveSettings()
               onClose()
             }}
-            className="px-6 py-2 bg-green-600 hover:bg-green-700 rounded transition-colors"
+            className="px-6 py-2 bg-green-600 hover:bg-green-700 rounded transition-colors ml-3"
           >
             Save & Close
-          </button>
-          <button
-            onClick={onClose}
-            className="px-6 py-2 bg-gray-600 hover:bg-gray-700 rounded transition-colors ml-3"
-          >
-            Cancel
           </button>
         </div>
       </div>

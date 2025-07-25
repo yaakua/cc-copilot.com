@@ -19,6 +19,9 @@ let settingsManager: SettingsManager
 const ptyManagers = new Map<string, PtyManager>()
 let currentActiveSessionId: string | null = null
 
+// IPC handlers setup flag
+let ipcHandlersSetup = false
+
 function createWindow(): void {
   // Create the browser window.
   const mainWindow = new BrowserWindow({
@@ -126,8 +129,11 @@ function createWindow(): void {
     mainWindow.loadFile(join(__dirname, '../renderer/index.html'))
   }
 
-  // Setup IPC handlers
-  setupIpcHandlers(mainWindow)
+  // Setup IPC handlers (only once)
+  if (!ipcHandlersSetup) {
+    setupIpcHandlers(mainWindow)
+    ipcHandlersSetup = true
+  }
 }
 
 function getOrCreatePtyManager(sessionId: string, mainWindow: BrowserWindow): PtyManager {
@@ -779,6 +785,23 @@ function setupIpcHandlers(mainWindow: BrowserWindow): void {
       logger.error('检测Claude authorization失败', 'main', error as Error)
       return { success: false, error: `检测失败: ${(error as Error).message}` }
     }
+  })
+
+  // Settings event forwarding to renderer
+  settingsManager.on('service-providers:updated', (providers) => {
+    mainWindow.webContents.send('service-providers:updated', providers)
+  })
+  
+  settingsManager.on('active-service-provider:changed', (providerId) => {
+    mainWindow.webContents.send('active-service-provider:changed', providerId)
+  })
+  
+  settingsManager.on('active-account:changed', (data) => {
+    mainWindow.webContents.send('active-account:changed', data)
+  })
+  
+  settingsManager.on('settings:updated', (settings) => {
+    mainWindow.webContents.send('settings:updated', settings)
   })
 
   // Get current session info for status bar

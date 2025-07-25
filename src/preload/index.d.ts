@@ -71,6 +71,12 @@ declare global {
       
       // Status APIs
       getCurrentStatus: () => Promise<any>
+
+      // Settings event listeners
+      onServiceProvidersUpdated: (callback: (providers: any[]) => void) => () => void
+      onActiveServiceProviderChanged: (callback: (providerId: string) => void) => () => void
+      onActiveAccountChanged: (callback: (data: { providerId: string, accountId: string }) => void) => () => void
+      onSettingsUpdated: (callback: (settings: any) => void) => () => void
     }
   }
 }
