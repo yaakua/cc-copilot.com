@@ -1,0 +1,76 @@
+{
+  "common": {
+    "retry": "Retry",
+    "reload": "Reload",
+    "close": "Close tab",
+    "unknown": "Unknown",
+    "error": "Error",
+    "settings": "Settings",
+    "ok": "OK",
+    "cancel": "Cancel"
+  },
+  "errorBoundary": {
+    "title": "Something went wrong",
+    "description": "An unexpected error occurred in this component.",
+    "errorDetails": "Error Details"
+  },
+  "welcome": {
+    "title": "Welcome to CC Copilot",
+    "subtitle": "Your intelligent coding assistant is ready",
+    "quickStart": "Quick Start",
+    "step1": "1. Create Project: Click \"New Project\" button, select project folder",
+    "step2": "2. Start Conversation: Click \"+\" button next to project or click on history session",
+    "step3": "3. Switch Channel: One-click switch between different accounts/API channels in status bar",
+    "features": "Core Features",
+    "feature1": "Project-based organization",
+    "feature2": "Multi-provider API support",
+    "feature3": "Dynamic model switching",
+    "feature4": "Usage analytics",
+    "faq": "FAQ",
+    "faq1": "How to install Claude CLI?",
+    "faq1Answer": "Download and install from official Anthropic website",
+    "faq2": "How to switch API providers?",
+    "faq2Answer": "Click status bar at bottom right to switch between providers",
+    "faq3": "How to configure proxy?",
+    "faq3Answer": "Set up proxy in Settings for network access"
+  },
+  "statusBar": {
+    "activated": "Activated",
+    "notActivated": "Not activated - need to use a history session to activate",
+    "refreshAccounts": "Refresh All Accounts",
+    "switchProvider": "Switch Service Provider",
+    "switchAccount": "Switch Account"
+  },
+  "settings": {
+    "title": "Settings",
+    "claudeSettings": "Claude Settings",
+    "claudePath": "Claude CLI Path",
+    "autoDetect": "Auto-detect",
+    "manualPath": "Manual Path",
+    "detectButton": "Detect",
+    "testConnection": "Test Connection",
+    "aiProviders": "AI Providers",
+    "addProvider": "Add Third-party Provider",
+    "providerName": "Provider Name",
+    "apiKey": "API Key",
+    "baseUrl": "Base URL",
+    "modelName": "Model Name",
+    "save": "Save",
+    "detectSuccess": "Account detection successful",
+    "detectFailed": "Account detection failed",
+    "detectTimeout": "Detection timeout, please ensure Claude CLI is working properly and retry",
+    "commandFailed": "Claude command execution failed, please check if Claude CLI is correctly installed",
+    "noAccountSelected": "Please ensure the correct Claude account is selected",
+    "networkError": "Network or system error occurred during detection, please check application status and retry"
+  },
+  "sessions": {
+    "newProject": "New Project",
+    "justNow": "Just now",
+    "project": "Project",
+    "session": "Session"
+  },
+  "alerts": {
+    "claudeNotInstalled": "Unable to create project: Claude CLI not detected\n\nError: {{error}}\n\nPlease install Claude CLI and re-detect.",
+    "sessionCreationFailed": "Unable to create session: Claude CLI not detected\n\nError: {{error}}\n\nPlease install Claude CLI and re-detect."
+  }
+}

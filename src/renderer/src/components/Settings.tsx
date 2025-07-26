@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react'
+import { useTranslation } from 'react-i18next'
 
 interface ClaudeDetectionResult {
   isInstalled: boolean
@@ -54,6 +55,7 @@ const Settings: React.FC<SettingsProps> = ({
   onRedetectClaude,
   onClose
 }) => {
+  const { t, i18n } = useTranslation()
   const [aiProviders, setAiProviders] = useState<AIProvider[]>([])
   const [proxySettings, setProxySettings] = useState<ProxySettings>({
     enabled: false,
@@ -61,7 +63,7 @@ const Settings: React.FC<SettingsProps> = ({
   })
   const [serviceProviders, setServiceProviders] = useState<ServiceProvider[]>([])
   const [detectingAuth, setDetectingAuth] = useState<Record<string, boolean>>({})
-  const [activeTab, setActiveTab] = useState<'general' | 'accounts' | 'providers' | 'proxy'>('general')
+  const [activeTab, setActiveTab] = useState<'general' | 'accounts' | 'providers' | 'proxy' | 'language'>('general')
 
   useEffect(() => {
     loadSettings()
@@ -102,7 +104,7 @@ const Settings: React.FC<SettingsProps> = ({
       
       // Combine both sources, preferring service providers
       const combinedProviders = [...aiProvidersFromService]
-      legacyProviders.forEach(legacy => {
+      legacyProviders.forEach((legacy: any) => {
         if (!combinedProviders.some(p => p.id === legacy.id)) {
           combinedProviders.push(legacy)
         }
@@ -190,6 +192,10 @@ const Settings: React.FC<SettingsProps> = ({
     setProxySettings(updatedSettings)
   }
 
+  const changeLanguage = (language: string) => {
+    i18n.changeLanguage(language)
+  }
+
   const detectAuthorization = async (accountEmail: string) => {
     try {
       setDetectingAuth(prev => ({ ...prev, [accountEmail]: true }))
@@ -209,20 +215,20 @@ const Settings: React.FC<SettingsProps> = ({
         console.error('账号检测失败:', result.error)
         
         // Provide more user-friendly error messages
-        let userMessage = '账号检测失败'
+        let userMessage = t('settings.detectFailed')
         if (result.error?.includes('超时')) {
-          userMessage = '检测超时，请确保Claude CLI正常工作并重试'
+          userMessage = t('settings.detectTimeout')
         } else if (result.error?.includes('命令失败')) {
-          userMessage = 'Claude命令执行失败，请检查Claude CLI是否正确安装'
+          userMessage = t('settings.commandFailed')
         } else if (result.error?.includes('未选择')) {
-          userMessage = '请确保已选择正确的Claude账号'
+          userMessage = t('settings.noAccountSelected')
         }
         
         alert(`${userMessage}\n\n详细信息: ${result.error}`)
       }
     } catch (error) {
       console.error('检测账号时出错:', error)
-      alert('检测时出现网络或系统错误，请检查应用状态并重试')
+      alert(t('settings.networkError'))
     } finally {
       setDetectingAuth(prev => ({ ...prev, [accountEmail]: false }))
     }
@@ -232,7 +238,7 @@ const Settings: React.FC<SettingsProps> = ({
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
       <div className="bg-gray-800 rounded-lg w-[900px] max-w-[95vw] max-h-[90vh] overflow-hidden flex flex-col">
         <div className="flex items-center justify-between p-6 border-b border-gray-700">
-          <h2 className="text-xl font-semibold">Settings</h2>
+          <h2 className="text-xl font-semibold">{t('settings.title')}</h2>
           <button
             onClick={onClose}
             className="text-gray-400 hover:text-white text-xl"
@@ -284,6 +290,16 @@ const Settings: React.FC<SettingsProps> = ({
                 }`}
               >
                 Proxy
+              </button>
+              <button
+                onClick={() => setActiveTab('language')}
+                className={`w-full text-left px-3 py-2 rounded text-sm ${
+                  activeTab === 'language' 
+                    ? 'bg-blue-600 text-white' 
+                    : 'text-gray-300 hover:bg-gray-700'
+                }`}
+              >
+                Language
               </button>
             </nav>
           </div>
@@ -612,6 +628,49 @@ const Settings: React.FC<SettingsProps> = ({
                       </div>
                     </div>
                   )}
+                </div>
+              </div>
+            )}
+
+            {activeTab === 'language' && (
+              <div className="space-y-6">
+                <h3 className="text-lg font-medium">Language Settings</h3>
+                
+                <div className="space-y-4">
+                  <div>
+                    <label className="block text-sm font-medium mb-3">Interface Language</label>
+                    <div className="space-y-2">
+                      <label className="flex items-center">
+                        <input
+                          type="radio"
+                          name="language"
+                          value="en"
+                          checked={i18n.language === 'en'}
+                          onChange={(e) => changeLanguage(e.target.value)}
+                          className="mr-3"
+                        />
+                        <span>English</span>
+                      </label>
+                      <label className="flex items-center">
+                        <input
+                          type="radio"
+                          name="language"
+                          value="zh-CN"
+                          checked={i18n.language === 'zh-CN'}
+                          onChange={(e) => changeLanguage(e.target.value)}
+                          className="mr-3"
+                        />
+                        <span>简体中文</span>
+                      </label>
+                    </div>
+                  </div>
+                  
+                  <div className="mt-6 p-4 bg-blue-900/30 border border-blue-700/50 rounded">
+                    <h4 className="font-medium text-blue-300 mb-2">Note:</h4>
+                    <p className="text-sm text-blue-200">
+                      Language changes take effect immediately. Log messages will remain in English for debugging purposes.
+                    </p>
+                  </div>
                 </div>
               </div>
             )}

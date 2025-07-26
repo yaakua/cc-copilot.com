@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react'
+import { useTranslation } from 'react-i18next'
 import Terminal from './Terminal'
 import { Session, Project } from '../../../shared/types'
 
@@ -23,6 +24,7 @@ const TabManager: React.FC<TabManagerProps> = ({
   onActivateSession,
   onCloseTab
 }) => {
+  const { t } = useTranslation()
   const [tabs, setTabs] = useState<TabInfo[]>([])
 
   useEffect(() => {
@@ -60,7 +62,7 @@ const TabManager: React.FC<TabManagerProps> = ({
 
   const getSessionDisplayName = (session: Session) => {
     const project = projects.find(p => p.id === session.projectId)
-    const projectName = project?.name || 'Unknown'
+    const projectName = project?.name || t('common.unknown')
     return `${projectName} - ${session.name}`
   }
 
@@ -110,7 +112,7 @@ const TabManager: React.FC<TabManagerProps> = ({
                   style={{ color: 'var(--text-tertiary)' }}
                   onMouseEnter={(e) => e.currentTarget.style.color = 'var(--text-primary)'}
                   onMouseLeave={(e) => e.currentTarget.style.color = 'var(--text-tertiary)'}
-                  title="Close tab"
+                  title={t('common.close')}
                 >
                   <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" className="w-4 h-4">
                     <path d="M5.28 4.22a.75.75 0 0 0-1.06 1.06L6.94 8l-2.72 2.72a.75.75 0 1 0 1.06 1.06L8 9.06l2.72 2.72a.75.75 0 1 0 1.06-1.06L9.06 8l2.72-2.72a.75.75 0 0 0-1.06-1.06L8 6.94 5.28 4.22Z" />
@@ -161,6 +163,7 @@ const HelpCircleIcon = () => (
 
 
 export const WelcomeScreen = () => {
+  const { t } = useTranslation()
   return (
     <div className="flex-1 flex items-center justify-center p-4 sm:p-8" style={{ color: 'var(--text-tertiary)' }}>
       <div className="w-full max-w-3xl mx-auto space-y-10">
@@ -168,10 +171,10 @@ export const WelcomeScreen = () => {
         {/* Header */}
         <div className="text-center">
           <h1 className="text-4xl font-bold mb-2" style={{ color: 'var(--text-primary)' }}>
-            欢迎使用 CC Copilot
+            {t('welcome.title')}
           </h1>
           <p className="text-lg" style={{ color: 'var(--text-secondary)' }}>
-            您的智能编码助手已准备就绪
+            {t('welcome.subtitle')}
           </p>
         </div>
 
@@ -180,13 +183,12 @@ export const WelcomeScreen = () => {
           <div className="p-6">
             <h3 className="flex items-center gap-3 text-xl font-semibold mb-5" style={{ color: 'var(--text-primary)' }}>
               <RocketIcon />
-              快速开始
+              {t('welcome.quickStart')}
             </h3>
             <div className="space-y-4 text-left">
-              <p><strong>1. 创建项目：</strong>点击"New Project" 按钮，选择项目文件夹</p>
-              <p><strong>2. 开始对话：</strong>点击项目右侧"+"按钮或者点击历史会话</p>
-              <p><strong>3. 切换渠道：</strong>在状态栏中一键切换不同账号/API渠道</p>
-              <p><strong>4. 管理会话：</strong>在左侧面板中查看和管理所有对话记录</p>
+              <p>{t('welcome.step1')}</p>
+              <p>{t('welcome.step2')}</p>
+              <p>{t('welcome.step3')}</p>
             </div>
           </div>
         </div>
@@ -197,16 +199,16 @@ export const WelcomeScreen = () => {
             <div className="bg-white/5 border border-white/10 rounded-xl shadow-lg p-6">
                 <h3 className="flex items-center gap-3 text-xl font-semibold mb-5" style={{ color: 'var(--text-primary)' }}>
                     <TargetIcon />
-                    核心特性
+                    {t('welcome.features')}
                 </h3>
                 <div className="space-y-5 text-left">
                     <div>
-                        <h4 className="font-semibold mb-1" style={{ color: 'var(--text-secondary)' }}>多账号/多渠道热切换</h4>
-                        <p className="text-sm">无需退出Claude命令，一键切换官方API、第三方代理、Kimi K2、Qwen Coder等</p>
+                        <h4 className="font-semibold mb-1" style={{ color: 'var(--text-secondary)' }}>{t('welcome.feature1')}</h4>
+                        <p className="text-sm">{t('welcome.feature2')}</p>
                     </div>
                     <div>
-                        <h4 className="font-semibold mb-1" style={{ color: 'var(--text-secondary)' }}>多项目/多会话管理</h4>
-                        <p className="text-sm">项目隔离，会话持久化，可视化管理，快速导航</p>
+                        <h4 className="font-semibold mb-1" style={{ color: 'var(--text-secondary)' }}>{t('welcome.feature3')}</h4>
+                        <p className="text-sm">{t('welcome.feature4')}</p>
                     </div>
                 </div>
             </div>
@@ -215,16 +217,20 @@ export const WelcomeScreen = () => {
             <div className="bg-white/5 border border-white/10 rounded-xl shadow-lg p-6">
                 <h3 className="flex items-center gap-3 text-xl font-semibold mb-5" style={{ color: 'var(--text-primary)' }}>
                     <HelpCircleIcon />
-                    常见问题
+                    {t('welcome.faq')}
                 </h3>
                 <div className="space-y-4 text-left">
                     <div>
-                        <p className="font-semibold" style={{ color: 'var(--text-secondary)' }}>Q: 如何添加新的API渠道？</p>
-                        <p className="text-sm">A: 进入设置页面，在账号管理中添加新的API配置（支持官方API、Kimi K2、Qwen Coder等）</p>
+                        <p className="font-semibold" style={{ color: 'var(--text-secondary)' }}>{t('welcome.faq1')}</p>
+                        <p className="text-sm">{t('welcome.faq1Answer')}</p>
                     </div>
                     <div>
-                        <p className="font-semibold" style={{ color: 'var(--text-secondary)' }}>Q: 需要预先安装什么？</p>
-                        <p className="text-sm">A: 需要预先安装 Claude Code 工具，应用会自动检测并配置</p>
+                        <p className="font-semibold" style={{ color: 'var(--text-secondary)' }}>{t('welcome.faq2')}</p>
+                        <p className="text-sm">{t('welcome.faq2Answer')}</p>
+                    </div>
+                    <div>
+                        <p className="font-semibold" style={{ color: 'var(--text-secondary)' }}>{t('welcome.faq3')}</p>
+                        <p className="text-sm">{t('welcome.faq3Answer')}</p>
                     </div>
                 </div>
             </div>

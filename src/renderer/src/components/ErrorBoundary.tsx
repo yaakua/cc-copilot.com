@@ -1,7 +1,8 @@
 import { Component, ErrorInfo, ReactNode } from 'react'
+import { withTranslation, WithTranslation } from 'react-i18next'
 import { logger } from '../utils/logger'
 
-interface Props {
+interface Props extends WithTranslation {
   children: ReactNode
   fallback?: ReactNode
 }
@@ -56,15 +57,15 @@ class ErrorBoundary extends Component<Props, State> {
                   d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L3.732 16.5c-.77.833.192 2.5 1.732 2.5z" 
                 />
               </svg>
-              <h2 className="text-xl font-bold text-red-400 mb-2">Something went wrong</h2>
+              <h2 className="text-xl font-bold text-red-400 mb-2">{this.props.t('errorBoundary.title')}</h2>
               <p className="text-gray-400 text-sm mb-4">
-                An unexpected error occurred in this component.
+                {this.props.t('errorBoundary.description')}
               </p>
             </div>
 
             <details className="text-left mb-6 p-4 bg-gray-800 rounded-lg">
               <summary className="cursor-pointer text-sm font-medium text-gray-300 hover:text-white">
-                Error Details
+                {this.props.t('errorBoundary.errorDetails')}
               </summary>
               <div className="mt-3 text-xs text-gray-400 font-mono">
                 <div className="mb-2">
@@ -84,13 +85,13 @@ class ErrorBoundary extends Component<Props, State> {
                 onClick={this.handleRetry}
                 className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-md transition-colors"
               >
-                Try Again
+                {this.props.t('common.retry')}
               </button>
               <button
                 onClick={() => window.location.reload()}
                 className="px-4 py-2 bg-gray-600 hover:bg-gray-700 text-white font-medium rounded-md transition-colors"
               >
-                Reload App
+                {this.props.t('common.reload')}
               </button>
             </div>
           </div>
@@ -102,4 +103,4 @@ class ErrorBoundary extends Component<Props, State> {
   }
 }
 
-export default ErrorBoundary
+export default withTranslation()(ErrorBoundary)

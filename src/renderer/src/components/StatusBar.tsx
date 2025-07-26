@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react'
+import { useTranslation } from 'react-i18next'
 import { logger } from '../utils/logger'
 
 interface StatusBarProps {
@@ -15,6 +16,7 @@ interface StatusInfo {
 }
 
 const StatusBar: React.FC<StatusBarProps> = ({ activeSessionId }) => {
+  const { t } = useTranslation()
   const [statusInfo, setStatusInfo] = useState<StatusInfo | null>(null)
   const [serviceProviders, setServiceProviders] = useState<any[]>([])
   const [showAccountMenu, setShowAccountMenu] = useState(false)
@@ -98,6 +100,34 @@ const StatusBar: React.FC<StatusBarProps> = ({ activeSessionId }) => {
     return `.../${lastTwo}`
   }
 
+  const sendProviderSwitchMessage = async (provider: any, account: any) => {
+    try {
+      if (!activeSessionId) return // Only send messages if there's an active terminal session
+      
+      const providerName = provider.name || 'Unknown Provider'
+      const isOfficial = provider.type === 'claude_official'
+      const providerType = isOfficial ? 'Official' : 'Third-party'
+      
+      // Get API endpoint
+      let apiEndpoint = 'Unknown'
+      if (isOfficial) {
+        apiEndpoint = 'https://api.anthropic.com'
+      } else if (account?.baseUrl) {
+        apiEndpoint = account.baseUrl
+      }
+      
+      // Format message with ANSI colors
+      const message = `\x1b[36m🔄 [Provider Switch] Switched to: ${providerName} (${providerType})\x1b[0m\n` +
+                    `\x1b[36m📡 API Endpoint: ${apiEndpoint}\x1b[0m`
+      
+      await window.api.sendSystemMessage(message)
+      
+      logger.info(`终端日志已发送 - 切换到提供商: ${providerName}`)
+    } catch (error) {
+      logger.error('发送终端切换消息失败', error as Error)
+    }
+  }
+
   const handleProviderChange = async (providerId: string) => {
     try {
       // 检查是否是Claude官方账号，并且是否需要检查authorization
@@ -131,6 +161,11 @@ const StatusBar: React.FC<StatusBarProps> = ({ activeSessionId }) => {
       setActiveProvider(active)
       setShowAccountMenu(false)
       
+      // Send terminal message for provider switch
+      if (active?.provider) {
+        await sendProviderSwitchMessage(active.provider, active.account)
+      }
+      
       logger.info(`切换服务提供方到: ${providerId}`)
     } catch (error) {
       logger.error('切换服务提供方失败', error as Error)
@@ -163,6 +198,11 @@ const StatusBar: React.FC<StatusBarProps> = ({ activeSessionId }) => {
       const active = await window.api.getActiveProvider()
       setActiveProvider(active)
       setShowAccountMenu(false)
+      
+      // Send terminal message for account switch
+      if (active?.provider) {
+        await sendProviderSwitchMessage(active.provider, active.account)
+      }
       
       logger.info(`切换账号到: ${accountId}`)
     } catch (error) {
@@ -299,7 +339,7 @@ const StatusBar: React.FC<StatusBarProps> = ({ activeSessionId }) => {
                                     color: account.authorization ? 'var(--status-green)' : 'var(--status-orange)',
                                     opacity: 0.8
                                   }}
-                                  title={account.authorization ? '已激活' : '未激活 - 需要先使用一个历史会话来激活'}
+                                  title={account.authorization ? t('statusBar.activated') : t('statusBar.notActivated')}
                                 >
                                   {account.authorization ? '●' : '○'}
                                 </span>

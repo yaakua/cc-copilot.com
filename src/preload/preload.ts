@@ -18,6 +18,7 @@ const api = {
   // Terminal APIs
   sendTerminalInput: (data: string, sessionId?: string) => ipcRenderer.invoke('terminal:input', data, sessionId),
   resizeTerminal: (cols: number, rows: number, sessionId?: string) => ipcRenderer.invoke('terminal:resize', cols, rows, sessionId),
+  sendSystemMessage: (message: string, sessionId?: string) => ipcRenderer.invoke('terminal:send-system-message', message, sessionId),
   onTerminalData: (callback: (data: { sessionId: string; data: string } | string) => void) => {
     console.log('在预加载中注册终端数据监听器')
     const listener = (_event: any, data: any) => {

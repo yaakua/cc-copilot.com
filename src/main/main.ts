@@ -470,6 +470,22 @@ function setupIpcHandlers(mainWindow: BrowserWindow): void {
     }
   })
 
+  ipcMain.handle('terminal:send-system-message', async (_, message: string, sessionId?: string) => {
+    const id = sessionId || currentActiveSessionId
+    if (id && mainWindow && !mainWindow.isDestroyed()) {
+      try {
+        // Format message with ANSI colors and proper line breaks
+        const formattedMessage = `\r\n${message}\r\n`
+        mainWindow.webContents.send('terminal:data', {
+          sessionId: id,
+          data: formattedMessage
+        })
+      } catch (error) {
+        logger.warn(`无法发送系统消息到终端: ${(error as Error).message}`, 'main')
+      }
+    }
+  })
+
 
   // Project management
   ipcMain.handle('project:create', async (_, projectPath: string) => {

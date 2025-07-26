@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react'
+import { useTranslation } from 'react-i18next'
 import SessionList from './components/SessionList'
 import TabManager from './components/TabManager'
 import StatusBar from './components/StatusBar'
@@ -6,8 +7,10 @@ import ErrorBoundary from './components/ErrorBoundary'
 import Settings from './components/Settings'
 import { logger } from './utils/logger'
 import { Session, Project, ClaudeDetectionResult } from '../../shared/types'
+import './i18n'
 
 const App: React.FC = () => {
+  const { t } = useTranslation()
   const [projects, setProjects] = useState<Project[]>([])
   const [activeSessionIds, setActiveSessionIds] = useState<string[]>([])
   const [currentActiveSessionId, setCurrentActiveSessionId] = useState<string | null>(null)
@@ -186,7 +189,7 @@ const App: React.FC = () => {
       // Check if Claude is available before creating project
       if (!claudeDetectionResult?.isInstalled) {
         logger.warn('Claude CLI未安装，无法创建项目')
-        alert(`无法创建项目: Claude CLI未检测到\n\n错误: ${claudeDetectionResult?.error || '未知错误'}\n\n请安装Claude CLI后重新检测。`)
+        alert(t('alerts.claudeNotInstalled', { error: claudeDetectionResult?.error || t('common.unknown') }))
         return
       }
 
@@ -218,7 +221,7 @@ const App: React.FC = () => {
       // Check if Claude is available before creating session
       if (!claudeDetectionResult?.isInstalled) {
         logger.warn('Claude CLI未安装，无法创建会话')
-        alert(`无法创建会话: Claude CLI未检测到\n\n错误: ${claudeDetectionResult?.error || '未知错误'}\n\n请安装Claude CLI后重新检测。`)
+        alert(t('alerts.sessionCreationFailed', { error: claudeDetectionResult?.error || t('common.unknown') }))
         return
       }
 
