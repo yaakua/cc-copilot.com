@@ -157,6 +157,7 @@ function getOrCreatePtyManager(sessionId: string, mainWindow: BrowserWindow): Pt
     const updatedSession = sessionManager.updateSession(sessionId, {
       claudeSessionId: claudeSessionId,
       isTemporary: false,
+      isLoading: false, // Clear loading state when session is ready
       lastActiveAt: new Date().toISOString(),
     });
 
@@ -569,6 +570,7 @@ function setupIpcHandlers(mainWindow: BrowserWindow): void {
       createdAt: new Date().toISOString(),
       lastActiveAt: new Date().toISOString(),
       isTemporary: true, // Will be updated when Claude CLI creates the real session
+      isLoading: true, // Will be cleared when Claude CLI creates the real session
     };
     sessionManager.addSession(newSession);
 
@@ -618,6 +620,20 @@ function setupIpcHandlers(mainWindow: BrowserWindow): void {
         args: claudeArgs,
       });
     }
+    
+    // Clear loading state if session was still loading
+    if (session.isLoading) {
+      const updatedSession = sessionManager.updateSession(sessionId, {
+        isLoading: false,
+        lastActiveAt: new Date().toISOString(),
+      });
+      
+      if (updatedSession) {
+        logger.info(`已清除会话loading状态: ${sessionId}`, 'main');
+        mainWindow.webContents.send('session:updated', { oldId: sessionId, newSession: updatedSession });
+      }
+    }
+    
     logger.info(`会话已激活: ${sessionId}`, 'main');
   });
 
