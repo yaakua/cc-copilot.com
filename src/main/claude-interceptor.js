@@ -193,11 +193,11 @@ class ClaudeInterceptor {
         const interceptor = this;
 
         global.fetch = async function (input, init = {}) {
-            const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+            const originalUrl = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
 
-            // 只对当前配置的API端点进行特殊处理
-            if (interceptor.isAnthropicAPI(url)) {
-                // 检测并保存原始authorization
+            // 检查是否需要拦截请求
+            if (interceptor.shouldInterceptRequest(originalUrl)) {
+                // 检测并保存原始authorization（仅对Claude官方账号）
                 if (init.headers) {
                     const headers = new Headers(init.headers);
                     const authHeader = headers.get('authorization');
@@ -205,6 +205,28 @@ class ClaudeInterceptor {
                         (!interceptor.accountInfo.authorization || interceptor.accountInfo.authorization !== authHeader)) {
                         console.log('[SILENT] [Claude Interceptor] 检测到新的authorization值，准备保存');
                         interceptor.updateAuthorizationInConfig(authHeader);
+                    }
+                }
+
+                // 对于第三方API，需要重写URL
+                let finalInput = input;
+                if (interceptor.accountInfo?.type === ClaudeInterceptor.PROVIDER_TYPE_THIRD_PARTY && 
+                    interceptor.accountInfo.baseUrl && originalUrl.includes('api.anthropic.com')) {
+                    try {
+                        const baseUrl = new URL(interceptor.accountInfo.baseUrl);
+                        const originalUrlObj = new URL(originalUrl);
+                        
+                        let newPath = originalUrlObj.pathname;
+                        if (baseUrl.pathname && baseUrl.pathname !== '/') {
+                            newPath = baseUrl.pathname.replace(/\/$/, '') + newPath;
+                        }
+                        
+                        const newUrl = baseUrl.origin + newPath + (originalUrlObj.search || '');
+                        finalInput = newUrl;
+                        
+                        console.log('[SILENT] [Claude Interceptor] Fetch URL重写: ' + originalUrl + ' -> ' + newUrl);
+                    } catch (error) {
+                        console.error('[SILENT] [Claude Interceptor] Fetch URL重写失败:', error.message);
                     }
                 }
 
@@ -234,6 +256,8 @@ class ClaudeInterceptor {
                         console.log('[SILENT] [Claude Interceptor] 已设置动态authorization:', '...' + dynamicAuth.slice(-20));
                     }
                 }
+                
+                return originalFetch(finalInput, init);
             }
 
             return originalFetch(input, init);
@@ -274,19 +298,30 @@ class ClaudeInterceptor {
     }
 
     interceptNodeRequest(originalRequest, options, callback, isHttps) {
-        const url = this.parseNodeRequestURL(options, isHttps);
+        const originalUrl = this.parseNodeRequestURL(options, isHttps);
 
-        // 只对当前配置的API端点进行特殊处理
-        if (this.isAnthropicAPI(url)) {
-            console.log('[TERMINAL] [Claude Interceptor] 拦截到Node HTTP API请求:', url);
+        // 检查是否需要拦截请求（包括Anthropic官方API和第三方API）
+        const shouldIntercept = this.shouldInterceptRequest(originalUrl);
+        
+        if (shouldIntercept) {
+            console.log('[TERMINAL] [Claude Interceptor] 拦截到Node HTTP API请求:', originalUrl);
 
-            // 检测并保存原始authorization
+            // 检测并保存原始authorization（仅对Claude官方账号）
             if (options.headers && options.headers.authorization) {
                 const authHeader = options.headers.authorization;
                 if (this.accountInfo?.type === ClaudeInterceptor.PROVIDER_TYPE_CLAUDE_OFFICIAL &&
                     (!this.accountInfo.authorization || this.accountInfo.authorization !== authHeader)) {
                     console.log('[SILENT] [Claude Interceptor] 检测到新的authorization值，准备保存');
                     this.updateAuthorizationInConfig(authHeader);
+                }
+            }
+
+            // 对于第三方API，需要重写URL
+            if (this.accountInfo?.type === ClaudeInterceptor.PROVIDER_TYPE_THIRD_PARTY && this.accountInfo.baseUrl) {
+                const rewrittenOptions = this.rewriteRequestForThirdParty(options, originalUrl, isHttps);
+                if (rewrittenOptions) {
+                    options = rewrittenOptions;
+                    console.log('[SILENT] [Claude Interceptor] 已重写请求URL到第三方API:', this.accountInfo.baseUrl);
                 }
             }
 
@@ -324,17 +359,124 @@ class ClaudeInterceptor {
     }
 
     /**
-     * 判断URL是否为Anthropic API端点
+     * 判断URL是否为当前配置的API端点
      */
     isAnthropicAPI(url) {
         if (!url) return false;
         
         try {
             // 检查当前账号配置
-            return url.includes('api.anthropic.com');
+            if (!this.accountInfo) {
+                return false;
+            }
+
+            if (this.accountInfo.type === ClaudeInterceptor.PROVIDER_TYPE_CLAUDE_OFFICIAL) {
+                // Claude官方API
+                return url.includes('api.anthropic.com');
+            } else if (this.accountInfo.type === ClaudeInterceptor.PROVIDER_TYPE_THIRD_PARTY) {
+                // 第三方API - 检查baseUrl
+                if (this.accountInfo.baseUrl) {
+                    try {
+                        const baseUrlObj = new URL(this.accountInfo.baseUrl);
+                        const requestUrlObj = new URL(url);
+                        // 检查域名和端口是否匹配
+                        return baseUrlObj.host === requestUrlObj.host;
+                    } catch (error) {
+                        console.warn('[SILENT] [Claude Interceptor] URL解析失败:', error.message);
+                        // 如果URL解析失败，尝试简单的字符串匹配
+                        return url.includes(this.accountInfo.baseUrl) || this.accountInfo.baseUrl.includes(url.split('//')[1]?.split('/')[0] || '');
+                    }
+                }
+                return false;
+            }
+
+            return false;
         } catch (error) {
             console.warn('[SILENT] [Claude Interceptor] 检查API端点失败:', error.message);
             return false;
+        }
+    }
+
+    /**
+     * 判断是否应该拦截请求
+     */
+    shouldInterceptRequest(url) {
+        if (!url || !this.accountInfo) {
+            return false;
+        }
+
+        // 对于Claude官方账号，拦截Anthropic官方API请求
+        if (this.accountInfo.type === ClaudeInterceptor.PROVIDER_TYPE_CLAUDE_OFFICIAL) {
+            return url.includes('api.anthropic.com');
+        }
+
+        // 对于第三方账号，拦截Anthropic官方API请求（需要重写）或已配置的第三方API请求
+        if (this.accountInfo.type === ClaudeInterceptor.PROVIDER_TYPE_THIRD_PARTY) {
+            // 拦截Anthropic官方API请求（需要重写到第三方API）
+            if (url.includes('api.anthropic.com')) {
+                return true;
+            }
+            
+            // 拦截已配置的第三方API请求
+            if (this.accountInfo.baseUrl) {
+                try {
+                    const baseUrlObj = new URL(this.accountInfo.baseUrl);
+                    const requestUrlObj = new URL(url);
+                    return baseUrlObj.host === requestUrlObj.host;
+                } catch (error) {
+                    return url.includes(this.accountInfo.baseUrl);
+                }
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * 为第三方API重写请求选项
+     */
+    rewriteRequestForThirdParty(options, originalUrl, isHttps) {
+        try {
+            if (!this.accountInfo?.baseUrl) {
+                return null;
+            }
+
+            // 只重写Anthropic官方API请求
+            if (!originalUrl.includes('api.anthropic.com')) {
+                return options;
+            }
+
+            const baseUrl = new URL(this.accountInfo.baseUrl);
+            const originalUrlObj = new URL(originalUrl);
+
+            // 创建新的请求选项
+            const newOptions = { ...options };
+            
+            // 更新hostname和port
+            newOptions.hostname = baseUrl.hostname;
+            newOptions.host = baseUrl.host;
+            
+            if (baseUrl.port) {
+                newOptions.port = baseUrl.port;
+            } else {
+                // 根据协议设置默认端口
+                delete newOptions.port;
+            }
+
+            // 保持原始路径，但可能需要添加API路径前缀
+            let newPath = originalUrlObj.pathname;
+            if (baseUrl.pathname && baseUrl.pathname !== '/') {
+                newPath = baseUrl.pathname.replace(/\/$/, '') + newPath;
+            }
+            
+            newOptions.path = newPath + (originalUrlObj.search || '');
+
+            console.log('[SILENT] [Claude Interceptor] URL重写: ' + originalUrl + ' -> ' + baseUrl.origin + newPath);
+
+            return newOptions;
+        } catch (error) {
+            console.error('[SILENT] [Claude Interceptor] 重写请求失败:', error.message);
+            return null;
         }
     }
 

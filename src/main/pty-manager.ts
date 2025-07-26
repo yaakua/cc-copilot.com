@@ -508,39 +508,91 @@ export class PtyManager {
    */
   private async getClaudeChannelInfo(): Promise<ClaudeChannelInfo> {
     try {
-      const claudeSettingsPath = path.join(os.homedir(), '.claude', 'settings.json')
       let model = 'sonnet' // 默认模型
       let apiBaseUrl: string | undefined
-      
-      // 读取Claude设置文件
-      if (fs.existsSync(claudeSettingsPath)) {
-        try {
-          const settingsContent = await fs.promises.readFile(claudeSettingsPath, 'utf8')
-          const settings = JSON.parse(settingsContent)
-          if (settings.model) {
-            model = settings.model
-          }
-          // 检查是否有自定义API基础URL
-          if (settings.env && settings.env.ANTHROPIC_API_URL) {
-            apiBaseUrl = settings.env.ANTHROPIC_API_URL
-          }
-        } catch (error) {
-          logger.warn('读取Claude设置文件失败', 'pty-manager', error as Error)
-        }
-      }
-      
-      // 从环境变量检查API基础URL
-      if (!apiBaseUrl && process.env.ANTHROPIC_API_URL) {
-        apiBaseUrl = process.env.ANTHROPIC_API_URL
-      }
-      
-      // 确定渠道名称
       let channelName = 'Anthropic Official'
-      if (apiBaseUrl) {
-        if (apiBaseUrl.includes('claude.ai')) {
-          channelName = 'Claude.ai'
-        } else {
-          channelName = 'Custom API'
+      
+      // 首先尝试从CC Copilot的设置中读取第三方API配置
+      try {
+        const appDataPath = this.getAppDataPath()
+        const appSettingsPath = path.join(appDataPath, 'settings.json')
+        
+        if (fs.existsSync(appSettingsPath)) {
+          const appSettingsContent = await fs.promises.readFile(appSettingsPath, 'utf8')
+          const appSettings = JSON.parse(appSettingsContent)
+          
+          // 检查是否有活动的服务提供方
+          if (appSettings.activeServiceProviderId && appSettings.serviceProviders) {
+            const activeProvider = appSettings.serviceProviders.find((p: any) => p.id === appSettings.activeServiceProviderId)
+            
+            if (activeProvider) {
+              if (activeProvider.type === 'claude_official') {
+                channelName = 'Anthropic Official'
+                // 尝试从Claude设置文件读取模型
+                const claudeSettingsPath = path.join(os.homedir(), '.claude', 'settings.json')
+                if (fs.existsSync(claudeSettingsPath)) {
+                  try {
+                    const claudeSettingsContent = await fs.promises.readFile(claudeSettingsPath, 'utf8')
+                    const claudeSettings = JSON.parse(claudeSettingsContent)
+                    if (claudeSettings.model) {
+                      model = claudeSettings.model
+                    }
+                  } catch (error) {
+                    logger.warn('读取Claude设置文件失败', 'pty-manager', error as Error)
+                  }
+                }
+              } else if (activeProvider.type === 'third_party') {
+                // 第三方API配置
+                channelName = activeProvider.name || 'Third-party API'
+                
+                // 获取活动账号的配置
+                if (activeProvider.activeAccountId && activeProvider.accounts) {
+                  const activeAccount = activeProvider.accounts.find((acc: any) => acc.id === activeProvider.activeAccountId)
+                  if (activeAccount) {
+                    apiBaseUrl = activeAccount.baseUrl
+                    // 第三方API通常不指定具体模型，使用通用名称
+                    model = 'claude-3.5-sonnet'
+                  }
+                }
+              }
+            }
+          }
+        }
+      } catch (error) {
+        logger.warn('读取CC Copilot设置失败，回退到Claude CLI设置', 'pty-manager', error as Error)
+      }
+      
+      // 如果没有从CC Copilot设置中找到配置，回退到Claude CLI设置
+      if (!apiBaseUrl && channelName === 'Anthropic Official') {
+        const claudeSettingsPath = path.join(os.homedir(), '.claude', 'settings.json')
+        if (fs.existsSync(claudeSettingsPath)) {
+          try {
+            const settingsContent = await fs.promises.readFile(claudeSettingsPath, 'utf8')
+            const settings = JSON.parse(settingsContent)
+            if (settings.model) {
+              model = settings.model
+            }
+            // 检查是否有自定义API基础URL
+            if (settings.env && settings.env.ANTHROPIC_API_URL) {
+              apiBaseUrl = settings.env.ANTHROPIC_API_URL
+            }
+          } catch (error) {
+            logger.warn('读取Claude设置文件失败', 'pty-manager', error as Error)
+          }
+        }
+        
+        // 从环境变量检查API基础URL
+        if (!apiBaseUrl && process.env.ANTHROPIC_API_URL) {
+          apiBaseUrl = process.env.ANTHROPIC_API_URL
+        }
+        
+        // 重新确定渠道名称
+        if (apiBaseUrl) {
+          if (apiBaseUrl.includes('claude.ai')) {
+            channelName = 'Claude.ai'
+          } else {
+            channelName = 'Custom API'
+          }
         }
       }
       
@@ -557,6 +609,20 @@ export class PtyManager {
         channelName: 'Anthropic Official',
         timestamp: Date.now()
       }
+    }
+  }
+
+  /**
+   * 获取应用数据路径
+   */
+  private getAppDataPath(): string {
+    const platform = os.platform()
+    if (platform === 'darwin') {
+      return path.join(os.homedir(), 'Library', 'Application Support', 'CC Copilot')
+    } else if (platform === 'win32') {
+      return path.join(os.homedir(), 'AppData', 'Roaming', 'CC Copilot')
+    } else {
+      return path.join(os.homedir(), '.config', 'CC Copilot')
     }
   }
 
