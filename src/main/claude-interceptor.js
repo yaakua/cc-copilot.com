@@ -224,7 +224,7 @@ class ClaudeInterceptor {
                         const newUrl = baseUrl.origin + newPath + (originalUrlObj.search || '');
                         finalInput = newUrl;
                         
-                        console.log('[SILENT] [Claude Interceptor] Fetch URL重写: ' + originalUrl + ' -> ' + newUrl);
+                        console.log('[SILENT] [Claude Interceptor] 已切换到第三方API:', baseUrl.origin);
                     } catch (error) {
                         console.error('[SILENT] [Claude Interceptor] Fetch URL重写失败:', error.message);
                     }
@@ -321,7 +321,7 @@ class ClaudeInterceptor {
                 const rewrittenOptions = this.rewriteRequestForThirdParty(options, originalUrl, isHttps);
                 if (rewrittenOptions) {
                     options = rewrittenOptions;
-                    console.log('[SILENT] [Claude Interceptor] 已重写请求URL到第三方API:', this.accountInfo.baseUrl);
+                    console.log('[SILENT] [Claude Interceptor] 已切换到第三方API');
                 }
             }
 
@@ -471,7 +471,7 @@ class ClaudeInterceptor {
             
             newOptions.path = newPath + (originalUrlObj.search || '');
 
-            console.log('[SILENT] [Claude Interceptor] URL重写: ' + originalUrl + ' -> ' + baseUrl.origin + newPath);
+            console.log('[SILENT] [Claude Interceptor] 已切换到第三方API:', baseUrl.origin);
 
             return newOptions;
         } catch (error) {
