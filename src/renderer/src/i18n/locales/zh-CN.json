@@ -159,7 +159,7 @@
     "deleteSession": "删除会话",
     "deleteProject": "删除项目",
     "confirmDelete": "确定删除此会话吗？",
-    "confirmDeleteProject": "确定删除项目\"{{projectName}}\"及其所有会话吗？",
+    "confirmDeleteProject": "⚠️ 警告：删除项目 \"{{projectName}}\"？\n\n此操作将：\n• 从 CC Copilot 中移除该项目\n• 删除所有相关对话会话\n• 删除项目文件夹：{{projectPath}}\n\n此操作无法撤销！",
     "secondsAgo": "{{seconds}}秒前",
     "minutesAgo": "{{minutes}}分钟前",
     "hoursAgo": "{{hours}}小时前",

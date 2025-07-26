@@ -183,7 +183,10 @@ const SessionList: React.FC<SessionListProps> = ({
       onCreateSession(projectId)
     } else if (action === 'delete') {
       const project = projects.find(p => p.id === projectId)
-      if (project && confirm(t('sessions.confirmDeleteProject', { projectName: project.name }))) {
+      if (project && confirm(t('sessions.confirmDeleteProject', { 
+        projectName: project.name,
+        projectPath: project.path 
+      }))) {
         onDeleteProject(projectId)
       }
     }

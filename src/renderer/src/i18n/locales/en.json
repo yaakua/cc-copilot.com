@@ -159,7 +159,7 @@
     "deleteSession": "Delete Session",
     "deleteProject": "Delete Project",
     "confirmDelete": "Delete this session?",
-    "confirmDeleteProject": "Delete project \"{{projectName}}\" and all its sessions?",
+    "confirmDeleteProject": "⚠️ WARNING: Delete project \"{{projectName}}\"?\n\nThis will:\n• Remove the project from CC Copilot\n• Delete all associated chat sessions\n• Remove project files from: {{projectPath}}\n\nThis action cannot be undone!",
     "secondsAgo": "{{seconds}} seconds ago",
     "minutesAgo": "{{minutes}} minutes ago",
     "hoursAgo": "{{hours}} hours ago",

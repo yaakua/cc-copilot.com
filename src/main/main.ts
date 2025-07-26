@@ -758,6 +758,19 @@ function setupIpcHandlers(mainWindow: BrowserWindow): void {
     sessionManager.deleteProject(projectId);
     logger.info(`项目及其所有会话已删除: ${project.name}`, 'main');
 
+    // Delete the actual project directory
+    try {
+      if (fs.existsSync(project.path)) {
+        await fs.promises.rm(project.path, { recursive: true, force: true });
+        logger.info(`项目文件夹已删除: ${project.path}`, 'main');
+      } else {
+        logger.warn(`项目文件夹不存在，跳过删除: ${project.path}`, 'main');
+      }
+    } catch (error) {
+      logger.error(`删除项目文件夹失败: ${project.path}`, 'main', error as Error);
+      // Don't fail the entire operation if file deletion fails
+    }
+
     mainWindow.webContents.send('project:deleted', projectId);
 
     return { success: true };
