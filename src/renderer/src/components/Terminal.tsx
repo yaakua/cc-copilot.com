@@ -17,28 +17,15 @@ const Terminal: React.FC<TerminalProps> = ({ sessionId, isActive, session }) => 
   const xtermInstanceRef = useRef<XTerm | null>(null)
   const fitAddonRef = useRef<FitAddon | null>(null)
 
-  // Show loading state if session is loading
-  if (session.isLoading) {
-    return (
-      <div className="h-full w-full flex items-center justify-center bg-black">
-        <div className="text-center" style={{ color: 'var(--text-secondary)' }}>
-          <div className="mb-4">
-            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500 mx-auto"></div>
-          </div>
-          <div className="text-lg font-medium mb-2">
-            {session.isTemporary ? t('sessions.creating') : t('common.loading')}
-          </div>
-          <div className="text-sm opacity-70">
-            {t('sessions.session')}: {session.name}
-          </div>
-        </div>
-      </div>
-    )
-  }
-
   // Effect for initialization and cleanup
   useEffect(() => {
     logger.setComponent('Terminal')
+    
+    // Skip initialization if session is loading
+    if (session.isLoading) {
+      return
+    }
+    
     if (!terminalRef.current) {
       logger.warn('终端容器引用尚不可用。')
       return
@@ -105,7 +92,7 @@ const Terminal: React.FC<TerminalProps> = ({ sessionId, isActive, session }) => 
       xtermInstanceRef.current = null
       fitAddonRef.current = null
     }
-  }, [sessionId]) // Re-run only if sessionId changes (new tab)
+  }, [sessionId, session.isLoading]) // Re-run if sessionId changes or loading state changes
 
   // Effect for handling active state changes and resize
   useEffect(() => {
@@ -134,6 +121,25 @@ const Terminal: React.FC<TerminalProps> = ({ sessionId, isActive, session }) => 
       window.removeEventListener('resize', handleResize)
     }
   }, [isActive, sessionId])
+
+  // Show loading state if session is loading
+  if (session.isLoading) {
+    return (
+      <div className="h-full w-full flex items-center justify-center bg-black">
+        <div className="text-center" style={{ color: 'var(--text-secondary)' }}>
+          <div className="mb-4">
+            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500 mx-auto"></div>
+          </div>
+          <div className="text-lg font-medium mb-2">
+            {session.isTemporary ? t('sessions.creating') : t('common.loading')}
+          </div>
+          <div className="text-sm opacity-70">
+            {t('sessions.session')}: {session.name}
+          </div>
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div className="h-full w-full bg-black" ref={terminalRef} />
