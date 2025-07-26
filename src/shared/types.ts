@@ -6,6 +6,7 @@ export interface Session {
   lastActiveAt: string;
   claudeSessionId?: string;
   isTemporary: boolean;
+  isLoading?: boolean;
 }
 
 export interface Project {
@@ -21,5 +22,12 @@ export interface ClaudeDetectionResult {
   version?: string
   path?: string
   error?: string
+  timestamp: number
+}
+
+export interface ClaudeChannelInfo {
+  model: string
+  apiBaseUrl?: string
+  channelName?: string
   timestamp: number
 }

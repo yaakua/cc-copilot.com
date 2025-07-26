@@ -1,4 +1,5 @@
 import React, { useEffect, useRef } from 'react'
+import { useTranslation } from 'react-i18next'
 import { Terminal as XTerm } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import '@xterm/xterm/css/xterm.css'
@@ -11,9 +12,29 @@ interface TerminalProps {
 }
 
 const Terminal: React.FC<TerminalProps> = ({ sessionId, isActive, session }) => {
+  const { t } = useTranslation()
   const terminalRef = useRef<HTMLDivElement>(null)
   const xtermInstanceRef = useRef<XTerm | null>(null)
   const fitAddonRef = useRef<FitAddon | null>(null)
+
+  // Show loading state if session is loading
+  if (session.isLoading) {
+    return (
+      <div className="h-full w-full flex items-center justify-center bg-black">
+        <div className="text-center" style={{ color: 'var(--text-secondary)' }}>
+          <div className="mb-4">
+            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500 mx-auto"></div>
+          </div>
+          <div className="text-lg font-medium mb-2">
+            {session.isTemporary ? t('sessions.creating') : t('common.loading')}
+          </div>
+          <div className="text-sm opacity-70">
+            {t('sessions.session')}: {session.name}
+          </div>
+        </div>
+      </div>
+    )
+  }
 
   // Effect for initialization and cleanup
   useEffect(() => {
@@ -71,7 +92,7 @@ const Terminal: React.FC<TerminalProps> = ({ sessionId, isActive, session }) => 
     })
    
     // Welcome message
-    terminal.write(`\x1b[36mCC Copilot Terminal - ${session.name}\x1b[0m\r\n`)
+    terminal.write(`\x1b[36mCC Copilot Terminal - ${session.name}\x1b[0m\r\n\r\n`)
 
     // Cleanup on component unmount
     return () => {

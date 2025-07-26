@@ -31,6 +31,14 @@ function createWindow(): void {
     minHeight: 600,
     show: false,
     autoHideMenuBar: true,
+    title: '', // 移除窗口标题文字
+    titleBarStyle: process.platform === 'darwin' ? 'hidden' : 'default',
+    backgroundColor: '#111827', // 设置窗口背景色与应用背景一致
+    titleBarOverlay: process.platform === 'win32' ? {
+      color: '#111827', // Windows标题栏背景色
+      symbolColor: '#ffffff', // 窗口控制按钮颜色
+      height: 32
+    } : undefined,
     webPreferences: {
       preload: join(__dirname, '../preload/preload.js'),
       sandbox: false,
@@ -697,6 +705,44 @@ function setupIpcHandlers(mainWindow: BrowserWindow): void {
     logger.info(`会话已从SessionManager中删除: ${sessionId}`, 'main');
 
     mainWindow.webContents.send('session:deleted', sessionId);
+
+    return { success: true };
+  });
+
+  ipcMain.handle('project:delete', async (_, projectId: string) => {
+    logger.info(`删除项目: ${projectId}`, 'main');
+
+    const project = sessionManager.getProjectById(projectId);
+    if (!project) {
+      logger.error(`删除项目失败: 未找到项目 ${projectId}`, 'main');
+      return { success: false, error: '项目不存在' };
+    }
+
+    // Get all sessions for this project and clean up their PTY managers
+    const projectSessions = sessionManager.getSessions(projectId);
+    for (const session of projectSessions) {
+      const manager = ptyManagers.get(session.id);
+      if (manager) {
+        try {
+          manager.destroy();
+          await manager.stop();
+        } catch (error) {
+          logger.error(`停止项目会话的PTY管理器失败: ${session.id}`, 'main', error as Error);
+        }
+        ptyManagers.delete(session.id);
+      }
+      
+      // Reset current active session if it belongs to this project
+      if (currentActiveSessionId === session.id) {
+        currentActiveSessionId = null;
+      }
+    }
+
+    // Delete the project and all its sessions
+    sessionManager.deleteProject(projectId);
+    logger.info(`项目及其所有会话已删除: ${project.name}`, 'main');
+
+    mainWindow.webContents.send('project:deleted', projectId);
 
     return { success: true };
   });

@@ -6,15 +6,19 @@
 /* Modern UI color scheme based on reference design */
 :root {
   --bg-primary: #111827;
-  --bg-sidebar: #1e293b;
+  --bg-sidebar: #0f172a;
+  --bg-secondary: #1f2937;
+  --bg-accent: #374151;
   --bg-selection: #3b82f6;
   --text-primary: #f8fafc;
   --text-secondary: #cbd5e1;
   --text-tertiary: #94a3b8;
+  --text-accent: #ffffff;
   --accent: #3b82f6;
-  --border-primary: #334155;
+  --border-primary: #1e293b;
   --status-green: #22c55e;
   --status-red: #ef4444;
+  --status-orange: #f59e0b;
   --icon-blue: #60a5fa;
   --hover-bg: rgba(255, 255, 255, 0.05);
 }
@@ -149,4 +153,19 @@ body {
 @keyframes blink {
   from, to { background-color: transparent }
   50% { background-color: var(--text-primary); }
+}
+
+/* Custom drag region styles */
+.drag-region {
+  /* Enable dragging on all platforms */
+  -webkit-app-region: drag;
+  user-select: none;
+}
+
+/* Ensure buttons and other interactive elements are not draggable */
+.drag-region button,
+.drag-region input,
+.drag-region select,
+.drag-region a {
+  -webkit-app-region: no-drag;
 }

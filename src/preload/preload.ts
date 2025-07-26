@@ -83,6 +83,14 @@ const api = {
       ipcRenderer.removeListener('projects:updated', listener)
     }
   },
+
+  onProjectDeleted: (callback: (projectId: string) => void) => {
+    const listener = (_event: any, projectId: string) => callback(projectId)
+    ipcRenderer.on('project:deleted', listener)
+    return () => {
+      ipcRenderer.removeListener('project:deleted', listener)
+    }
+  },
   
   // Session APIs
   createSession: (projectId: string) => ipcRenderer.invoke('session:create', projectId),
@@ -95,6 +103,7 @@ const api = {
   selectProjectDirectory: () => ipcRenderer.invoke('project:select-directory'),
   getProjectSessions: (projectPath: string) => ipcRenderer.invoke('project:get-sessions', projectPath),
   getAllProjects: () => ipcRenderer.invoke('project:get-all'),
+  deleteProject: (projectId: string) => ipcRenderer.invoke('project:delete', projectId),
   
   // Settings APIs
   getSettings: () => ipcRenderer.invoke('settings:get'),

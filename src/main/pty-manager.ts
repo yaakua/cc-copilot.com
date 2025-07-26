@@ -5,6 +5,7 @@ import * as fs from 'fs'
 import { logger } from './logger'
 import path from 'path'
 import { claudePathManager } from './claude-path-manager'
+import { ClaudeChannelInfo } from '../shared/types'
 
 export interface PtyOptions {
   workingDirectory?: string
@@ -141,6 +142,23 @@ export class PtyManager {
       logger.info(`专用 Claude PTY 进程已创建，PID: ${this.ptyProcess.pid}`, 'pty-manager')
 
       this.setupEventHandlers()
+      
+      // 获取并显示渠道信息
+      const channelInfo = await this.getClaudeChannelInfo()
+      const channelMessage = this.formatChannelInfo(channelInfo)
+      
+      // 发送渠道信息到终端
+      if (!this.isDestroyed && this.mainWindow && !this.mainWindow.isDestroyed()) {
+        try {
+          this.mainWindow.webContents.send('terminal:data', {
+            sessionId: this.sessionId,
+            data: channelMessage
+          })
+        } catch (error) {
+          logger.warn(`无法发送渠道信息到终端: ${(error as Error).message}`, 'pty-manager')
+        }
+      }
+      
       logger.info('进程启动成功', 'pty-manager')
 
     } catch (error) {
@@ -410,6 +428,135 @@ export class PtyManager {
     } catch (error) {
       logger.error('通过路径管理器获取Claude路径失败', 'pty-manager', error as Error);
       throw error;
+    }
+  }
+
+  /**
+   * 获取当前语言环境
+   */
+  private getCurrentLanguage(): 'en' | 'zh-CN' {
+    // 从系统环境变量或其他方式获取语言，默认为英文
+    const lang = process.env.LANG || process.env.LANGUAGE || 'en'
+    return lang.includes('zh') ? 'zh-CN' : 'en'
+  }
+
+  /**
+   * 获取翻译文本
+   */
+  private getTranslation(key: string): string {
+    const lang = this.getCurrentLanguage()
+    const translations = {
+      en: {
+        channelInfo: 'Claude Channel Information',
+        channel: 'Channel',
+        model: 'Model',
+        apiUrl: 'API URL',
+        anthropicOfficial: 'Anthropic Official',
+        claudeAi: 'Claude.ai',
+        customApi: 'Custom API'
+      },
+      'zh-CN': {
+        channelInfo: 'Claude 渠道信息',
+        channel: '渠道',
+        model: '模型',
+        apiUrl: 'API 地址',
+        anthropicOfficial: 'Anthropic 官方',
+        claudeAi: 'Claude.ai',
+        customApi: '自定义 API'
+      }
+    }
+    
+    return translations[lang][key as keyof typeof translations[typeof lang]] || key
+  }
+
+  /**
+   * 格式化渠道信息显示
+   */
+  private formatChannelInfo(channelInfo: ClaudeChannelInfo): string {
+    const { model, apiBaseUrl, channelName } = channelInfo
+    
+    // 翻译渠道名称
+    let translatedChannelName = channelName
+    if (channelName === 'Anthropic Official') {
+      translatedChannelName = this.getTranslation('anthropicOfficial')
+    } else if (channelName === 'Claude.ai') {
+      translatedChannelName = this.getTranslation('claudeAi')
+    } else if (channelName === 'Custom API') {
+      translatedChannelName = this.getTranslation('customApi')
+    }
+    
+    const boxWidth = 60
+    const title = this.getTranslation('channelInfo')
+    const padding = Math.max(0, Math.floor((boxWidth - title.length - 4) / 2))
+    const titleLine = '─'.repeat(padding) + ` ${title} ` + '─'.repeat(boxWidth - padding - title.length - 5)
+    
+    let message = `\x1b[36m╭${titleLine}╮\x1b[0m\r\n`
+    message += `\x1b[36m│\x1b[0m \x1b[1m${this.getTranslation('channel')}:\x1b[0m ${translatedChannelName}\r\n`
+    message += `\x1b[36m│\x1b[0m \x1b[1m${this.getTranslation('model')}:\x1b[0m   ${model}\r\n`
+    
+    if (apiBaseUrl) {
+      message += `\x1b[36m│\x1b[0m \x1b[1m${this.getTranslation('apiUrl')}:\x1b[0m ${apiBaseUrl}\r\n`
+    }
+    
+    message += `\x1b[36m╰${'─'.repeat(boxWidth - 2)}╯\x1b[0m\r\n\r\n`
+    
+    return message
+  }
+
+  /**
+   * 获取Claude渠道信息
+   */
+  private async getClaudeChannelInfo(): Promise<ClaudeChannelInfo> {
+    try {
+      const claudeSettingsPath = path.join(os.homedir(), '.claude', 'settings.json')
+      let model = 'sonnet' // 默认模型
+      let apiBaseUrl: string | undefined
+      
+      // 读取Claude设置文件
+      if (fs.existsSync(claudeSettingsPath)) {
+        try {
+          const settingsContent = await fs.promises.readFile(claudeSettingsPath, 'utf8')
+          const settings = JSON.parse(settingsContent)
+          if (settings.model) {
+            model = settings.model
+          }
+          // 检查是否有自定义API基础URL
+          if (settings.env && settings.env.ANTHROPIC_API_URL) {
+            apiBaseUrl = settings.env.ANTHROPIC_API_URL
+          }
+        } catch (error) {
+          logger.warn('读取Claude设置文件失败', 'pty-manager', error as Error)
+        }
+      }
+      
+      // 从环境变量检查API基础URL
+      if (!apiBaseUrl && process.env.ANTHROPIC_API_URL) {
+        apiBaseUrl = process.env.ANTHROPIC_API_URL
+      }
+      
+      // 确定渠道名称
+      let channelName = 'Anthropic Official'
+      if (apiBaseUrl) {
+        if (apiBaseUrl.includes('claude.ai')) {
+          channelName = 'Claude.ai'
+        } else {
+          channelName = 'Custom API'
+        }
+      }
+      
+      return {
+        model,
+        apiBaseUrl,
+        channelName,
+        timestamp: Date.now()
+      }
+    } catch (error) {
+      logger.error('获取Claude渠道信息失败', 'pty-manager', error as Error)
+      return {
+        model: 'sonnet',
+        channelName: 'Anthropic Official',
+        timestamp: Date.now()
+      }
     }
   }
 

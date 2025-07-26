@@ -54,6 +54,7 @@ interface SessionListProps {
   onCreateSession: (projectId: string) => void
   onActivateSession: (sessionId: string) => void
   onDeleteSession: (sessionId: string) => void
+  onDeleteProject: (projectId: string) => void
   onOpenSettings?: () => void
   claudeAvailable: boolean
 }
@@ -65,12 +66,14 @@ const SessionList: React.FC<SessionListProps> = ({
   onCreateSession,
   onActivateSession,
   onDeleteSession,
+  onDeleteProject,
   onOpenSettings,
   claudeAvailable,
 }) => {
   const { t } = useTranslation()
   const [expandedProjects, setExpandedProjects] = useState<Set<string>>(new Set())
   const [currentTime, setCurrentTime] = useState(new Date().getTime())
+  const [contextMenu, setContextMenu] = useState<{x: number, y: number, projectId: string} | null>(null)
 
   // 定时更新时间，用于实时显示倒计时
   useEffect(() => {
@@ -80,6 +83,18 @@ const SessionList: React.FC<SessionListProps> = ({
 
     return () => clearInterval(timer)
   }, [])
+
+  // Handle clicking outside to close context menu
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (contextMenu) {
+        setContextMenu(null)
+      }
+    }
+
+    document.addEventListener('click', handleClickOutside)
+    return () => document.removeEventListener('click', handleClickOutside)
+  }, [contextMenu])
 
   // 自动展开当前活跃会话对应的项目（手风琴效果）
   useEffect(() => {
@@ -138,16 +153,39 @@ const SessionList: React.FC<SessionListProps> = ({
     if (diffInSeconds < 0) {
       return t('sessions.justNow')
     } else if (diffInSeconds < 60) {
-      return `${diffInSeconds}秒前`
+      return t('sessions.secondsAgo', { seconds: diffInSeconds })
     } else if (diffInSeconds < 3600) {
       const minutes = Math.floor(diffInSeconds / 60)
-      return `${minutes}分钟前`
+      return t('sessions.minutesAgo', { minutes })
     } else if (diffInSeconds < 86400) {
       const hours = Math.floor(diffInSeconds / 3600)
-      return `${hours}小时前`
+      return t('sessions.hoursAgo', { hours })
     } else {
       const days = Math.floor(diffInSeconds / 86400)
-      return `${days}天前`
+      return t('sessions.daysAgo', { days })
+    }
+  }
+
+  // Handle right-click context menu for projects
+  const handleProjectContextMenu = (event: React.MouseEvent, projectId: string) => {
+    event.preventDefault()
+    event.stopPropagation()
+    setContextMenu({
+      x: event.clientX,
+      y: event.clientY,
+      projectId
+    })
+  }
+
+  const handleContextMenuAction = (action: 'newSession' | 'delete', projectId: string) => {
+    setContextMenu(null)
+    if (action === 'newSession') {
+      onCreateSession(projectId)
+    } else if (action === 'delete') {
+      const project = projects.find(p => p.id === projectId)
+      if (project && confirm(t('sessions.confirmDeleteProject', { projectName: project.name }))) {
+        onDeleteProject(projectId)
+      }
     }
   }
 
@@ -184,8 +222,8 @@ const SessionList: React.FC<SessionListProps> = ({
       <nav className="flex-grow px-2 overflow-y-auto space-y-1">
         {projects.length === 0 ? (
           <div className="p-4 text-center" style={{ color: 'var(--text-tertiary)' }}>
-            <p>No projects yet</p>
-            <p className="text-sm mt-1">Add a project to get started</p>
+            <p>{t('sessions.noProjects')}</p>
+            <p className="text-sm mt-1">{t('sessions.addProjectToStart')}</p>
           </div>
         ) : (
           projects.map((project, projectIndex) => (
@@ -211,6 +249,7 @@ const SessionList: React.FC<SessionListProps> = ({
                   }
                 }}
                 onClick={() => toggleProject(project.id)}
+                onContextMenu={(e) => handleProjectContextMenu(e, project.id)}
               >
                 <div className="flex items-center gap-3 flex-1 min-w-0">
                   <svg 
@@ -255,7 +294,7 @@ const SessionList: React.FC<SessionListProps> = ({
                       e.currentTarget.style.color = expandedProjects.has(project.id) ? '#ffffff' : 'var(--text-tertiary)'
                       e.currentTarget.style.opacity = expandedProjects.has(project.id) ? '0.8' : '0'
                     }}
-                    title="New Session"
+                    title={t('sessions.newSession')}
                   >
                     <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" className="w-4 h-4">
                       <path d="M8.75 3.75a.75.75 0 0 0-1.5 0v3.5h-3.5a.75.75 0 0 0 0 1.5h3.5v3.5a.75.75 0 0 0 1.5 0v-3.5h3.5a.75.75 0 0 0 0-1.5h-3.5v-3.5Z" />
@@ -273,7 +312,7 @@ const SessionList: React.FC<SessionListProps> = ({
                 <div className="pl-6 pt-1 space-y-0.5">
                   {project.sessions.length === 0 ? (
                     <div className="p-3 text-sm" style={{ color: 'var(--text-tertiary)' }}>
-                      No sessions yet
+                      {t('sessions.noSessionsYet')}
                     </div>
                   ) : (
                     project.sessions.map((session, sessionIndex) => (
@@ -329,13 +368,13 @@ const SessionList: React.FC<SessionListProps> = ({
                         <button
                           onClick={(e) => {
                             e.stopPropagation()
-                            if (confirm('Delete this session?')) {
+                            if (confirm(t('sessions.confirmDelete'))) {
                               onDeleteSession(session.id)
                             }
                           }}
                           className="opacity-0 group-hover/session:opacity-100 transition-opacity hover:text-red-400 mt-0.5 shrink-0"
                           style={{ color: 'var(--text-tertiary)' }}
-                          title="Delete Session"
+                          title={t('sessions.deleteSession')}
                         >
                           <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" className="w-4 h-4">
                             <path d="M5.28 4.22a.75.75 0 0 0-1.06 1.06L6.94 8l-2.72 2.72a.75.75 0 1 0 1.06 1.06L8 9.06l2.72 2.72a.75.75 0 1 0 1.06-1.06L9.06 8l2.72-2.72a.75.75 0 0 0-1.06-1.06L8 6.94 5.28 4.22Z" />
@@ -395,6 +434,54 @@ const SessionList: React.FC<SessionListProps> = ({
           )}
         </div>
       </div>
+
+      {/* Context Menu */}
+      {contextMenu && (
+        <div
+          className="fixed z-50 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg py-1 min-w-48"
+          style={{
+            left: contextMenu.x,
+            top: contextMenu.y,
+            backgroundColor: 'var(--bg-primary)',
+            borderColor: 'var(--border-primary)',
+            boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06)'
+          }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <button
+            className="w-full text-left px-4 py-2 text-sm hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center gap-2"
+            style={{ color: 'var(--text-primary)' }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.backgroundColor = 'var(--hover-bg)'
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.backgroundColor = 'transparent'
+            }}
+            onClick={() => handleContextMenuAction('newSession', contextMenu.projectId)}
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" className="w-4 h-4">
+              <path d="M8.75 3.75a.75.75 0 0 0-1.5 0v3.5h-3.5a.75.75 0 0 0 0 1.5h3.5v3.5a.75.75 0 0 0 1.5 0v-3.5h3.5a.75.75 0 0 0 0-1.5h-3.5v-3.5Z" />
+            </svg>
+            {t('sessions.newSession')}
+          </button>
+          <div className="border-t border-gray-200 dark:border-gray-700 my-1" style={{ borderColor: 'var(--border-primary)' }}></div>
+          <button
+            className="w-full text-left px-4 py-2 text-sm hover:bg-red-50 dark:hover:bg-red-900/20 text-red-600 dark:text-red-400 flex items-center gap-2"
+            onMouseEnter={(e) => {
+              e.currentTarget.style.backgroundColor = 'rgba(239, 68, 68, 0.1)'
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.backgroundColor = 'transparent'
+            }}
+            onClick={() => handleContextMenuAction('delete', contextMenu.projectId)}
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" className="w-4 h-4">
+              <path fillRule="evenodd" d="M5 3.25V4H2.75a.75.75 0 0 0 0 1.5h.3l.815 8.15A1.5 1.5 0 0 0 5.357 15h5.285a1.5 1.5 0 0 0 1.493-1.35L12.95 5.5h.3a.75.75 0 0 0 0-1.5H11V3.25a2.25 2.25 0 0 0-2.25-2.25h-1.5A2.25 2.25 0 0 0 5 3.25Zm2.25-.75a.75.75 0 0 0-.75.75V4h3V3.25a.75.75 0 0 0-.75-.75h-1.5ZM6.05 6a.75.75 0 0 1 .787.713l.275 5.5a.75.75 0 0 1-1.498.075l-.275-5.5A.75.75 0 0 1 6.05 6Zm3.9 0a.75.75 0 0 1 .712.787l-.275 5.5a.75.75 0 0 1-1.498-.075l.275-5.5a.75.75 0 0 1 .786-.712Z" clipRule="evenodd" />
+            </svg>
+            {t('sessions.deleteProject')}
+          </button>
+        </div>
+      )}
     </div>
   )
 }

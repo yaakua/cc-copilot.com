@@ -27,7 +27,16 @@
       "!.git",
       "!docs",
       "!.vscode"
-    ]
+    ],
+    "mac": {
+      "icon": "resources/icon.png"
+    },
+    "win": {
+      "icon": "resources/icon.png"
+    },
+    "linux": {
+      "icon": "resources/icon.png"
+    }
   },
   "scripts": {
     "dev": "electron-vite dev",

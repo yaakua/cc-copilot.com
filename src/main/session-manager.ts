@@ -350,4 +350,153 @@ export class SessionManager {
       logger.info(`Project and its sessions deleted: ${projectId}`, 'SessionManager');
     }
   }
+
+  public refreshProjectSessions(projectId: string): void {
+    const project = this.getProjectById(projectId);
+    if (!project) {
+      logger.warn(`Project not found for refresh: ${projectId}`, 'SessionManager');
+      return;
+    }
+
+    logger.info(`Refreshing sessions for project: ${project.name}`, 'SessionManager');
+
+    // Remove existing sessions for this project
+    this.data.sessions = this.data.sessions.filter(s => s.projectId !== projectId);
+
+    const claudeDir = path.join(os.homedir(), '.claude');
+    const projectsDir = path.join(claudeDir, 'projects');
+
+    if (!fs.existsSync(projectsDir)) {
+      logger.warn('Claude projects directory not found', 'SessionManager');
+      return;
+    }
+
+    // Find the project folder by matching the project path
+    const projectFolders = fs.readdirSync(projectsDir, { withFileTypes: true })
+      .filter(dirent => dirent.isDirectory())
+      .map(dirent => dirent.name);
+
+    let sessionsSynced = 0;
+
+    for (const projectFolder of projectFolders) {
+      try {
+        const projectFolderPath = path.join(projectsDir, projectFolder);
+        
+        // Check if this folder contains sessions for our target project
+        const allSessionFiles = fs.readdirSync(projectFolderPath).filter(f => f.endsWith('.jsonl'));
+        if (allSessionFiles.length === 0) continue;
+
+        // Check the first session file to see if it matches our project path
+        let matchesProject = false;
+        try {
+          const firstSessionFile = path.join(projectFolderPath, allSessionFiles[0]);
+          const sessionData = fs.readFileSync(firstSessionFile, 'utf-8')
+            .split('\n')
+            .filter(line => line.trim() !== '')
+            .map(line => JSON.parse(line));
+          
+          const entryWithCwd = sessionData.find(entry => entry.cwd);
+          if (entryWithCwd && entryWithCwd.cwd === project.path) {
+            matchesProject = true;
+          }
+        } catch (error) {
+          continue;
+        }
+
+        if (!matchesProject) continue;
+
+        // Process session files for this project
+        const sessionFiles = allSessionFiles
+          .map(file => ({
+            name: file,
+            path: path.join(projectFolderPath, file),
+            stats: fs.statSync(path.join(projectFolderPath, file))
+          }))
+          .sort((a, b) => b.stats.mtime.getTime() - a.stats.mtime.getTime())
+          .slice(0, 20)
+          .map(item => item.name);
+
+        for (const sessionFile of sessionFiles) {
+          try {
+            const sessionFilePath = path.join(projectFolderPath, sessionFile);
+            const sessionData = fs.readFileSync(sessionFilePath, 'utf-8')
+              .split('\n')
+              .filter(line => line.trim() !== '')
+              .map(line => JSON.parse(line));
+
+            if (sessionData.length > 0) {
+              const firstEntry = sessionData[0];
+              const claudeSessionId = firstEntry.sessionId;
+
+              // Check if session already exists (avoid duplicates)
+              const existingSession = this.data.sessions.find(s => s.claudeSessionId === claudeSessionId);
+              if (existingSession) continue;
+
+              const firstUserMessage = sessionData.find(msg => msg.type === 'user');
+              const lastMessage = sessionData[sessionData.length - 1];
+
+              let sessionName = `Session ${claudeSessionId}`;
+              if (firstUserMessage && firstUserMessage.message && firstUserMessage.message.content) {
+                let content: string;
+                if (typeof firstUserMessage.message.content === 'string') {
+                  content = firstUserMessage.message.content;
+                } else if (Array.isArray(firstUserMessage.message.content)) {
+                  const textContent = firstUserMessage.message.content.find((item: any) => item.type === 'text');
+                  content = textContent ? textContent.text : String(firstUserMessage.message.content);
+                } else {
+                  content = String(firstUserMessage.message.content);
+                }
+
+                content = content.replace(/cd\s+"[^"]*"|cd\s+\S+/g, '').trim();
+                content = content.replace(/\n|\r/g, ' ').trim();
+                if (content.length > 3) {
+                  sessionName = content.substring(0, 50).trim();
+                }
+              }
+
+              let lastActiveAt: string;
+              try {
+                lastActiveAt = lastMessage && lastMessage.timestamp 
+                  ? new Date(lastMessage.timestamp).toISOString() 
+                  : new Date(firstEntry.timestamp).toISOString();
+              } catch (error) {
+                lastActiveAt = new Date().toISOString();
+              }
+
+              let createdAt: string;
+              try {
+                createdAt = firstUserMessage && firstUserMessage.timestamp 
+                  ? new Date(firstUserMessage.timestamp).toISOString() 
+                  : new Date(firstEntry.timestamp).toISOString();
+              } catch (error) {
+                createdAt = new Date().toISOString();
+              }
+
+              const session: Session = {
+                id: uuidv4(),
+                name: sessionName,
+                projectId: project.id,
+                createdAt: createdAt,
+                lastActiveAt: lastActiveAt,
+                claudeSessionId: claudeSessionId,
+                isTemporary: false,
+                filePath: sessionFilePath,
+              };
+
+              this.data.sessions.push(session);
+              sessionsSynced++;
+            }
+          } catch (error) {
+            logger.error(`Failed to process session file during refresh: ${sessionFile}`, 'SessionManager', error as Error);
+          }
+        }
+        break; // Found the matching project folder, no need to continue
+      } catch (error) {
+        logger.error(`Failed to process project folder during refresh: ${projectFolder}`, 'SessionManager', error as Error);
+      }
+    }
+
+    this.save(this.data);
+    logger.info(`Refresh complete for project ${project.name}. Loaded ${sessionsSynced} sessions.`, 'SessionManager');
+  }
 }

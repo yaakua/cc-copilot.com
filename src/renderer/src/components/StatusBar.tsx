@@ -16,10 +16,11 @@ interface StatusInfo {
 }
 
 const StatusBar: React.FC<StatusBarProps> = ({ activeSessionId }) => {
-  const { t } = useTranslation()
+  const { t, i18n } = useTranslation()
   const [statusInfo, setStatusInfo] = useState<StatusInfo | null>(null)
   const [serviceProviders, setServiceProviders] = useState<any[]>([])
   const [showAccountMenu, setShowAccountMenu] = useState(false)
+  const [showLanguageMenu, setShowLanguageMenu] = useState(false)
   const [activeProvider, setActiveProvider] = useState<any | null>(null)
 
   useEffect(() => {
@@ -140,10 +141,7 @@ const StatusBar: React.FC<StatusBarProps> = ({ activeSessionId }) => {
           // 检查第一个账号是否有authorization，如果没有则提醒用户
           if (!firstAccount.authorization) {
             // 弹窗提醒用户，但不阻止切换
-            window.alert(
-              `提醒：Claude官方账号 "${firstAccount.emailAddress}" 尚未激活。\n\n` +
-              `请先选择任意一个历史会话来激活此账号，否则可能无法正常使用。`
-            )
+            window.alert(t('statusBar.providerSwitchAlert', { email: firstAccount.emailAddress }))
             logger.warn(`切换到未激活的Claude官方账号: ${firstAccount.emailAddress}`)
           }
         }
@@ -184,10 +182,7 @@ const StatusBar: React.FC<StatusBarProps> = ({ activeSessionId }) => {
         
         if (targetAccount && !targetAccount.authorization) {
           // 弹窗提醒用户，但不阻止切换
-          window.alert(
-            `提醒：Claude官方账号 "${targetAccount.emailAddress}" 尚未激活。\n\n` +
-            `请先选择任意一个历史会话来激活此账号，否则可能无法正常使用。`
-          )
+          window.alert(t('statusBar.providerSwitchAlert', { email: targetAccount.emailAddress }))
           logger.warn(`切换到未激活的Claude官方账号: ${accountId}`)
         }
       }
@@ -230,6 +225,12 @@ const StatusBar: React.FC<StatusBarProps> = ({ activeSessionId }) => {
     }
   }
 
+  const handleLanguageChange = (language: string) => {
+    i18n.changeLanguage(language)
+    setShowLanguageMenu(false)
+    logger.info(`语言切换到: ${language}`)
+  }
+
   const getAccountDisplayName = (account: any, providerType: string) => {
     if (providerType === 'claude_official') {
       return account.emailAddress || account.organizationName || 'Unknown'
@@ -247,7 +248,7 @@ const StatusBar: React.FC<StatusBarProps> = ({ activeSessionId }) => {
             className="status-dot" 
             style={{ backgroundColor: activeSessionId ? 'var(--status-green)' : 'var(--text-tertiary)' }}
           ></div>
-          <span>{activeSessionId ? 'Connected' : 'Disconnected'}</span>
+          <span>{activeSessionId ? t('statusBar.connected') : t('statusBar.disconnected')}</span>
         </div>
         
         {/* Account Selector */}
@@ -259,8 +260,8 @@ const StatusBar: React.FC<StatusBarProps> = ({ activeSessionId }) => {
           >
             <span>
               {activeProvider?.provider ? 
-                `${activeProvider.provider.name}: ${activeProvider.account ? getAccountDisplayName(activeProvider.account, activeProvider.provider.type) : 'No Account'}` : 
-                'No Provider'
+                `${activeProvider.provider.name}: ${activeProvider.account ? getAccountDisplayName(activeProvider.account, activeProvider.provider.type) : t('statusBar.noAccount')}` : 
+                t('statusBar.noProvider')
               }
             </span>
             <span style={{ fontSize: '10px' }}>▼</span>
@@ -278,13 +279,13 @@ const StatusBar: React.FC<StatusBarProps> = ({ activeSessionId }) => {
             >
               {/* Header with refresh button */}
               <div className="px-3 py-2 border-b flex items-center justify-between" style={{ borderBottom: '1px solid var(--border-primary)' }}>
-                <span className="font-medium">Select Account</span>
+                <span className="font-medium">{t('statusBar.selectAccount')}</span>
                 <button 
                   className="text-xs px-2 py-1 rounded hover:opacity-80"
                   style={{ backgroundColor: 'var(--bg-secondary)', color: 'var(--text-secondary)' }}
                   onClick={handleRefreshAccounts}
                 >
-                  Refresh Accounts
+                  {t('statusBar.refreshAccounts')}
                 </button>
               </div>
               
@@ -299,7 +300,7 @@ const StatusBar: React.FC<StatusBarProps> = ({ activeSessionId }) => {
                       color: 'var(--text-secondary)'
                     }}
                   >
-                    {provider.name} {provider.type === 'claude_official' ? '(Official)' : '(Third-party)'}
+                    {provider.name} ({provider.type === 'claude_official' ? t('statusBar.official') : t('statusBar.thirdParty')})
                   </div>
                   
                   {/* Accounts List */}
@@ -352,7 +353,7 @@ const StatusBar: React.FC<StatusBarProps> = ({ activeSessionId }) => {
                     })
                   ) : (
                     <div className="px-6 py-2" style={{ color: 'var(--text-tertiary)' }}>
-                      No accounts available
+                      {t('statusBar.noAccountsAvailable')}
                     </div>
                   )}
                 </div>
@@ -360,7 +361,7 @@ const StatusBar: React.FC<StatusBarProps> = ({ activeSessionId }) => {
               
               {serviceProviders.length === 0 && (
                 <div className="px-3 py-4 text-center" style={{ color: 'var(--text-tertiary)' }}>
-                  No service providers configured
+                  {t('statusBar.noServiceProviders')}
                 </div>
               )}
             </div>
@@ -370,9 +371,60 @@ const StatusBar: React.FC<StatusBarProps> = ({ activeSessionId }) => {
         {/* Proxy Info */}
         {statusInfo && (
           <span>
-            Proxy: {statusInfo.proxy === 'Disabled' ? 'Off' : statusInfo.proxy}
+            {t('statusBar.proxy')}: {statusInfo.proxy === 'Disabled' ? t('statusBar.off') : statusInfo.proxy}
           </span>
         )}
+        
+        {/* Language Switcher */}
+        <div className="relative">
+          <div 
+            className="flex items-center gap-1 cursor-pointer hover:opacity-80 px-2 py-1 rounded"
+            onClick={() => setShowLanguageMenu(!showLanguageMenu)}
+            style={{ backgroundColor: showLanguageMenu ? 'var(--bg-secondary)' : 'transparent' }}
+          >
+            <span style={{ fontSize: '12px' }}>🌐</span>
+            <span>{i18n.language === 'zh-CN' ? '中' : 'EN'}</span>
+            <span style={{ fontSize: '10px' }}>▼</span>
+          </div>
+          
+          {/* Language Selection Dropdown */}
+          {showLanguageMenu && (
+            <div 
+              className="absolute bottom-full left-0 mb-1 bg-white border rounded shadow-lg z-50 min-w-32"
+              style={{ 
+                backgroundColor: 'var(--bg-primary)', 
+                border: '1px solid var(--border-primary)',
+                color: 'var(--text-primary)'
+              }}
+            >
+              <div 
+                className="px-3 py-2 cursor-pointer hover:opacity-80 flex items-center gap-2"
+                style={{ 
+                  backgroundColor: i18n.language === 'en' ? 'var(--bg-accent)' : 'transparent',
+                  color: i18n.language === 'en' ? 'var(--text-accent)' : 'var(--text-primary)'
+                }}
+                onClick={() => handleLanguageChange('en')}
+              >
+                <span>🇺🇸</span>
+                <span>English</span>
+                {i18n.language === 'en' && <span style={{ fontSize: '10px', marginLeft: 'auto' }}>✓</span>}
+              </div>
+              
+              <div 
+                className="px-3 py-2 cursor-pointer hover:opacity-80 flex items-center gap-2"
+                style={{ 
+                  backgroundColor: i18n.language === 'zh-CN' ? 'var(--bg-accent)' : 'transparent',
+                  color: i18n.language === 'zh-CN' ? 'var(--text-accent)' : 'var(--text-primary)'
+                }}
+                onClick={() => handleLanguageChange('zh-CN')}
+              >
+                <span>🇨🇳</span>
+                <span>简体中文</span>
+                {i18n.language === 'zh-CN' && <span style={{ fontSize: '10px', marginLeft: 'auto' }}>✓</span>}
+              </div>
+            </div>
+          )}
+        </div>
       </div>
       
       {/* Right side - Git/Project info and Help */}
@@ -396,7 +448,7 @@ const StatusBar: React.FC<StatusBarProps> = ({ activeSessionId }) => {
             e.currentTarget.style.backgroundColor = 'transparent'
             e.currentTarget.style.color = 'var(--text-tertiary)'
           }}
-          title="Click to open website"
+          title={t('statusBar.clickToOpenWebsite')}
         >
           <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 16 16" strokeWidth="1.5" stroke="currentColor" className="w-3 h-3">
             <path strokeLinecap="round" strokeLinejoin="round" d="M13.828 10.172a4 4 0 0 0-5.656-5.656l-4 4a4 4 0 1 0 5.656 5.656l1.102-1.101m-.758-4.899a4 4 0 0 0-5.656 5.656l4-4Z"/>
@@ -405,11 +457,17 @@ const StatusBar: React.FC<StatusBarProps> = ({ activeSessionId }) => {
         </button>
       </div>
       
-      {/* Click outside to close menu */}
+      {/* Click outside to close menus */}
       {showAccountMenu && (
         <div 
           className="fixed inset-0 z-40"
           onClick={() => setShowAccountMenu(false)}
+        />
+      )}
+      {showLanguageMenu && (
+        <div 
+          className="fixed inset-0 z-40"
+          onClick={() => setShowLanguageMenu(false)}
         />
       )}
     </footer>

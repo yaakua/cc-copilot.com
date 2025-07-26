@@ -65,16 +65,33 @@ const App: React.FC = () => {
         const newProjects = [...prevProjects]
         const project = { ...newProjects[projectIndex] }
 
-        if (!project.sessions.some(s => s.id === newSession.id)) {
-          project.sessions = [...project.sessions, newSession].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
-          newProjects[projectIndex] = project
+        // Find and remove any temporary sessions for this project
+        const tempSessionIndex = project.sessions.findIndex(s => s.isLoading && s.isTemporary && s.projectId === newSession.projectId)
+        
+        if (tempSessionIndex !== -1) {
+          // Replace temp session with real session
+          const tempSessionId = project.sessions[tempSessionIndex].id
+          project.sessions[tempSessionIndex] = newSession
+          
+          // Update activeSessionIds to replace temp id with real id
+          setActiveSessionIds(prev => 
+            prev.map(id => id === tempSessionId ? newSession.id : id)
+          )
+          
+          // Update current active session id
+          setCurrentActiveSessionId(prevCurrentId => 
+            prevCurrentId === tempSessionId ? newSession.id : prevCurrentId
+          )
+        } else if (!project.sessions.some(s => s.id === newSession.id)) {
+          // No temp session found, add as new session
+          project.sessions = [newSession, ...project.sessions].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+          setActiveSessionIds(prev => [...prev, newSession.id])
+          setCurrentActiveSessionId(newSession.id)
         }
 
+        newProjects[projectIndex] = project
         return newProjects
       })
-
-      setActiveSessionIds(prev => [...prev, newSession.id])
-      setCurrentActiveSessionId(newSession.id)
     })
 
     const removeSessionUpdatedListener = window.api.onSessionUpdated((updateData: { oldId: string; newSession: Session }) => {
@@ -143,6 +160,30 @@ const App: React.FC = () => {
       })
     })
 
+    const removeProjectDeletedListener = window.api.onProjectDeleted((projectId: string) => {
+      logger.info('Received project:deleted event', { projectId })
+      
+      setProjects(prev => prev.filter(p => p.id !== projectId))
+      
+      // Remove any active sessions that belonged to this project
+      setActiveSessionIds(prevActiveIds => {
+        const project = projects.find(p => p.id === projectId)
+        if (!project) return prevActiveIds
+        
+        const projectSessionIds = project.sessions.map(s => s.id)
+        const remainingIds = prevActiveIds.filter(id => !projectSessionIds.includes(id))
+        
+        setCurrentActiveSessionId(prevCurrentId => {
+          if (prevCurrentId && projectSessionIds.includes(prevCurrentId)) {
+            return remainingIds.length > 0 ? remainingIds[remainingIds.length - 1] : null
+          }
+          return prevCurrentId
+        })
+        
+        return remainingIds
+      })
+    })
+
     return () => {
       removeClaudeListener()
       removeTerminalClosedListener()
@@ -150,6 +191,7 @@ const App: React.FC = () => {
       removeSessionUpdatedListener()
       removeSessionDeletedListener()
       removeProjectCreatedListener()
+      removeProjectDeletedListener()
     }
   }, [])
 
@@ -226,12 +268,49 @@ const App: React.FC = () => {
       }
 
       logger.info('创建新会话', { projectId });
-      // The backend will create the session.
+      
+      // Create a temporary loading session immediately
+      const tempSessionId = `temp-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`
+      const tempSession: Session = {
+        id: tempSessionId,
+        name: t('sessions.creating'),
+        projectId,
+        createdAt: new Date().toISOString(),
+        lastActiveAt: new Date().toISOString(),
+        isTemporary: true,
+        isLoading: true
+      }
+      
+      // Add temp session to projects state
+      setProjects(prevProjects => {
+        const projectIndex = prevProjects.findIndex(p => p.id === projectId)
+        if (projectIndex === -1) return prevProjects
+        
+        const newProjects = [...prevProjects]
+        const project = { ...newProjects[projectIndex] }
+        project.sessions = [tempSession, ...project.sessions]
+        newProjects[projectIndex] = project
+        return newProjects
+      })
+      
+      // Add to active sessions and set as current
+      setActiveSessionIds(prev => [...prev, tempSessionId])
+      setCurrentActiveSessionId(tempSessionId)
+      
+      // Send request to backend
       // The UI will be updated via the `session:created` event.
       await window.api.createSession(projectId);
       logger.info('新会话创建请求已发送');
     } catch (error) {
       logger.error('创建会话失败', error as Error)
+      // Clean up temp session on error
+      setActiveSessionIds(prev => prev.filter(id => !id.startsWith('temp-')))
+      setProjects(prevProjects => 
+        prevProjects.map(p => ({
+          ...p,
+          sessions: p.sessions.filter(s => !s.id.startsWith('temp-'))
+        }))
+      )
     }
   }
 
@@ -250,10 +329,22 @@ const App: React.FC = () => {
         if (session) break
       }
 
+      if (!session) {
+        logger.error('找不到要激活的会话', { sessionId })
+        return
+      }
+
       logger.info('激活会话', { sessionId });
 
-      await window.api.activateSession(sessionId);
-      logger.info('会话激活请求已发送', { sessionId });
+      // Set session to loading state immediately
+      setProjects(prevProjects => 
+        prevProjects.map(p => ({
+          ...p,
+          sessions: p.sessions.map(s => 
+            s.id === sessionId ? { ...s, isLoading: true } : s
+          )
+        }))
+      )
 
       // Add to active sessions and set as current
       setActiveSessionIds(prev => {
@@ -263,8 +354,32 @@ const App: React.FC = () => {
         return prev;
       });
       setCurrentActiveSessionId(sessionId);
+
+      await window.api.activateSession(sessionId);
+      logger.info('会话激活请求已发送', { sessionId });
+
+      // Clear loading state after a short delay (terminal should be ready)
+      setTimeout(() => {
+        setProjects(prevProjects => 
+          prevProjects.map(p => ({
+            ...p,
+            sessions: p.sessions.map(s => 
+              s.id === sessionId ? { ...s, isLoading: false } : s
+            )
+          }))
+        )
+      }, 1000)
     } catch (error) {
       logger.error('激活会话失败', error as Error, { meta: { sessionId } })
+      // Clear loading state on error
+      setProjects(prevProjects => 
+        prevProjects.map(p => ({
+          ...p,
+          sessions: p.sessions.map(s => 
+            s.id === sessionId ? { ...s, isLoading: false } : s
+          )
+        }))
+      )
     }
   }
 
@@ -275,6 +390,16 @@ const App: React.FC = () => {
       // The UI will be updated via the `session:deleted` event.
     } catch (error) {
       logger.error('删除会话失败', error as Error, { meta: { sessionId } })
+    }
+  }
+
+  const handleDeleteProject = async (projectId: string) => {
+    try {
+      logger.info('请求删除项目', { projectId });
+      await window.api.deleteProject(projectId);
+      // The UI will be updated via the `project:deleted` event.
+    } catch (error) {
+      logger.error('删除项目失败', error as Error, { meta: { projectId } })
     }
   }
 
@@ -317,7 +442,7 @@ const App: React.FC = () => {
   if (loading) {
     return (
       <div className="flex h-screen items-center justify-center" style={{ backgroundColor: 'var(--bg-primary)', color: 'var(--text-primary)' }}>
-        <div>Loading...</div>
+        <div>{t('common.loading')}</div>
       </div>
     )
   }
@@ -325,6 +450,15 @@ const App: React.FC = () => {
   return (
     <ErrorBoundary>
       <div className="flex flex-col h-screen" style={{ backgroundColor: 'var(--bg-primary)', color: 'var(--text-primary)' }}>
+        {/* Custom drag area - show on all platforms for consistency */}
+        <div 
+          className="h-6 shrink-0 drag-region"
+          style={{ 
+            backgroundColor: 'var(--bg-primary)',
+            WebkitAppRegion: 'drag' as any
+          }}
+        />
+        
         {/* Main Content Area */}
         <div className="flex flex-1 overflow-hidden">
           {/* Left Sidebar - Session List */}
@@ -336,6 +470,7 @@ const App: React.FC = () => {
               onCreateSession={handleCreateSession}
               onActivateSession={handleActivateSession}
               onDeleteSession={handleDeleteSession}
+              onDeleteProject={handleDeleteProject}
               onOpenSettings={handleOpenSettings}
               claudeAvailable={claudeDetectionResult?.isInstalled === true}
             />

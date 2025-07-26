@@ -259,7 +259,7 @@ const Settings: React.FC<SettingsProps> = ({
                     : 'text-gray-300 hover:bg-gray-700'
                 }`}
               >
-                General
+                {t('settings.general')}
               </button>
               <button
                 onClick={() => setActiveTab('accounts')}
@@ -269,7 +269,7 @@ const Settings: React.FC<SettingsProps> = ({
                     : 'text-gray-300 hover:bg-gray-700'
                 }`}
               >
-                Accounts
+                {t('settings.accounts')}
               </button>
               <button
                 onClick={() => setActiveTab('providers')}
@@ -279,7 +279,7 @@ const Settings: React.FC<SettingsProps> = ({
                     : 'text-gray-300 hover:bg-gray-700'
                 }`}
               >
-                AI Providers
+                {t('settings.aiProviders')}
               </button>
               <button
                 onClick={() => setActiveTab('proxy')}
@@ -289,7 +289,7 @@ const Settings: React.FC<SettingsProps> = ({
                     : 'text-gray-300 hover:bg-gray-700'
                 }`}
               >
-                Proxy
+                {t('settings.proxy')}
               </button>
               <button
                 onClick={() => setActiveTab('language')}
@@ -299,7 +299,7 @@ const Settings: React.FC<SettingsProps> = ({
                     : 'text-gray-300 hover:bg-gray-700'
                 }`}
               >
-                Language
+                {t('settings.language')}
               </button>
             </nav>
           </div>
@@ -310,13 +310,13 @@ const Settings: React.FC<SettingsProps> = ({
               <div className="space-y-6">
                 <div>
                   <div className="flex items-center justify-between mb-3">
-                    <h3 className="text-lg font-medium">Claude CLI Status</h3>
+                    <h3 className="text-lg font-medium">{t('settings.claudeCliStatus')}</h3>
                     <button
                       onClick={onRedetectClaude}
                       disabled={claudeDetecting}
                       className="px-3 py-1 text-sm bg-blue-600 hover:bg-blue-700 disabled:bg-gray-600 rounded transition-colors"
                     >
-                      {claudeDetecting ? 'Detecting...' : 'Re-detect'}
+                      {claudeDetecting ? t('settings.detecting') : t('settings.reDetect')}
                     </button>
                   </div>
                   
@@ -326,38 +326,38 @@ const Settings: React.FC<SettingsProps> = ({
                         <span>{claudeDetectionResult.isInstalled ? '✓' : '✗'}</span>
                         <span>
                           {claudeDetectionResult.isInstalled 
-                            ? `Claude CLI installed ${claudeDetectionResult.version ? `(${claudeDetectionResult.version})` : ''}`
-                            : `Claude CLI not found`
+                            ? `${t('settings.claudeCliInstalled')} ${claudeDetectionResult.version ? `(${claudeDetectionResult.version})` : ''}`
+                            : t('settings.claudeCliNotFound')
                           }
                         </span>
                       </div>
                       
                       {claudeDetectionResult.path && (
                         <div className="text-sm text-gray-400">
-                          Path: {claudeDetectionResult.path}
+                          {t('settings.path')}: {claudeDetectionResult.path}
                         </div>
                       )}
                       
                       {claudeDetectionResult.error && (
                         <div className="text-sm text-red-400">
-                          Error: {claudeDetectionResult.error}
+                          {t('settings.error')}: {claudeDetectionResult.error}
                         </div>
                       )}
                       
                       <div className="text-sm text-gray-500">
-                        Last checked: {new Date(claudeDetectionResult.timestamp).toLocaleString()}
+                        {t('settings.lastChecked')}: {new Date(claudeDetectionResult.timestamp).toLocaleString()}
                       </div>
                     </div>
                   ) : (
                     <div className="text-sm text-gray-400">
-                      {claudeDetecting ? 'Detecting Claude CLI...' : 'Detection status unknown'}
+                      {claudeDetecting ? t('settings.detectingClaude') : t('settings.detectionStatusUnknown')}
                     </div>
                   )}
                   
                   {!claudeDetectionResult?.isInstalled && (
                     <>
                       <p className="text-sm text-gray-400 mt-3 mb-2">
-                        Claude CLI is required for terminal sessions. Install with:
+                        {t('settings.claudeRequired')}
                       </p>
                       <code className="block bg-gray-900 p-3 rounded text-sm text-green-400">
                         npm install -g @anthropic-ai/claude-code
@@ -367,19 +367,18 @@ const Settings: React.FC<SettingsProps> = ({
                 </div>
                 
                 <div>
-                  <h3 className="text-lg font-medium mb-3">Project Management</h3>
+                  <h3 className="text-lg font-medium mb-3">{t('settings.projectManagement')}</h3>
                   <p className="text-sm text-gray-400">
-                    Projects are automatically discovered from your Claude projects directory.
-                    Create new sessions within projects to start coding.
+                    {t('settings.projectManagementDesc')}
                   </p>
                 </div>
                 
                 <div>
-                  <h3 className="text-lg font-medium mb-3">Keyboard Shortcuts</h3>
+                  <h3 className="text-lg font-medium mb-3">{t('settings.keyboardShortcuts')}</h3>
                   <div className="text-sm text-gray-400 space-y-1">
-                    <div>Ctrl/Cmd + C: Copy in terminal</div>
-                    <div>Ctrl/Cmd + V: Paste in terminal</div>
-                    <div>Ctrl/Cmd + L: Clear terminal</div>
+                    <div>{t('settings.copyShortcut')}</div>
+                    <div>{t('settings.pasteShortcut')}</div>
+                    <div>{t('settings.clearShortcut')}</div>
                   </div>
                 </div>
               </div>
@@ -387,7 +386,7 @@ const Settings: React.FC<SettingsProps> = ({
 
             {activeTab === 'accounts' && (
               <div className="space-y-6">
-                <h3 className="text-lg font-medium">Claude Official Accounts</h3>
+                <h3 className="text-lg font-medium">{t('settings.claudeOfficialAccounts')}</h3>
                 
                 {serviceProviders
                   .filter(provider => provider.type === 'claude_official')
@@ -396,14 +395,14 @@ const Settings: React.FC<SettingsProps> = ({
                       <div className="flex items-center justify-between">
                         <h4 className="font-medium text-blue-400">{provider.name}</h4>
                         <span className="text-sm text-gray-400">
-                          {provider.accounts.length} account{provider.accounts.length !== 1 ? 's' : ''}
+                          {t('settings.accountsCount', { count: provider.accounts.length, s: provider.accounts.length !== 1 ? 's' : '' })}
                         </span>
                       </div>
                       
                       {provider.accounts.length === 0 ? (
                         <div className="text-center py-8 text-gray-400">
-                          <p>No Claude accounts found</p>
-                          <p className="text-sm mt-1">Please login with 'claude login' first</p>
+                          <p>{t('settings.noClaudeAccounts')}</p>
+                          <p className="text-sm mt-1">{t('settings.pleaseLoginFirst')}</p>
                         </div>
                       ) : (
                         <div className="space-y-3">
@@ -419,22 +418,22 @@ const Settings: React.FC<SettingsProps> = ({
                                           ? 'bg-green-100 text-green-800' 
                                           : 'bg-red-100 text-red-800'
                                       }`}>
-                                        {account.authorization ? '✓ Account Available' : '✗ Need Detection'}
+                                        {account.authorization ? t('settings.accountAvailable') : t('settings.needDetection')}
                                       </span>
                                     </div>
                                   </div>
                                   
                                   <div className="mt-2 space-y-1 text-sm text-gray-300">
-                                    <div>Organization: {account.organizationName}</div>
-                                    <div>Role: {account.organizationRole}</div>
+                                    <div>{t('settings.organization')}: {account.organizationName}</div>
+                                    <div>{t('settings.role')}: {account.organizationRole}</div>
                                     {account.workspaceRole && (
-                                      <div>Workspace Role: {account.workspaceRole}</div>
+                                      <div>{t('settings.workspaceRole')}: {account.workspaceRole}</div>
                                     )}
                                   </div>
                                   
                                   {account.authorization && (
                                     <div className="mt-2 text-xs text-green-400">
-                                      ✓ Account verified and ready to use
+                                      {t('settings.accountVerified')}
                                     </div>
                                   )}
                                 </div>
@@ -450,10 +449,10 @@ const Settings: React.FC<SettingsProps> = ({
                                     }`}
                                   >
                                     {detectingAuth[account.emailAddress] 
-                                      ? 'Detecting...' 
+                                      ? t('settings.detecting')
                                       : account.authorization 
-                                        ? 'Re-detect' 
-                                        : 'Detect Account'
+                                        ? t('settings.reDetect')
+                                        : t('settings.detectAccount')
                                     }
                                   </button>
                                 </div>
@@ -461,10 +460,9 @@ const Settings: React.FC<SettingsProps> = ({
                               
                               {!account.authorization && (
                                 <div className="mt-3 p-3 bg-yellow-900/30 border border-yellow-700/50 rounded text-sm text-yellow-300">
-                                  <p className="font-medium">Account Detection Required</p>
+                                  <p className="font-medium">{t('settings.accountDetectionRequired')}</p>
                                   <p className="mt-1">
-                                    Click "Detect Account" to verify this account is properly configured 
-                                    and available for use with Claude Code.
+                                    {t('settings.accountDetectionDesc')}
                                   </p>
                                 </div>
                               )}
@@ -478,18 +476,18 @@ const Settings: React.FC<SettingsProps> = ({
                 
                 {serviceProviders.filter(p => p.type === 'claude_official').length === 0 && (
                   <div className="text-center py-8 text-gray-400">
-                    <p>No Claude official accounts configured</p>
-                    <p className="text-sm mt-1">Please login with 'claude login' first</p>
+                    <p>{t('settings.noClaudeOfficialAccounts')}</p>
+                    <p className="text-sm mt-1">{t('settings.pleaseLoginFirst')}</p>
                   </div>
                 )}
                 
                 <div className="mt-6 p-4 bg-blue-900/30 border border-blue-700/50 rounded">
-                  <h4 className="font-medium text-blue-300 mb-2">How to add Claude accounts:</h4>
+                  <h4 className="font-medium text-blue-300 mb-2">{t('settings.howToAddAccounts')}</h4>
                   <ol className="text-sm text-blue-200 space-y-1 list-decimal list-inside">
-                    <li>Open terminal and run: <code className="bg-gray-800 px-1 rounded">claude login</code></li>
-                    <li>Complete the login process in your browser</li>
-                    <li>Restart this application to see the new account</li>
-                    <li>Click "Detect Account" to verify the account is available</li>
+                    <li>{t('settings.openTerminalRun')} <code className="bg-gray-800 px-1 rounded">claude login</code></li>
+                    <li>{t('settings.completeLoginBrowser')}</li>
+                    <li>{t('settings.restartApplication')}</li>
+                    <li>{t('settings.clickDetectAccount')}</li>
                   </ol>
                 </div>
               </div>
@@ -498,12 +496,12 @@ const Settings: React.FC<SettingsProps> = ({
             {activeTab === 'providers' && (
               <div className="space-y-4">
                 <div className="flex items-center justify-between">
-                  <h3 className="text-lg font-medium">AI Providers</h3>
+                  <h3 className="text-lg font-medium">{t('settings.aiProvidersTitle')}</h3>
                   <button
                     onClick={addAIProvider}
                     className="px-3 py-2 bg-green-600 hover:bg-green-700 rounded text-sm transition-colors"
                   >
-                    + Add Provider
+                    {t('settings.addProvider')}
                   </button>
                 </div>
                 
@@ -511,29 +509,29 @@ const Settings: React.FC<SettingsProps> = ({
                   {aiProviders.map((provider) => (
                     <div key={provider.id} className="bg-gray-700 p-4 rounded-lg">
                       <div className="flex items-center justify-between mb-3">
-                        <h4 className="font-medium">Provider Configuration</h4>
+                        <h4 className="font-medium">{t('settings.providerConfiguration')}</h4>
                         <button
                           onClick={() => removeAIProvider(provider.id)}
                           className="text-red-400 hover:text-red-300 text-sm"
                         >
-                          Remove
+                          {t('settings.remove')}
                         </button>
                       </div>
                       
                       <div className="space-y-3">
                         <div>
-                          <label className="block text-sm font-medium mb-1">Name</label>
+                          <label className="block text-sm font-medium mb-1">{t('settings.name')}</label>
                           <input
                             type="text"
                             value={provider.name}
                             onChange={(e) => updateAIProvider(provider.id, 'name', e.target.value)}
-                            placeholder="e.g., Claude API, OpenAI"
+                            placeholder={t('settings.nameExample')}
                             className="w-full px-3 py-2 bg-gray-800 border border-gray-600 rounded text-sm focus:outline-none focus:border-blue-500"
                           />
                         </div>
                         
                         <div>
-                          <label className="block text-sm font-medium mb-1">API URL</label>
+                          <label className="block text-sm font-medium mb-1">{t('settings.apiUrl')}</label>
                           <input
                             type="url"
                             value={provider.apiUrl}
@@ -544,12 +542,12 @@ const Settings: React.FC<SettingsProps> = ({
                         </div>
                         
                         <div>
-                          <label className="block text-sm font-medium mb-1">API Key</label>
+                          <label className="block text-sm font-medium mb-1">{t('settings.apiKey')}</label>
                           <input
                             type="password"
                             value={provider.apiKey}
                             onChange={(e) => updateAIProvider(provider.id, 'apiKey', e.target.value)}
-                            placeholder="sk-..."
+                            placeholder={t('settings.apiKeyPlaceholder')}
                             className="w-full px-3 py-2 bg-gray-800 border border-gray-600 rounded text-sm focus:outline-none focus:border-blue-500"
                           />
                         </div>
@@ -559,8 +557,8 @@ const Settings: React.FC<SettingsProps> = ({
                   
                   {aiProviders.length === 0 && (
                     <div className="text-center py-8 text-gray-400">
-                      <p>No AI providers configured</p>
-                      <p className="text-sm mt-1">Click "Add Provider" to get started</p>
+                      <p>{t('settings.noAiProviders')}</p>
+                      <p className="text-sm mt-1">{t('settings.clickAddProvider')}</p>
                     </div>
                   )}
                 </div>
@@ -569,7 +567,7 @@ const Settings: React.FC<SettingsProps> = ({
 
             {activeTab === 'proxy' && (
               <div className="space-y-6">
-                <h3 className="text-lg font-medium">Upstream Proxy Settings</h3>
+                <h3 className="text-lg font-medium">{t('settings.upstreamProxySettings')}</h3>
                 
                 <div className="space-y-4">
                   <div className="flex items-center">
@@ -581,14 +579,14 @@ const Settings: React.FC<SettingsProps> = ({
                       className="mr-2"
                     />
                     <label htmlFor="proxy-enabled" className="text-sm font-medium">
-                      Enable Proxy
+                      {t('settings.enableProxy')}
                     </label>
                   </div>
                   
                   {proxySettings.enabled && (
                     <div className="space-y-4 pl-6 border-l border-gray-600">
                       <div>
-                        <label className="block text-sm font-medium mb-1">Proxy URL</label>
+                        <label className="block text-sm font-medium mb-1">{t('settings.proxyUrl')}</label>
                         <input
                           type="text"
                           value={proxySettings.url}
@@ -597,13 +595,13 @@ const Settings: React.FC<SettingsProps> = ({
                           className="w-full px-3 py-2 bg-gray-700 border border-gray-600 rounded text-sm focus:outline-none focus:border-blue-500"
                         />
                         <p className="text-xs text-gray-400 mt-1">
-                          Examples: http://127.0.0.1:1087, https://proxy.example.com:8080
+                          {t('settings.proxyUrlExample')}
                         </p>
                       </div>
                       
                       <div className="grid grid-cols-2 gap-4">
                         <div>
-                          <label className="block text-sm font-medium mb-1">Username (Optional)</label>
+                          <label className="block text-sm font-medium mb-1">{t('settings.usernameOptional')}</label>
                           <input
                             type="text"
                             value={proxySettings.username || ''}
@@ -613,7 +611,7 @@ const Settings: React.FC<SettingsProps> = ({
                         </div>
                         
                         <div>
-                          <label className="block text-sm font-medium mb-1">Password (Optional)</label>
+                          <label className="block text-sm font-medium mb-1">{t('settings.passwordOptional')}</label>
                           <input
                             type="password"
                             value={proxySettings.password || ''}
@@ -624,7 +622,7 @@ const Settings: React.FC<SettingsProps> = ({
                       </div>
                       
                       <div className="text-sm text-gray-400">
-                        <p>Final proxy URL: {proxySettings.url}{proxySettings.username ? ' (with authentication)' : ''}</p>
+                        <p>{t('settings.finalProxyUrl', { url: proxySettings.url, auth: proxySettings.username ? t('settings.withAuthentication') : '' })}</p>
                       </div>
                     </div>
                   )}
@@ -634,11 +632,11 @@ const Settings: React.FC<SettingsProps> = ({
 
             {activeTab === 'language' && (
               <div className="space-y-6">
-                <h3 className="text-lg font-medium">Language Settings</h3>
+                <h3 className="text-lg font-medium">{t('settings.languageSettings')}</h3>
                 
                 <div className="space-y-4">
                   <div>
-                    <label className="block text-sm font-medium mb-3">Interface Language</label>
+                    <label className="block text-sm font-medium mb-3">{t('settings.interfaceLanguage')}</label>
                     <div className="space-y-2">
                       <label className="flex items-center">
                         <input
@@ -649,7 +647,7 @@ const Settings: React.FC<SettingsProps> = ({
                           onChange={(e) => changeLanguage(e.target.value)}
                           className="mr-3"
                         />
-                        <span>English</span>
+                        <span>{t('settings.english')}</span>
                       </label>
                       <label className="flex items-center">
                         <input
@@ -660,15 +658,15 @@ const Settings: React.FC<SettingsProps> = ({
                           onChange={(e) => changeLanguage(e.target.value)}
                           className="mr-3"
                         />
-                        <span>简体中文</span>
+                        <span>{t('settings.simplifiedChinese')}</span>
                       </label>
                     </div>
                   </div>
                   
                   <div className="mt-6 p-4 bg-blue-900/30 border border-blue-700/50 rounded">
-                    <h4 className="font-medium text-blue-300 mb-2">Note:</h4>
+                    <h4 className="font-medium text-blue-300 mb-2">{t('settings.languageNote')}</h4>
                     <p className="text-sm text-blue-200">
-                      Language changes take effect immediately. Log messages will remain in English for debugging purposes.
+                      {t('settings.languageNoteDesc')}
                     </p>
                   </div>
                 </div>
@@ -682,7 +680,7 @@ const Settings: React.FC<SettingsProps> = ({
             onClick={onClose}
             className="px-6 py-2 bg-gray-600 hover:bg-gray-700 rounded transition-colors"
           >
-            Cancel
+            {t('settings.cancel')}
           </button>
           <button
             onClick={async () => {
@@ -692,7 +690,7 @@ const Settings: React.FC<SettingsProps> = ({
             }}
             className="px-6 py-2 bg-green-600 hover:bg-green-700 rounded transition-colors ml-3"
           >
-            Save & Close
+            {t('settings.saveAndClose')}
           </button>
         </div>
       </div>
