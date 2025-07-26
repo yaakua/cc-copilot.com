@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
 import { logger } from '../utils/logger'
+import packageJson from '../../../../package.json'
 
 interface StatusBarProps {
   activeSessionId: string | null
@@ -427,7 +428,7 @@ const StatusBar: React.FC<StatusBarProps> = ({ activeSessionId }) => {
         </div>
       </div>
       
-      {/* Right side - Git/Project info and Help */}
+      {/* Right side - Git/Project info, Version and Help */}
       <div className="flex items-center gap-4" style={{ color: 'var(--text-tertiary)' }}>
         <div>
           {statusInfo && statusInfo.projectPath ? (
@@ -435,6 +436,9 @@ const StatusBar: React.FC<StatusBarProps> = ({ activeSessionId }) => {
           ) : (
             <span></span>
           )}
+        </div>
+        <div className="text-xs">
+          v{packageJson.version}
         </div>
         <button 
           onClick={() => window.open('https://cc-copilot.com?ref=cc-copilot', '_blank')}
