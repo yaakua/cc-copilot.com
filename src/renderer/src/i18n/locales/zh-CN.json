@@ -2,13 +2,20 @@
   "common": {
     "retry": "重试",
     "reload": "重新加载",
-    "close": "关闭标签页",
+    "close": "关闭",
     "unknown": "未知",
     "error": "错误",
     "settings": "设置",
     "ok": "确定",
     "cancel": "取消",
     "loading": "加载中..."
+  },
+  "auth": {
+    "dialog": {
+      "title": "认证失败",
+      "instructions": "解决方法：",
+      "openSettings": "打开设置"
+    }
   },
   "errorBoundary": {
     "title": "出现了一些问题",
@@ -159,7 +166,7 @@
     "deleteSession": "删除会话",
     "deleteProject": "删除项目",
     "confirmDelete": "确定删除此会话吗？",
-    "confirmDeleteProject": "⚠️ 警告：删除项目 \"{{projectName}}\"？\n\n此操作将：\n• 从 CC Copilot 中移除该项目\n• 删除所有相关对话会话\n• 删除项目文件夹：{{projectPath}}\n\n此操作无法撤销！",
+    "confirmDeleteProject": "⚠️ 警告：删除项目 \"{{projectName}}\"？\n\n此操作将：\n• 从 CC Copilot 中移除该项目\n• 删除所有相关对话会话\n• 删除 Claude 项目数据目录\n\n要删除的目录：\n{{claudeProjectDir}}\n\n注意：源代码目录 {{projectPath}} 不会被删除\n此操作无法撤销！",
     "secondsAgo": "{{seconds}}秒前",
     "minutesAgo": "{{minutes}}分钟前",
     "hoursAgo": "{{hours}}小时前",

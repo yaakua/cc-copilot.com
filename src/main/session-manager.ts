@@ -4,26 +4,9 @@ import * as os from 'os';
 import { logger } from './logger';
 import { app } from 'electron';
 import { SettingsManager } from './settings';
+import { Session, Project } from '../shared/types';
 
 import { v4 as uuidv4 } from 'uuid';
-
-export interface Session {
-  id: string; 
-  name: string;
-  projectId: string;
-  createdAt: string;
-  lastActiveAt: string;
-  claudeSessionId?: string; 
-  isTemporary: boolean; 
-  filePath?: string;
-}
-
-export interface Project {
-  id: string; 
-  name: string;
-  path: string;
-  createdAt: string;
-}
 
 interface StoreData {
   projects: Project[];
@@ -233,6 +216,7 @@ export class SessionManager {
                 name: projectName,
                 path: projectPath,
                 createdAt: createdAt,
+                sessions: [],
               };
               this.data.projects.push(project);
               projectsSynced++;

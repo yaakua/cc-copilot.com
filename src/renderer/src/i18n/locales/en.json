@@ -2,13 +2,20 @@
   "common": {
     "retry": "Retry",
     "reload": "Reload",
-    "close": "Close tab",
+    "close": "Close",
     "unknown": "Unknown",
     "error": "Error",
     "settings": "Settings",
     "ok": "OK",
     "cancel": "Cancel",
     "loading": "Loading..."
+  },
+  "auth": {
+    "dialog": {
+      "title": "Authentication Failed",
+      "instructions": "How to fix:",
+      "openSettings": "Open Settings"
+    }
   },
   "errorBoundary": {
     "title": "Something went wrong",
@@ -159,7 +166,7 @@
     "deleteSession": "Delete Session",
     "deleteProject": "Delete Project",
     "confirmDelete": "Delete this session?",
-    "confirmDeleteProject": "⚠️ WARNING: Delete project \"{{projectName}}\"?\n\nThis will:\n• Remove the project from CC Copilot\n• Delete all associated chat sessions\n• Remove project files from: {{projectPath}}\n\nThis action cannot be undone!",
+    "confirmDeleteProject": "⚠️ WARNING: Delete project \"{{projectName}}\"?\n\nThis will:\n• Remove the project from CC Copilot\n• Delete all associated chat sessions\n• Delete Claude project data directory\n\nDirectory to be deleted:\n{{claudeProjectDir}}\n\nNote: Source code directory {{projectPath}} will NOT be deleted\nThis action cannot be undone!",
     "secondsAgo": "{{seconds}} seconds ago",
     "minutesAgo": "{{minutes}} minutes ago",
     "hoursAgo": "{{hours}} hours ago",

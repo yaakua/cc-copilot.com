@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Terminal as XTerm } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
@@ -16,12 +16,36 @@ const Terminal: React.FC<TerminalProps> = ({ sessionId, isActive, session }) => 
   const terminalRef = useRef<HTMLDivElement>(null)
   const xtermInstanceRef = useRef<XTerm | null>(null)
   const fitAddonRef = useRef<FitAddon | null>(null)
+  const [bufferedData, setBufferedData] = useState<string>('')
 
-  // Effect for initialization and cleanup
+  // Effect for data listener (always active to capture all data)
   useEffect(() => {
     logger.setComponent('Terminal')
     
-    // Skip initialization if session is loading
+    // Always initialize terminal data listener to capture all output
+    const removeDataListener = window.api?.onTerminalData((eventData) => {
+      if (typeof eventData === 'object' && eventData.sessionId === sessionId) {
+        if (xtermInstanceRef.current) {
+          // If terminal is ready, write directly
+          xtermInstanceRef.current.write(eventData.data)
+        } else {
+          // If terminal not ready, buffer the data
+          setBufferedData(prev => prev + eventData.data)
+        }
+      }
+    })
+
+    // Cleanup function
+    return () => {
+      if (removeDataListener) {
+        removeDataListener()
+      }
+    }
+  }, [sessionId])
+
+  // Effect for terminal UI initialization (only when not loading)
+  useEffect(() => {
+    // Skip UI initialization if session is loading
     if (session.isLoading) {
       return
     }
@@ -38,7 +62,7 @@ const Terminal: React.FC<TerminalProps> = ({ sessionId, isActive, session }) => 
       return
     }
 
-    // Initialize xterm.js only once
+    // Initialize xterm.js UI
     const terminal = new XTerm({
       theme: {
         background: '#000000',
@@ -66,33 +90,29 @@ const Terminal: React.FC<TerminalProps> = ({ sessionId, isActive, session }) => 
     // Initial resize with multiple checks
     fitAddon.fit()
 
+    // Welcome message
+    terminal.write(`\x1b[36mCC Copilot Terminal - ${session.name}\x1b[0m\r\n\r\n`)
+    
+    // Write any buffered data that was received while loading
+    if (bufferedData) {
+      terminal.write(bufferedData)
+      setBufferedData('') // Clear buffer after writing
+    }
+
     // Listen for user input
     const onDataDisposable = terminal.onData((data) => {
       window.api?.sendTerminalInput(data, sessionId)
     })
 
-    // Listen for data from backend
-    const removeDataListener = window.api?.onTerminalData((eventData) => {
-      if (typeof eventData === 'object' && xtermInstanceRef.current && eventData.sessionId === sessionId) {
-        xtermInstanceRef.current.write(eventData.data)
-      }
-    })
-   
-    // Welcome message
-    terminal.write(`\x1b[36mCC Copilot Terminal - ${session.name}\x1b[0m\r\n\r\n`)
-
     // Cleanup on component unmount
     return () => {
-      logger.info('清理终端组件', { sessionId })
+      logger.info('清理终端UI组件', { sessionId })
       onDataDisposable.dispose()
-      if (removeDataListener) {
-        removeDataListener()
-      }
       terminal.dispose()
       xtermInstanceRef.current = null
       fitAddonRef.current = null
     }
-  }, [sessionId, session.isLoading]) // Re-run if sessionId changes or loading state changes
+  }, [sessionId, session.isLoading, bufferedData]) // Re-run if sessionId changes or loading state changes
 
   // Effect for handling active state changes and resize
   useEffect(() => {

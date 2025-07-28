@@ -5,6 +5,7 @@ import TabManager from './components/TabManager'
 import StatusBar from './components/StatusBar'
 import ErrorBoundary from './components/ErrorBoundary'
 import Settings from './components/Settings'
+import AuthDialog from './components/AuthDialog'
 import { logger } from './utils/logger'
 import { Session, Project, ClaudeDetectionResult } from '../../shared/types'
 import './i18n'
@@ -18,6 +19,11 @@ const App: React.FC = () => {
   const [showSettings, setShowSettings] = useState(false)
   const [claudeDetectionResult, setClaudeDetectionResult] = useState<ClaudeDetectionResult | null>(null)
   const [claudeDetecting, setClaudeDetecting] = useState(false)
+  const [authDialog, setAuthDialog] = useState<{ isOpen: boolean; error: string; loginInstructions: string }>({
+    isOpen: false,
+    error: '',
+    loginInstructions: ''
+  })
 
   // Load initial data
   useEffect(() => {
@@ -184,6 +190,23 @@ const App: React.FC = () => {
       })
     })
 
+    const removeSessionAuthRequiredListener = window.api.onSessionAuthRequired((authData: { error: string; loginInstructions: string }) => {
+      logger.warn('Session creation failed due to authentication:', authData.error)
+      
+      // Show authentication dialog
+      setAuthDialog({
+        isOpen: true,
+        error: authData.error,
+        loginInstructions: authData.loginInstructions
+      })
+      
+      // Also send the login instructions to the terminal if there's an active session
+      if (currentActiveSessionId) {
+        const formattedMessage = `\x1b[31m认证失败: ${authData.error}\x1b[0m\n\n\x1b[33m${authData.loginInstructions}\x1b[0m\n`
+        window.api.sendSystemMessage(formattedMessage, currentActiveSessionId)
+      }
+    })
+
     return () => {
       removeClaudeListener()
       removeTerminalClosedListener()
@@ -192,6 +215,7 @@ const App: React.FC = () => {
       removeSessionDeletedListener()
       removeProjectCreatedListener()
       removeProjectDeletedListener()
+      removeSessionAuthRequiredListener()
     }
   }, [])
 
@@ -299,7 +323,22 @@ const App: React.FC = () => {
       
       // Send request to backend
       // The UI will be updated via the `session:created` event.
-      await window.api.createSession(projectId);
+      const result = await window.api.createSession(projectId);
+      
+      // Check if authentication failed
+      if (result && typeof result === 'object' && 'error' in result) {
+        logger.warn('会话创建失败，需要认证', result)
+        // Clean up temp session when auth fails
+        setActiveSessionIds(prev => prev.filter(id => id !== tempSessionId))
+        setProjects(prevProjects => 
+          prevProjects.map(p => ({
+            ...p,
+            sessions: p.sessions.filter(s => s.id !== tempSessionId)
+          }))
+        )
+        return
+      }
+      
       logger.info('新会话创建请求已发送');
     } catch (error) {
       logger.error('创建会话失败', error as Error)
@@ -498,6 +537,15 @@ const App: React.FC = () => {
             onClose={() => setShowSettings(false)}
           />
         )}
+        
+        {/* Authentication Dialog */}
+        <AuthDialog
+          isOpen={authDialog.isOpen}
+          error={authDialog.error}
+          loginInstructions={authDialog.loginInstructions}
+          onClose={() => setAuthDialog({ isOpen: false, error: '', loginInstructions: '' })}
+          onOpenSettings={() => setShowSettings(true)}
+        />
       </div>
     </ErrorBoundary>
   )

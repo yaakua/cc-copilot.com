@@ -177,17 +177,39 @@ const SessionList: React.FC<SessionListProps> = ({
     })
   }
 
-  const handleContextMenuAction = (action: 'newSession' | 'delete', projectId: string) => {
+  const handleContextMenuAction = async (action: 'newSession' | 'delete', projectId: string) => {
     setContextMenu(null)
     if (action === 'newSession') {
       onCreateSession(projectId)
     } else if (action === 'delete') {
       const project = projects.find(p => p.id === projectId)
-      if (project && confirm(t('sessions.confirmDeleteProject', { 
-        projectName: project.name,
-        projectPath: project.path 
-      }))) {
-        onDeleteProject(projectId)
+      if (project) {
+        // Get Claude project directory for more accurate confirmation message
+        try {
+          const claudeProjectDir = await window.api.getClaudeProjectDirectory(project.path)
+          const confirmMessage = claudeProjectDir 
+            ? t('sessions.confirmDeleteProject', { 
+                projectName: project.name,
+                projectPath: project.path,
+                claudeProjectDir: claudeProjectDir
+              })
+            : t('sessions.confirmDeleteProject', { 
+                projectName: project.name,
+                projectPath: project.path
+              })
+          
+          if (confirm(confirmMessage)) {
+            onDeleteProject(projectId)
+          }
+        } catch (error) {
+          // Fallback to original confirmation if API call fails
+          if (confirm(t('sessions.confirmDeleteProject', { 
+            projectName: project.name,
+            projectPath: project.path 
+          }))) {
+            onDeleteProject(projectId)
+          }
+        }
       }
     }
   }

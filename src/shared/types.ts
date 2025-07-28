@@ -7,6 +7,7 @@ export interface Session {
   claudeSessionId?: string;
   isTemporary: boolean;
   isLoading?: boolean;
+  filePath?: string;
 }
 
 export interface Project {

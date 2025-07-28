@@ -23,6 +23,7 @@ declare global {
       onSessionCreated: (callback: (session: Session) => void) => () => void;
       onSessionUpdated: (callback: (updateData: { oldId: string; newSession: Session }) => void) => () => void;
       onSessionDeleted: (callback: (sessionId: string) => void) => () => void;
+      onSessionAuthRequired: (callback: (authData: { error: string; loginInstructions: string }) => void) => () => void;
       onProjectCreated: (callback: (project: Project) => void) => () => void;
       onProjectsUpdated: (callback: (projects: Project[]) => void) => () => void;
 
@@ -46,9 +47,11 @@ declare global {
       selectProjectDirectory: () => Promise<string | null>
       getProjectSessions: (projectPath: string) => Promise<any>
       getAllProjects: () => Promise<Project[]>
+      getClaudeProjectDirectory: (projectPath: string) => Promise<string | null>
+      deleteProject: (projectId: string) => Promise<{ success: boolean; error?: string }>
       
       // Session APIs
-      createSession: (projectId: string) => Promise<Session>
+      createSession: (projectId: string) => Promise<Session | { error: string; loginInstructions: string }>
       activateSession: (sessionId: string) => Promise<boolean>
       resumeSession: (sessionId: string, projectPath: string) => Promise<any>
       deleteSession: (sessionId: string) => Promise<any>

@@ -69,6 +69,14 @@ const api = {
     }
   },
 
+  onSessionAuthRequired: (callback: (authData: { error: string; loginInstructions: string }) => void) => {
+    const listener = (_event: any, authData: any) => callback(authData)
+    ipcRenderer.on('session:auth-required', listener)
+    return () => {
+      ipcRenderer.removeListener('session:auth-required', listener)
+    }
+  },
+
   onProjectCreated: (callback: (project: import('../shared/types').Project) => void) => {
     const listener = (_event: any, project: any) => callback(project)
     ipcRenderer.on('project:created', listener)
@@ -103,6 +111,7 @@ const api = {
   selectProjectDirectory: () => ipcRenderer.invoke('project:select-directory'),
   getProjectSessions: (projectPath: string) => ipcRenderer.invoke('project:get-sessions', projectPath),
   getAllProjects: () => ipcRenderer.invoke('project:get-all'),
+  getClaudeProjectDirectory: (projectPath: string) => ipcRenderer.invoke('project:get-claude-directory', projectPath),
   deleteProject: (projectId: string) => ipcRenderer.invoke('project:delete', projectId),
   
   // Settings APIs

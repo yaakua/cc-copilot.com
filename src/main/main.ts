@@ -5,11 +5,12 @@ import * as os from 'os'
 import * as fs from 'fs'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import { PtyManager } from './pty-manager'
-import { SessionManager, Session } from './session-manager'
+import { SessionManager,  } from './session-manager'
 import { v4 as uuidv4 } from 'uuid';
 import { SettingsManager, ClaudeAccount, ThirdPartyAccount } from './settings'
 import { logger } from './logger'
 import { claudePathManager } from './claude-path-manager'
+import {Session} from '../shared/types'
 
 // Global instances
 let sessionManager: SessionManager
@@ -111,7 +112,7 @@ function createWindow(): void {
         }
         
         // Notify renderer about detection result
-        mainWindow.webContents.send('claude:detection-result', detectionResult)
+        safelySendToRenderer(mainWindow, 'claude:detection-result', detectionResult)
       }
     } catch (error) {
       logger.error('获取Claude CLI检测结果失败', 'main', error as Error)
@@ -121,7 +122,7 @@ function createWindow(): void {
         error: `检测失败: ${(error as Error).message}`,
         timestamp: Date.now()
       }
-      mainWindow.webContents.send('claude:detection-result', failureResult)
+      safelySendToRenderer(mainWindow, 'claude:detection-result', failureResult)
     }
   })
 
@@ -163,7 +164,7 @@ function getOrCreatePtyManager(sessionId: string, mainWindow: BrowserWindow): Pt
 
     if (updatedSession) {
       logger.info(`临时会话 ${sessionId} 已关联到 Claude 会话: ${claudeSessionId}`, 'main');
-      mainWindow.webContents.send('session:updated', { oldId: sessionId, newSession: updatedSession });
+      safelySendToRenderer(mainWindow, 'session:updated', { oldId: sessionId, newSession: updatedSession });
     }
   };
 
@@ -448,6 +449,66 @@ async function detectClaudeAuthorization(accountEmail: string): Promise<{ succes
 }
 
 
+// Helper function to safely send messages to renderer
+function safelySendToRenderer(window: BrowserWindow, channel: string, ...args: any[]): void {
+  try {
+    if (window && !window.isDestroyed()) {
+      window.webContents.send(channel, ...args);
+    } else {
+      logger.warn(`无法发送消息到渲染进程: 窗口已销毁, channel: ${channel}`, 'main');
+    }
+  } catch (error) {
+    logger.error(`发送消息到渲染进程失败: channel: ${channel}`, 'main', error as Error);
+  }
+}
+
+// Helper function to find Claude project directory for a given project path
+function findClaudeProjectDirectory(projectPath: string): string | null {
+  try {
+    const claudeDir = path.join(os.homedir(), '.claude');
+    const projectsDir = path.join(claudeDir, 'projects');
+    
+    if (!fs.existsSync(projectsDir)) {
+      return null;
+    }
+    
+    const projectFolders = fs.readdirSync(projectsDir, { withFileTypes: true })
+      .filter(dirent => dirent.isDirectory())
+      .map(dirent => dirent.name);
+    
+    for (const projectFolder of projectFolders) {
+      const projectFolderPath = path.join(projectsDir, projectFolder);
+      const sessionFiles = fs.readdirSync(projectFolderPath).filter(f => f.endsWith('.jsonl'));
+      
+      // Check if any session file in this folder belongs to our project
+      for (const sessionFile of sessionFiles) {
+        try {
+          const sessionFilePath = path.join(projectFolderPath, sessionFile);
+          const sessionData = fs.readFileSync(sessionFilePath, 'utf-8')
+            .split('\n')
+            .filter(line => line.trim() !== '')
+            .map(line => JSON.parse(line));
+          
+          if (sessionData.length > 0) {
+            const entryWithCwd = sessionData.find(entry => entry.cwd);
+            if (entryWithCwd && entryWithCwd.cwd === projectPath) {
+              return projectFolderPath;
+            }
+          }
+        } catch (error) {
+          // Skip files that can't be parsed
+          continue;
+        }
+      }
+    }
+    
+    return null;
+  } catch (error) {
+    logger.error(`查找Claude项目目录失败: ${projectPath}`, 'main', error as Error);
+    return null;
+  }
+}
+
 function setupIpcHandlers(mainWindow: BrowserWindow): void {
   // Logger IPC handlers
   ipcMain.handle('logger:log', (_, logEntry: any) => {
@@ -485,7 +546,7 @@ function setupIpcHandlers(mainWindow: BrowserWindow): void {
       try {
         // Format message with ANSI colors and proper line breaks
         const formattedMessage = `\r\n${message}\r\n`
-        mainWindow.webContents.send('terminal:data', {
+        safelySendToRenderer(mainWindow, 'terminal:data', {
           sessionId: id,
           data: formattedMessage
         })
@@ -505,9 +566,10 @@ function setupIpcHandlers(mainWindow: BrowserWindow): void {
         name: path.basename(projectPath),
         path: projectPath,
         createdAt: new Date().toISOString(),
+        sessions: [],
       };
       sessionManager.addProject(project);
-      mainWindow.webContents.send('project:created', project);
+      safelySendToRenderer(mainWindow, 'project:created', project);
     }
 
     // This will now be handled by createSession
@@ -552,12 +614,108 @@ function setupIpcHandlers(mainWindow: BrowserWindow): void {
     }
   });
 
+  // Check for authentication before creating session
+  async function checkAuthenticationForSession(): Promise<{ isAuthenticated: boolean, error?: string, loginInstructions?: string }> {
+    try {
+      // Check if Claude CLI is available
+      const pathResult = claudePathManager.getCachedResult()
+      if (!pathResult || !pathResult.isFound) {
+        return {
+          isAuthenticated: false,
+          error: 'Claude CLI 未安装或未找到',
+          loginInstructions: `请先安装 Claude CLI：
+1. npm install -g @anthropic-ai/claude-code
+2. 安装完成后重新检测`
+        }
+      }
+
+      // Check if user has configured any accounts
+      const activeResult = settingsManager.getCurrentActiveAccount()
+      if (!activeResult) {
+        return {
+          isAuthenticated: false,
+          error: '未配置可用的账号',
+          loginInstructions: `请配置 Claude 账号：
+
+方式一：Claude 官方账号
+1. 在终端运行: claude login
+2. 按提示完成登录验证
+3. 登录成功后重新创建会话
+
+方式二：配置第三方 API 提供商
+1. 点击设置按钮
+2. 在账号管理中添加第三方服务提供商
+3. 配置 API Key 和服务地址`
+        }
+      }
+
+      // If it's a Claude official account, check if it has authorization
+      if (activeResult.provider.type === 'claude_official') {
+        const claudeAccount = activeResult.account as ClaudeAccount
+        if (!claudeAccount.authorization) {
+          return {
+            isAuthenticated: false,
+            error: `Claude 账号 ${claudeAccount.emailAddress} 未完成授权`,
+            loginInstructions: `请重新登录 Claude 账号：
+
+1. 在终端运行: claude login
+2. 根据提示打开浏览器或者粘贴api key
+3. 按提示完成登录验证
+4. 登录成功后重新创建会话
+
+或者点击设置中的"检测授权"按钮自动获取授权信息`
+          }
+        }
+      }
+
+      // If it's a third party account, check if it has valid API key
+      if (activeResult.provider.type === 'third_party') {
+        const thirdPartyAccount = activeResult.account as ThirdPartyAccount
+        if (!thirdPartyAccount.apiKey || !thirdPartyAccount.baseUrl) {
+          return {
+            isAuthenticated: false,
+            error: `第三方账号 ${thirdPartyAccount.name} 配置不完整`,
+            loginInstructions: `请完善第三方账号配置：
+
+1. 点击右上角设置按钮
+2. 在账号管理中编辑 ${thirdPartyAccount.name}
+3. 确保 API Key 和服务地址已正确配置
+4. 保存配置后重新创建会话`
+          }
+        }
+      }
+
+      return { isAuthenticated: true }
+    } catch (error) {
+      logger.error('检查认证状态失败', 'main', error as Error)
+      return {
+        isAuthenticated: false,
+        error: `检查认证状态失败: ${(error as Error).message}`,
+        loginInstructions: '请检查 Claude CLI 安装状态和账号配置'
+      }
+    }
+  }
+
   // Session management
   ipcMain.handle('session:create', async (_, projectId: string) => {
     const project = sessionManager.getProjectById(projectId);
     if (!project) {
       logger.error(`创建会话失败: 未找到项目 ${projectId}`, 'main');
       return null;
+    }
+
+    // Check authentication before creating session
+    const authCheck = await checkAuthenticationForSession()
+    if (!authCheck.isAuthenticated) {
+      logger.warn(`创建会话失败: ${authCheck.error}`, 'main')
+      
+      // Send authentication error to renderer
+      safelySendToRenderer(mainWindow, 'session:auth-required', {
+        error: authCheck.error,
+        loginInstructions: authCheck.loginInstructions
+      })
+      
+      return { error: authCheck.error, loginInstructions: authCheck.loginInstructions }
     }
 
     logger.info(`为项目 ${project.name} 创建新会话，工作目录: ${project.path}`, 'main');
@@ -590,7 +748,7 @@ function setupIpcHandlers(mainWindow: BrowserWindow): void {
       // Still send the session to UI even if Claude CLI failed to start
     }
 
-    mainWindow.webContents.send('session:created', newSession);
+    safelySendToRenderer(mainWindow, 'session:created', newSession);
     return newSession;
   });
 
@@ -630,7 +788,7 @@ function setupIpcHandlers(mainWindow: BrowserWindow): void {
       
       if (updatedSession) {
         logger.info(`已清除会话loading状态: ${sessionId}`, 'main');
-        mainWindow.webContents.send('session:updated', { oldId: sessionId, newSession: updatedSession });
+        safelySendToRenderer(mainWindow, 'session:updated', { oldId: sessionId, newSession: updatedSession });
       }
     }
     
@@ -667,7 +825,7 @@ function setupIpcHandlers(mainWindow: BrowserWindow): void {
       
       // Notify all windows about new detection result
       BrowserWindow.getAllWindows().forEach(window => {
-        window.webContents.send('claude:detection-result', result)
+        safelySendToRenderer(window, 'claude:detection-result', result)
       })
       
       return result
@@ -681,7 +839,7 @@ function setupIpcHandlers(mainWindow: BrowserWindow): void {
       
       // Notify all windows about failure
       BrowserWindow.getAllWindows().forEach(window => {
-        window.webContents.send('claude:detection-result', failureResult)
+        safelySendToRenderer(window, 'claude:detection-result', failureResult)
       })
       
       return failureResult
@@ -703,6 +861,10 @@ function setupIpcHandlers(mainWindow: BrowserWindow): void {
   ipcMain.handle('session:delete', async (_, sessionId: string) => {
     logger.info(`删除会话: ${sessionId}`, 'main');
 
+    // Get session info before deletion for file cleanup
+    const session = sessionManager.getSessionById(sessionId);
+    const project = session ? sessionManager.getProjectById(session.projectId) : null;
+
     const manager = ptyManagers.get(sessionId);
     if (manager) {
       try {
@@ -717,12 +879,73 @@ function setupIpcHandlers(mainWindow: BrowserWindow): void {
       currentActiveSessionId = null;
     }
 
+    // Delete session from SessionManager
     sessionManager.deleteSession(sessionId);
     logger.info(`会话已从SessionManager中删除: ${sessionId}`, 'main');
 
-    mainWindow.webContents.send('session:deleted', sessionId);
+    // Delete the corresponding .jsonl file if session has claudeSessionId and filePath
+    if (session?.claudeSessionId || session?.filePath) {
+      try {
+        let sessionFilePath = session.filePath;
+        
+        // If no filePath, try to construct it from claudeSessionId
+        if (!sessionFilePath && session.claudeSessionId && project) {
+          const claudeDir = path.join(os.homedir(), '.claude');
+          const projectsDir = path.join(claudeDir, 'projects');
+          
+          // Find the project folder that contains this session
+          if (fs.existsSync(projectsDir)) {
+            const projectFolders = fs.readdirSync(projectsDir, { withFileTypes: true })
+              .filter(dirent => dirent.isDirectory())
+              .map(dirent => dirent.name);
+            
+            for (const projectFolder of projectFolders) {
+              const projectFolderPath = path.join(projectsDir, projectFolder);
+              const sessionFiles = fs.readdirSync(projectFolderPath).filter(f => f.endsWith('.jsonl'));
+              
+              for (const sessionFile of sessionFiles) {
+                const filePath = path.join(projectFolderPath, sessionFile);
+                try {
+                  const sessionData = fs.readFileSync(filePath, 'utf-8')
+                    .split('\n')
+                    .filter(line => line.trim() !== '')
+                    .map(line => JSON.parse(line));
+                  
+                  if (sessionData.length > 0 && sessionData[0].sessionId === session.claudeSessionId) {
+                    sessionFilePath = filePath;
+                    break;
+                  }
+                } catch (error) {
+                  // Skip files that can't be parsed
+                  continue;
+                }
+              }
+              if (sessionFilePath) break;
+            }
+          }
+        }
+        
+        // Delete the session file
+        if (sessionFilePath && fs.existsSync(sessionFilePath)) {
+          await fs.promises.unlink(sessionFilePath);
+          logger.info(`已删除会话文件: ${sessionFilePath}`, 'main');
+        } else {
+          logger.warn(`找不到会话文件，跳过删除: ${sessionId}`, 'main');
+        }
+      } catch (error) {
+        logger.error(`删除会话文件失败: ${sessionId}`, 'main', error as Error);
+        // Don't fail the entire operation if file deletion fails
+      }
+    }
+
+    // Send notification to renderer
+    safelySendToRenderer(mainWindow, 'session:deleted', sessionId);
 
     return { success: true };
+  });
+
+  ipcMain.handle('project:get-claude-directory', async (_, projectPath: string) => {
+    return findClaudeProjectDirectory(projectPath);
   });
 
   ipcMain.handle('project:delete', async (_, projectId: string) => {
@@ -758,20 +981,22 @@ function setupIpcHandlers(mainWindow: BrowserWindow): void {
     sessionManager.deleteProject(projectId);
     logger.info(`项目及其所有会话已删除: ${project.name}`, 'main');
 
-    // Delete the actual project directory
+    // Delete the corresponding Claude project directory (not the real project directory)
     try {
-      if (fs.existsSync(project.path)) {
-        await fs.promises.rm(project.path, { recursive: true, force: true });
-        logger.info(`项目文件夹已删除: ${project.path}`, 'main');
+      const claudeProjectDir = findClaudeProjectDirectory(project.path);
+      
+      if (claudeProjectDir && fs.existsSync(claudeProjectDir)) {
+        await fs.promises.rm(claudeProjectDir, { recursive: true, force: true });
+        logger.info(`已删除Claude项目目录: ${claudeProjectDir}`, 'main');
       } else {
-        logger.warn(`项目文件夹不存在，跳过删除: ${project.path}`, 'main');
+        logger.warn(`找不到对应的Claude项目目录，跳过删除`, 'main');
       }
     } catch (error) {
-      logger.error(`删除项目文件夹失败: ${project.path}`, 'main', error as Error);
-      // Don't fail the entire operation if file deletion fails
+      logger.error(`删除Claude项目目录失败: ${project.name}`, 'main', error as Error);
+      // Don't fail the entire operation if directory deletion fails
     }
 
-    mainWindow.webContents.send('project:deleted', projectId);
+    safelySendToRenderer(mainWindow, 'project:deleted', projectId);
 
     return { success: true };
   });
@@ -796,7 +1021,7 @@ function setupIpcHandlers(mainWindow: BrowserWindow): void {
             .filter(s => s.projectId === p.id)
             .sort((a, b) => new Date(b.lastActiveAt).getTime() - new Date(a.lastActiveAt).getTime())
         }))
-        mainWindow.webContents.send('projects:updated', projectsWithSessions)
+        safelySendToRenderer(mainWindow, 'projects:updated', projectsWithSessions)
       } catch (error) {
         logger.error('重新同步项目失败', 'main', error as Error)
       }
@@ -880,19 +1105,19 @@ function setupIpcHandlers(mainWindow: BrowserWindow): void {
 
   // Settings event forwarding to renderer
   settingsManager.on('service-providers:updated', (providers) => {
-    mainWindow.webContents.send('service-providers:updated', providers)
+    safelySendToRenderer(mainWindow, 'service-providers:updated', providers)
   })
   
   settingsManager.on('active-service-provider:changed', (providerId) => {
-    mainWindow.webContents.send('active-service-provider:changed', providerId)
+    safelySendToRenderer(mainWindow, 'active-service-provider:changed', providerId)
   })
   
   settingsManager.on('active-account:changed', (data) => {
-    mainWindow.webContents.send('active-account:changed', data)
+    safelySendToRenderer(mainWindow, 'active-account:changed', data)
   })
   
   settingsManager.on('settings:updated', (settings) => {
-    mainWindow.webContents.send('settings:updated', settings)
+    safelySendToRenderer(mainWindow, 'settings:updated', settings)
   })
 
   // Get current session info for status bar

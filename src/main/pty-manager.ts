@@ -27,6 +27,10 @@ export class PtyManager {
   private lastWorkingDirectory: string = ''
   private lastArgs: string[] = []
   private isDestroyed: boolean = false
+  private sessionReadyTimeout: NodeJS.Timeout | null = null
+  private hasDetectedClaudePrompt: boolean = false
+  private startTime: number = 0
+  private allOutputBuffer: string = '' // 完整输出缓冲区用于调试
 
   constructor(
     mainWindow: BrowserWindow,
@@ -83,6 +87,7 @@ export class PtyManager {
       let userShellPath: string;
       try {
         // 使用动态导入来加载 ES 模块
+        //@ts-ignore
         const { shellPath } = await import('shell-path');
         userShellPath = await shellPath();
         logger.info(`成功获取用户 Shell PATH: ${userShellPath}`, 'pty-manager');
@@ -159,6 +164,10 @@ export class PtyManager {
         }
       }
       
+      // 设置会话就绪检测超时（15秒）
+      this.startTime = Date.now()
+      this.setupSessionReadyTimeout()
+      
       logger.info('进程启动成功', 'pty-manager')
 
     } catch (error) {
@@ -195,6 +204,9 @@ export class PtyManager {
 
     // Mark as destroyed to prevent further IPC communication
     this.isDestroyed = true
+
+    // Clear timeout
+    this.clearSessionReadyTimeout()
 
     try {
       // Send exit command based on platform
@@ -243,6 +255,7 @@ export class PtyManager {
 
   public destroy(): void {
     this.isDestroyed = true
+    this.clearSessionReadyTimeout()
     this.mainWindow = null
   }
 
@@ -253,37 +266,30 @@ export class PtyManager {
     let outputBuffer = '' // 用于收集输出以便错误分析
 
     this.ptyProcess.onData((data: string) => {
-      // 收集输出用于错误分析
+      // 收集输出用于错误分析和调试
       outputBuffer += data
+      this.allOutputBuffer += data
 
       // 日志前缀过滤处理，获取处理后的数据
       const processedData = this.processInterceptorLogs(data)
       
-      // 如果所有内容都被过滤了，不继续处理
-      if (!processedData.trim()) {
-        return
+      // 详细记录Claude输出用于调试
+      if (data.trim()) {
+        logger.debug(`[${this.sessionId}] Claude原始输出: "${data.replace(/\r\n/g, '\\r\\n').replace(/\n/g, '\\n')}"`, 'pty-manager')
       }
       
-      // 使用处理后的数据继续后续逻辑
-      // data = processedData
+      // 如果所有内容都被过滤了，仍然要检查会话就绪状态
+      if (!processedData.trim() && data.trim()) {
+        logger.debug(`[${this.sessionId}] 输出被完全过滤，但仍检查会话状态`, 'pty-manager')
+      }
 
       // 检查是否包含错误信息
       if (data.includes('Error') || data.includes('error') || data.includes('ERROR')) {
         logger.warn(`[${this.sessionId}] Claude输出包含错误信息: "${data.replace(/\r\n/g, ' ')}"`, 'pty-manager')
       }
 
-      // Check if a new claude session was created
-      const match = data.match(/Session created: (\S+\.jsonl)/);
-      if (match && match[1]) {
-        const claudeSessionFile = match[1];
-        const claudeSessionId = path.basename(claudeSessionFile, '.jsonl');
-        logger.info(`Detected new Claude session: ${claudeSessionId}`, 'pty-manager');
-        if (this.onSessionReady) {
-          this.onSessionReady(claudeSessionId);
-        }
-      }
-
-      logger.debug(`[${this.sessionId}] 从 Claude PTY 接收数据: "${data.slice(0, 100).replace(/\r\n/g, ' ')}${data.length > 100 ? '...' : ''}"`, 'pty-manager')
+      // 多种方式检测会话就绪状态
+      this.detectSessionReadiness(data)
 
       // Check if manager is destroyed or window is destroyed before sending IPC
       if (!this.isDestroyed && this.mainWindow && !this.mainWindow.isDestroyed()) {
@@ -623,6 +629,136 @@ export class PtyManager {
       return path.join(os.homedir(), 'AppData', 'Roaming', 'CC Copilot')
     } else {
       return path.join(os.homedir(), '.config', 'CC Copilot')
+    }
+  }
+
+  /**
+   * 设置会话就绪检测超时
+   */
+  private setupSessionReadyTimeout(): void {
+    // 15秒超时
+    this.sessionReadyTimeout = setTimeout(() => {
+      if (!this.hasDetectedClaudePrompt && this.onSessionReady) {
+        const elapsed = Date.now() - this.startTime
+        logger.warn(`[${this.sessionId}] 会话就绪检测超时 (${elapsed}ms)，使用fallback机制`, 'pty-manager')
+        
+        // 记录调试信息
+        if (this.allOutputBuffer.trim()) {
+          logger.info(`[${this.sessionId}] 完整输出内容用于调试: "${this.allOutputBuffer.slice(-500)}"`, 'pty-manager')
+        } else {
+          logger.warn(`[${this.sessionId}] 未收到任何Claude输出`, 'pty-manager')
+        }
+        
+        // 使用时间戳作为fallback session ID
+        const fallbackSessionId = Date.now().toString()
+        logger.info(`[${this.sessionId}] 使用fallback session ID: ${fallbackSessionId}`, 'pty-manager')
+        
+        this.hasDetectedClaudePrompt = true
+        this.onSessionReady(fallbackSessionId)
+      }
+    }, 15000)
+  }
+
+  /**
+   * 清除会话就绪检测超时
+   */
+  private clearSessionReadyTimeout(): void {
+    if (this.sessionReadyTimeout) {
+      clearTimeout(this.sessionReadyTimeout)
+      this.sessionReadyTimeout = null
+    }
+  }
+
+  /**
+   * 多种方式检测会话就绪状态
+   */
+  private detectSessionReadiness(data: string): void {
+    if (this.hasDetectedClaudePrompt || !this.onSessionReady) {
+      return
+    }
+
+    // 方法1: 原始的 "Session created:" 检测
+    const sessionCreatedMatch = data.match(/Session created: (\S+\.jsonl)/)
+    if (sessionCreatedMatch && sessionCreatedMatch[1]) {
+      const claudeSessionFile = sessionCreatedMatch[1]
+      const claudeSessionId = path.basename(claudeSessionFile, '.jsonl')
+      logger.info(`[${this.sessionId}] 检测到 "Session created:" 消息，Claude会话ID: ${claudeSessionId}`, 'pty-manager')
+      this.markSessionReady(claudeSessionId, 'Session created message')
+      return
+    }
+
+    // 方法2: 检测Claude提示符或交互式界面
+    const claudePromptPatterns = [
+      /Claude\s*>/i,                    // Claude>
+      /\$\s*$/,                         // Shell prompt
+      />\s*$/,                          // Generic prompt
+      /claude-code/i,                   // claude-code 命令名
+      /Welcome to Claude/i,             // 欢迎信息
+      /How can I help you/i,            // 帮助信息
+      /What would you like/i,           // 询问信息
+      /Ready to assist/i,               // 准备帮助
+      /ask me anything/i,               // 提问邀请
+    ]
+
+    for (const pattern of claudePromptPatterns) {
+      if (pattern.test(data)) {
+        const fallbackSessionId = Date.now().toString()
+        logger.info(`[${this.sessionId}] 检测到Claude提示符模式: ${pattern}, 使用fallback session ID: ${fallbackSessionId}`, 'pty-manager')
+        this.markSessionReady(fallbackSessionId, `Prompt pattern: ${pattern}`)
+        return
+      }
+    }
+
+    // 方法3: 检测拦截器初始化完成
+    if (data.includes('[Claude Interceptor] 拦截器初始化完成')) {
+      // 等待一小段时间让Claude完全启动
+      setTimeout(() => {
+        if (!this.hasDetectedClaudePrompt && this.onSessionReady) {
+          const fallbackSessionId = Date.now().toString()
+          logger.info(`[${this.sessionId}] 拦截器初始化完成，使用fallback session ID: ${fallbackSessionId}`, 'pty-manager')
+          this.markSessionReady(fallbackSessionId, 'Interceptor initialized')
+        }
+      }, 2000)
+      return
+    }
+
+    // 方法4: 检测任何表明Claude正在工作的输出
+    const workingIndicators = [
+      /thinking/i,
+      /processing/i,
+      /analyzing/i,
+      /understanding/i,
+      /I'll help/i,
+      /I can help/i,
+      /Let me/i,
+    ]
+
+    for (const indicator of workingIndicators) {
+      if (indicator.test(data)) {
+        const fallbackSessionId = Date.now().toString()
+        logger.info(`[${this.sessionId}] 检测到Claude工作指示符: ${indicator}, 使用fallback session ID: ${fallbackSessionId}`, 'pty-manager')
+        this.markSessionReady(fallbackSessionId, `Working indicator: ${indicator}`)
+        return
+      }
+    }
+  }
+
+  /**
+   * 标记会话就绪
+   */
+  private markSessionReady(claudeSessionId: string, reason: string): void {
+    if (this.hasDetectedClaudePrompt) {
+      return
+    }
+    
+    this.hasDetectedClaudePrompt = true
+    this.clearSessionReadyTimeout()
+    
+    const elapsed = Date.now() - this.startTime
+    logger.info(`[${this.sessionId}] 会话就绪检测成功 (${elapsed}ms), 原因: ${reason}, Claude会话ID: ${claudeSessionId}`, 'pty-manager')
+    
+    if (this.onSessionReady) {
+      this.onSessionReady(claudeSessionId)
     }
   }
 
