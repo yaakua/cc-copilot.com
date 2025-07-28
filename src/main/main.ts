@@ -168,7 +168,34 @@ function getOrCreatePtyManager(sessionId: string, mainWindow: BrowserWindow): Pt
     }
   };
 
-  const manager = new PtyManager(mainWindow, sessionId, onSessionReady);
+  const onProcessExit = (sessionId: string, exitCode: number, signal?: string) => {
+    logger.info(`PTY进程退出: 会话 ${sessionId}, 退出代码: ${exitCode}, 信号: ${signal}`, 'main');
+    
+    // Get the session to check if it's temporary
+    const session = sessionManager.getSessionById(sessionId);
+    if (session && session.isTemporary) {
+      logger.info(`检测到临时会话退出，正在清理: ${sessionId}`, 'main');
+      
+      // Delete the temporary session from memory
+      sessionManager.deleteSession(sessionId);
+      logger.info(`已删除临时会话: ${sessionId}`, 'main');
+      
+      // Refresh sessions from Claude directory to pick up any newly created sessions
+      if (session.projectId) {
+        sessionManager.refreshProjectSessions(session.projectId);
+        logger.info(`已刷新项目会话列表: ${session.projectId}`, 'main');
+        
+        // Send updated projects to renderer
+        safelySendToRenderer(mainWindow, 'projects:updated', sessionManager.getProjects());
+      }
+    }
+    
+    // Clean up PTY manager
+    ptyManagers.delete(sessionId);
+    logger.info(`已清理PTY管理器: ${sessionId}`, 'main');
+  };
+
+  const manager = new PtyManager(mainWindow, sessionId, onSessionReady, onProcessExit);
   ptyManagers.set(sessionId, manager);
   return manager;
 }
@@ -851,6 +878,21 @@ function setupIpcHandlers(mainWindow: BrowserWindow): void {
     return pathResult?.isFound === true
   })
 
+  // PTY IPC handlers
+  ipcMain.handle('pty:stop', async (_, sessionId?: string) => {
+    const id = sessionId || currentActiveSessionId
+    if (id && ptyManagers.has(id)) {
+      logger.info(`停止PTY进程: ${id}`, 'main')
+      const manager = ptyManagers.get(id)!
+      await manager.stop()
+      ptyManagers.delete(id)
+      return true
+    } else {
+      logger.warn(`未找到要停止的PTY管理器: ${id}`, 'main')
+      return false
+    }
+  })
+
   ipcMain.handle('session:resume', async (_, sessionId: string, projectPath: string) => {
     currentActiveSessionId = sessionId
     const manager = getOrCreatePtyManager(sessionId, mainWindow)
@@ -999,6 +1041,38 @@ function setupIpcHandlers(mainWindow: BrowserWindow): void {
     safelySendToRenderer(mainWindow, 'project:deleted', projectId);
 
     return { success: true };
+  });
+
+  // Refresh project sessions
+  ipcMain.handle('project:refresh-sessions', async (_, projectId: string) => {
+    logger.info(`刷新项目会话: ${projectId}`, 'main');
+
+    const project = sessionManager.getProjectById(projectId);
+    if (!project) {
+      logger.error(`刷新项目会话失败: 未找到项目 ${projectId}`, 'main');
+      return { success: false, error: '项目不存在' };
+    }
+
+    try {
+      // Call refresh method from session manager
+      sessionManager.refreshProjectSessions(projectId);
+      logger.info(`项目会话刷新成功: ${project.name}`, 'main');
+
+      // Send updated projects to renderer
+      const projects = sessionManager.getProjects();
+      const sessions = sessionManager.getAllSessions();
+      const projectsWithSessions = projects.map(p => ({
+        ...p,
+        sessions: sessions.filter(s => s.projectId === p.id)
+      }));
+
+      safelySendToRenderer(mainWindow, 'projects:updated', projectsWithSessions);
+
+      return { success: true };
+    } catch (error) {
+      logger.error(`刷新项目会话失败: ${project.name}`, 'main', error as Error);
+      return { success: false, error: '刷新失败' };
+    }
   });
 
   // Settings management

@@ -18,6 +18,7 @@ export interface PtyOptions {
 
 export class PtyManager {
   private onSessionReady: ((claudeSessionId: string) => void) | null = null;
+  private onProcessExit: ((sessionId: string, exitCode: number, signal?: string) => void) | null = null;
   private ptyProcess: pty.IPty | null = null
   private mainWindow: BrowserWindow | null = null
   private currentEnv: Record<string, string | undefined> = {}
@@ -35,7 +36,8 @@ export class PtyManager {
   constructor(
     mainWindow: BrowserWindow,
     sessionId: string,
-    onSessionReadyCallback?: (claudeSessionId: string) => void
+    onSessionReadyCallback?: (claudeSessionId: string) => void,
+    onProcessExitCallback?: (sessionId: string, exitCode: number, signal?: string) => void
   ) {
     this.mainWindow = mainWindow;
     this.sessionId = sessionId;
@@ -43,6 +45,10 @@ export class PtyManager {
 
     if (onSessionReadyCallback) {
       this.onSessionReady = onSessionReadyCallback;
+    }
+    
+    if (onProcessExitCallback) {
+      this.onProcessExit = onProcessExitCallback;
     }
   }
 
@@ -294,10 +300,13 @@ export class PtyManager {
       // Check if manager is destroyed or window is destroyed before sending IPC
       if (!this.isDestroyed && this.mainWindow && !this.mainWindow.isDestroyed()) {
         try {
-          this.mainWindow.webContents.send('terminal:data', {
-            sessionId: this.sessionId,
-            data
-          })
+          // Only send data if it's not completely filtered out
+          if (processedData) {
+            this.mainWindow.webContents.send('terminal:data', {
+              sessionId: this.sessionId,
+              data: processedData
+            })
+          }
         } catch (error) {
           logger.warn(`无法发送终端数据到渲染进程: ${(error as Error).message}`, 'pty-manager')
         }
@@ -369,6 +378,15 @@ export class PtyManager {
           }, 500)
         } catch (error) {
           logger.warn(`无法发送退出消息到渲染进程: ${(error as Error).message}`, 'pty-manager')
+        }
+      }
+      
+      // Call the exit callback if provided
+      if (this.onProcessExit) {
+        try {
+          this.onProcessExit(this.sessionId, exitCode, signal)
+        } catch (error) {
+          logger.warn(`退出回调执行失败: ${(error as Error).message}`, 'pty-manager')
         }
       }
     })
@@ -789,6 +807,11 @@ export class PtyManager {
 
         // 保存到日志文件
         logger[logLevel](`[INTERCEPTOR] ${logContent}`, 'claude-interceptor')
+        
+        // 对于[TERMINAL]前缀的日志，显示在终端但清理格式
+        if (line.includes('[TERMINAL]')) {
+          processedLines.push(logContent)
+        }
         // SILENT前缀的日志不输出到终端，直接跳过
       } else {
         // 非拦截器日志，保持原样
@@ -796,7 +819,13 @@ export class PtyManager {
       }
     }
 
-    return processedLines.join('\n')
+    const result = processedLines.join('\n')
+    
+    // 清理重复的提示符和多余的空行，防止双光标问题
+    return result
+      .replace(/\r\n\r\n+/g, '\r\n') // 合并多个空行
+      .replace(/\n\n+/g, '\n') // 合并多个换行
+      .replace(/>\s*>\s*/g, '> ') // 清理重复的提示符
   }
 
 }

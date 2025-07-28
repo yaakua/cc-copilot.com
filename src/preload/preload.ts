@@ -106,6 +106,10 @@ const api = {
   resumeSession: (sessionId: string, projectPath: string) => ipcRenderer.invoke('session:resume', sessionId, projectPath),
   deleteSession: (sessionId: string) => ipcRenderer.invoke('session:delete', sessionId),
   
+  // PTY APIs
+  startPty: (options?: any, sessionId?: string) => ipcRenderer.invoke('pty:start', options, sessionId),
+  stopPty: (sessionId?: string) => ipcRenderer.invoke('pty:stop', sessionId),
+  
   // Project APIs
   createProject: (workingDirectory: string) => ipcRenderer.invoke('project:create', workingDirectory),
   selectProjectDirectory: () => ipcRenderer.invoke('project:select-directory'),
@@ -113,6 +117,7 @@ const api = {
   getAllProjects: () => ipcRenderer.invoke('project:get-all'),
   getClaudeProjectDirectory: (projectPath: string) => ipcRenderer.invoke('project:get-claude-directory', projectPath),
   deleteProject: (projectId: string) => ipcRenderer.invoke('project:delete', projectId),
+  refreshProjectSessions: (projectId: string) => ipcRenderer.invoke('project:refresh-sessions', projectId),
   
   // Settings APIs
   getSettings: () => ipcRenderer.invoke('settings:get'),

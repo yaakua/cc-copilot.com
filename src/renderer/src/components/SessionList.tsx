@@ -74,6 +74,8 @@ const SessionList: React.FC<SessionListProps> = ({
   const [expandedProjects, setExpandedProjects] = useState<Set<string>>(new Set())
   const [currentTime, setCurrentTime] = useState(new Date().getTime())
   const [contextMenu, setContextMenu] = useState<{x: number, y: number, projectId: string} | null>(null)
+  const [refreshingProjects, setRefreshingProjects] = useState<Set<string>>(new Set())
+  const [recentlyRefreshedProjects, setRecentlyRefreshedProjects] = useState<Set<string>>(new Set())
 
   // 定时更新时间，用于实时显示倒计时
   useEffect(() => {
@@ -177,10 +179,43 @@ const SessionList: React.FC<SessionListProps> = ({
     })
   }
 
-  const handleContextMenuAction = async (action: 'newSession' | 'delete', projectId: string) => {
+  const handleContextMenuAction = async (action: 'newSession' | 'refresh' | 'delete', projectId: string) => {
     setContextMenu(null)
     if (action === 'newSession') {
       onCreateSession(projectId)
+    } else if (action === 'refresh') {
+      try {
+        // Set refreshing state
+        setRefreshingProjects(prev => new Set(prev).add(projectId))
+        
+        // Call refresh project sessions API
+        const result = await window.api.refreshProjectSessions(projectId)
+        
+        if (result.success) {
+          // Show success indicator
+          setRecentlyRefreshedProjects(prev => new Set(prev).add(projectId))
+          
+          // Remove success indicator after 2 seconds
+          setTimeout(() => {
+            setRecentlyRefreshedProjects(prev => {
+              const newSet = new Set(prev)
+              newSet.delete(projectId)
+              return newSet
+            })
+          }, 2000)
+        } else {
+          console.error('Refresh failed:', result.error)
+        }
+      } catch (error) {
+        console.error('Refresh error:', error)
+      } finally {
+        // Remove refreshing state
+        setRefreshingProjects(prev => {
+          const newSet = new Set(prev)
+          newSet.delete(projectId)
+          return newSet
+        })
+      }
     } else if (action === 'delete') {
       const project = projects.find(p => p.id === projectId)
       if (project) {
@@ -301,6 +336,14 @@ const SessionList: React.FC<SessionListProps> = ({
                   </div>
                 </div>
                 <div className="flex items-center gap-2 shrink-0">
+                  {/* Refresh Success Indicator */}
+                  {recentlyRefreshedProjects.has(project.id) && (
+                    <div className="flex items-center">
+                      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" className="w-4 h-4 text-green-500">
+                        <path fillRule="evenodd" d="M12.416 3.376a.75.75 0 0 1 .208 1.04l-5 7.5a.75.75 0 0 1-1.154.114l-3-3a.75.75 0 0 1 1.06-1.06l2.353 2.353 4.493-6.74a.75.75 0 0 1 1.04-.207Z" clipRule="evenodd" />
+                      </svg>
+                    </div>
+                  )}
                   {/* New Session Button */}
                   <button
                     onClick={(e) => {
@@ -488,6 +531,38 @@ const SessionList: React.FC<SessionListProps> = ({
               <path d="M8.75 3.75a.75.75 0 0 0-1.5 0v3.5h-3.5a.75.75 0 0 0 0 1.5h3.5v3.5a.75.75 0 0 0 1.5 0v-3.5h3.5a.75.75 0 0 0 0-1.5h-3.5v-3.5Z" />
             </svg>
             {t('sessions.newSession')}
+          </button>
+          <button
+            className={`w-full text-left px-4 py-2 text-sm flex items-center gap-2 ${
+              refreshingProjects.has(contextMenu.projectId) 
+                ? 'opacity-60 cursor-not-allowed' 
+                : 'hover:bg-gray-100 dark:hover:bg-gray-700'
+            }`}
+            style={{ color: 'var(--text-primary)' }}
+            onMouseEnter={(e) => {
+              if (!refreshingProjects.has(contextMenu.projectId)) {
+                e.currentTarget.style.backgroundColor = 'var(--hover-bg)'
+              }
+            }}
+            onMouseLeave={(e) => {
+              if (!refreshingProjects.has(contextMenu.projectId)) {
+                e.currentTarget.style.backgroundColor = 'transparent'
+              }
+            }}
+            onClick={() => handleContextMenuAction('refresh', contextMenu.projectId)}
+            disabled={refreshingProjects.has(contextMenu.projectId)}
+          >
+            {refreshingProjects.has(contextMenu.projectId) ? (
+              <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+              </svg>
+            ) : (
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" className="w-4 h-4">
+                <path fillRule="evenodd" d="M13.836 2.477a.75.75 0 0 1 .75.75v3.182a.75.75 0 0 1-.75.75h-3.182a.75.75 0 0 1 0-1.5h1.37l-.84-.841a4.5 4.5 0 0 0-7.08.932.75.75 0 0 1-1.3-.75 6 6 0 0 1 9.44-1.242l.842.84V3.227a.75.75 0 0 1 .75-.75Zm-.911 7.5A.75.75 0 0 1 13.199 11a6 6 0 0 1-9.44 1.241l-.84-.84v1.371a.75.75 0 0 1-1.5 0V9.591a.75.75 0 0 1 .75-.75H5.35a.75.75 0 0 1 0 1.5H3.98l.841.841a4.5 4.5 0 0 0 7.08-.932.75.75 0 0 1 1.025-.273Z" clipRule="evenodd" />
+              </svg>
+            )}
+            {refreshingProjects.has(contextMenu.projectId) ? t('sessions.refreshing') : t('sessions.refreshProject')}
           </button>
           <div className="border-t border-gray-200 dark:border-gray-700 my-1" style={{ borderColor: 'var(--border-primary)' }}></div>
           <button

@@ -49,6 +49,7 @@ declare global {
       getAllProjects: () => Promise<Project[]>
       getClaudeProjectDirectory: (projectPath: string) => Promise<string | null>
       deleteProject: (projectId: string) => Promise<{ success: boolean; error?: string }>
+      refreshProjectSessions: (projectId: string) => Promise<{ success: boolean; error?: string }>
       
       // Session APIs
       createSession: (projectId: string) => Promise<Session | { error: string; loginInstructions: string }>

@@ -190,6 +190,11 @@ const App: React.FC = () => {
       })
     })
 
+    const removeProjectsUpdatedListener = window.api.onProjectsUpdated((updatedProjects: Project[]) => {
+      logger.info('Received projects:updated event', { projectCount: updatedProjects.length })
+      setProjects(updatedProjects)
+    })
+
     const removeSessionAuthRequiredListener = window.api.onSessionAuthRequired((authData: { error: string; loginInstructions: string }) => {
       logger.warn('Session creation failed due to authentication:', authData.error)
       
@@ -215,6 +220,7 @@ const App: React.FC = () => {
       removeSessionDeletedListener()
       removeProjectCreatedListener()
       removeProjectDeletedListener()
+      removeProjectsUpdatedListener()
       removeSessionAuthRequiredListener()
     }
   }, [])
@@ -442,7 +448,64 @@ const App: React.FC = () => {
     }
   }
 
-  const handleCloseTab = (sessionId: string) => {
+  const handleCloseTab = async (sessionId: string) => {
+    logger.info('关闭tab', { sessionId })
+    
+    // Find the session to check if it's temporary
+    let session: Session | undefined;
+    for (const project of projects) {
+      session = project.sessions.find(s => s.id === sessionId);
+      if (session) break;
+    }
+    
+    // Check if this is a recently created session that should be cleaned up
+    // A session should be cleaned up if:
+    // 1. It's marked as temporary, OR
+    // 2. It has no filePath (not yet persisted to Claude directory), OR  
+    // 3. It was created within the last 30 seconds (recently created)
+    const now = Date.now()
+    const sessionCreatedAt = session ? new Date(session.createdAt).getTime() : 0
+    const isRecentlyCreated = now - sessionCreatedAt < 30000 // 30 seconds
+    const shouldCleanup = session && (
+      session.isTemporary || 
+      !session.filePath || 
+      isRecentlyCreated
+    )
+    
+    if (shouldCleanup) {
+      logger.info('检测到应清理的会话，正在清理', { 
+        sessionId, 
+        isTemporary: session?.isTemporary,
+        hasFilePath: !!session?.filePath,
+        isRecentlyCreated,
+        createdAt: session?.createdAt 
+      })
+      
+      try {
+        // Stop the PTY process and clean up session
+        await window.api.stopPty(sessionId)
+        
+        // Delete the session - this will trigger session:deleted event
+        await window.api.deleteSession(sessionId)
+        
+        logger.info('会话已清理', { sessionId })
+        
+        // Don't update UI state here - let the session:deleted event handle it
+        return
+      } catch (error) {
+        logger.error('清理会话失败', error as Error, { sessionId })
+      }
+    } else {
+      // For regular sessions, just stop the PTY process but keep the session record
+      try {
+        await window.api.stopPty(sessionId)
+        logger.info('常规会话PTY进程已停止', { sessionId })
+      } catch (error) {
+        logger.error('停止会话PTY进程失败', error as Error, { sessionId })
+      }
+    }
+    
+    // Update UI state (only for regular sessions)
     setActiveSessionIds(prevActiveIds => {
       const remainingIds = prevActiveIds.filter(id => id !== sessionId);
       

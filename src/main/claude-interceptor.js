@@ -23,6 +23,11 @@ class ClaudeInterceptor {
         this.lastConfigHash = null;
         this.lastConfigCheck = 0; // 最后一次配置检查时间
 
+        // 用于控制提示显示的状态
+        this.lastLoggedAuth = null; // 上次记录的authorization
+        this.lastLoggedAccount = null; // 上次记录的账号信息
+        this.hasLoggedInterception = false; // 是否已记录拦截信息
+
         // 加载配置
         this.refreshConfig();
 
@@ -56,10 +61,10 @@ class ClaudeInterceptor {
                     }
                 }
             }
-            console.log("未获取到任何可用的账号")
+            console.log('No available account found')
             return null;
         } catch (error) {
-            console.warn('[SILENT] 无法获取账号配置:', error.message);
+            console.warn('[SILENT] Unable to get account config:', error.message);
             return null;
         }
     }
@@ -80,7 +85,7 @@ class ClaudeInterceptor {
             }
             return { enabled: false };
         } catch (error) {
-            console.warn('[SILENT] 无法获取代理配置:', error.message);
+            console.warn('[SILENT] Unable to get proxy config:', error.message);
             return { enabled: false };
         }
     }
@@ -105,9 +110,9 @@ class ClaudeInterceptor {
             process.env.http_proxy = proxyUrl;
             process.env.https_proxy = proxyUrl;
 
-            console.log('[SILENT] [Claude Interceptor] 上游代理已设置:', proxyUrl.replace(/\/\/.*@/, '//***@'));
+            console.log('[SILENT] [Claude Interceptor] Upstream proxy configured:', proxyUrl.replace(/\/\/.*@/, '//***@'));
         } catch (error) {
-            console.error('[SILENT] [Claude Interceptor] 设置上游代理失败:', error.message);
+            console.error('[SILENT] [Claude Interceptor] Failed to setup upstream proxy:', error.message);
         }
     }
 
@@ -120,23 +125,23 @@ class ClaudeInterceptor {
                     // 检查这个authorization是否已被其他Claude账号使用
                     const existingAccount = this.findClaudeAccountByAuthorizationInSettings(settingsData, authorization);
                     if (existingAccount && existingAccount.emailAddress !== this.accountInfo.emailAddress) {
-                        console.warn(`[SILENT] [Claude Interceptor] Authorization值已被其他账号 ${existingAccount.emailAddress} 使用，无法分配给当前账号 ${this.accountInfo.emailAddress}`);
-                        console.warn('[SILENT] [Claude Interceptor] 建议检查账号配置或切换到正确的账号');
+                        console.warn(`[SILENT] [Claude Interceptor] Authorization already used by account ${existingAccount.emailAddress}, cannot assign to current account ${this.accountInfo.emailAddress}`);
+                        console.warn('[SILENT] [Claude Interceptor] Please check account configuration or switch to correct account');
                         return;
                     }
 
-                    console.log(`[SILENT] [Claude Interceptor] 检测到并准备保存Claude官方账号的authorization值: ${this.accountInfo.emailAddress}`);
+                    console.log(`[SILENT] [Claude Interceptor] Detected and preparing to save Claude official account authorization: ${this.accountInfo.emailAddress}`);
                     this.updateClaudeAccountAuthorizationInSettings(settingsData, this.accountInfo.emailAddress, authorization);
                     this.saveSettingsToStore(settingsData);
                     // 更新本地缓存
                     this.accountInfo.authorization = authorization;
-                    console.log('[SILENT] [Claude Interceptor] Authorization值已直接保存到配置文件');
+                    console.log('[SILENT] [Claude Interceptor] Authorization saved to config file');
                 } else {
-                    console.log('保存authorization失败', error.message);
+                    console.log('Failed to save authorization', error.message);
                 }
             }
         } catch (error) {
-            console.error('[SILENT] [Claude Interceptor] 保存authorization失败:', error.message);
+            console.error('[SILENT] [Claude Interceptor] Failed to save authorization:', error.message);
         }
     }
 
@@ -203,7 +208,7 @@ class ClaudeInterceptor {
                     const authHeader = headers.get('authorization');
                     if (authHeader && interceptor.accountInfo?.type === ClaudeInterceptor.PROVIDER_TYPE_CLAUDE_OFFICIAL &&
                         (!interceptor.accountInfo.authorization || interceptor.accountInfo.authorization !== authHeader)) {
-                        console.log('[SILENT] [Claude Interceptor] 检测到新的authorization值，准备保存');
+                        console.log('[SILENT] [Claude Interceptor] New authorization detected, preparing to save');
                         interceptor.updateAuthorizationInConfig(authHeader);
                     }
                 }
@@ -224,9 +229,13 @@ class ClaudeInterceptor {
                         const newUrl = baseUrl.origin + newPath + (originalUrlObj.search || '');
                         finalInput = newUrl;
                         
-                        console.log('[SILENT] [Claude Interceptor] 已切换到第三方API:', baseUrl.origin);
+                        // 只在首次切换时记录
+                        if (this.lastLoggedAccount !== this.accountInfo?.name) {
+                            console.log('[SILENT] [Claude Interceptor] 已切换到第三方API:', baseUrl.origin);
+                            this.lastLoggedAccount = this.accountInfo?.name;
+                        }
                     } catch (error) {
-                        console.error('[SILENT] [Claude Interceptor] Fetch URL重写失败:', error.message);
+                        console.error('[SILENT] [Claude Interceptor] Fetch URL rewrite failed:', error.message);
                     }
                 }
 
@@ -253,7 +262,11 @@ class ClaudeInterceptor {
                             init.headers.authorization = dynamicAuth;
                         }
 
-                        console.log('[SILENT] [Claude Interceptor] 已设置动态authorization:', '...' + dynamicAuth.slice(-20));
+                        // 只在authorization发生变化时记录
+                        if (interceptor.lastLoggedAuth !== dynamicAuth) {
+                            console.log('[SILENT] [Claude Interceptor] Dynamic authorization set:', '...' + dynamicAuth.slice(-20));
+                            interceptor.lastLoggedAuth = dynamicAuth;
+                        }
                     }
                 }
                 
@@ -264,7 +277,7 @@ class ClaudeInterceptor {
         };
 
         global.fetch.__claudeIntercepted = true;
-        console.log('[SILENT] [Claude Interceptor] Fetch已被拦截');
+        console.log('[SILENT] [Claude Interceptor] Fetch intercepted');
     }
 
     instrumentNodeHTTP() {
@@ -291,9 +304,9 @@ class ClaudeInterceptor {
                 https.request.__claudeIntercepted = true;
             }
 
-            console.log('[SILENT] [Claude Interceptor] Node HTTP已被拦截');
+            console.log('[SILENT] [Claude Interceptor] Node HTTP intercepted');
         } catch (error) {
-            console.error('[TERMINAL] [Claude Interceptor] 拦截Node HTTP失败:', error.message);
+            console.error('[TERMINAL] [Claude Interceptor] Failed to intercept Node HTTP:', error.message);
         }
     }
 
@@ -304,14 +317,18 @@ class ClaudeInterceptor {
         const shouldIntercept = this.shouldInterceptRequest(originalUrl);
         
         if (shouldIntercept) {
-            console.log('[TERMINAL] [Claude Interceptor] 拦截到Node HTTP API请求:', originalUrl);
+            // 只在首次拦截时记录
+            if (!this.hasLoggedInterception) {
+                console.log('[TERMINAL] [Claude Interceptor] 拦截到Node HTTP API请求:', originalUrl);
+                this.hasLoggedInterception = true;
+            }
 
             // 检测并保存原始authorization（仅对Claude官方账号）
             if (options.headers && options.headers.authorization) {
                 const authHeader = options.headers.authorization;
                 if (this.accountInfo?.type === ClaudeInterceptor.PROVIDER_TYPE_CLAUDE_OFFICIAL &&
                     (!this.accountInfo.authorization || this.accountInfo.authorization !== authHeader)) {
-                    console.log('[SILENT] [Claude Interceptor] 检测到新的authorization值，准备保存');
+                    console.log('[SILENT] [Claude Interceptor] New authorization detected, preparing to save');
                     this.updateAuthorizationInConfig(authHeader);
                 }
             }
@@ -321,7 +338,11 @@ class ClaudeInterceptor {
                 const rewrittenOptions = this.rewriteRequestForThirdParty(options, originalUrl, isHttps);
                 if (rewrittenOptions) {
                     options = rewrittenOptions;
-                    console.log('[SILENT] [Claude Interceptor] 已切换到第三方API');
+                    // 只在首次切换时记录
+                    if (this.lastLoggedAccount !== this.accountInfo?.name) {
+                        console.log('[SILENT] [Claude Interceptor] Switched to third-party API');
+                        this.lastLoggedAccount = this.accountInfo?.name;
+                    }
                 }
             }
 
@@ -337,7 +358,12 @@ class ClaudeInterceptor {
                         options.headers = {};
                     }
                     options.headers.authorization = dynamicAuth;
-                    console.log('[SILENT] [Claude Interceptor] 已设置动态authorization:', '...' + dynamicAuth.slice(-20));
+                    
+                    // 只在authorization发生变化时记录
+                    if (this.lastLoggedAuth !== dynamicAuth) {
+                        console.log('[SILENT] [Claude Interceptor] 已设置动态authorization:', '...' + dynamicAuth.slice(-20));
+                        this.lastLoggedAuth = dynamicAuth;
+                    }
                 }
             }
         }
@@ -382,7 +408,7 @@ class ClaudeInterceptor {
                         // 检查域名和端口是否匹配
                         return baseUrlObj.host === requestUrlObj.host;
                     } catch (error) {
-                        console.warn('[SILENT] [Claude Interceptor] URL解析失败:', error.message);
+                        console.warn('[SILENT] [Claude Interceptor] URL parsing failed:', error.message);
                         // 如果URL解析失败，尝试简单的字符串匹配
                         return url.includes(this.accountInfo.baseUrl) || this.accountInfo.baseUrl.includes(url.split('//')[1]?.split('/')[0] || '');
                     }
@@ -392,7 +418,7 @@ class ClaudeInterceptor {
 
             return false;
         } catch (error) {
-            console.warn('[SILENT] [Claude Interceptor] 检查API端点失败:', error.message);
+            console.warn('[SILENT] [Claude Interceptor] Failed to check API endpoint:', error.message);
             return false;
         }
     }
@@ -475,29 +501,29 @@ class ClaudeInterceptor {
 
             return newOptions;
         } catch (error) {
-            console.error('[SILENT] [Claude Interceptor] 重写请求失败:', error.message);
+            console.error('[SILENT] [Claude Interceptor] Failed to rewrite request:', error.message);
             return null;
         }
     }
 
     initialize() {
-        console.log('[TERMINAL] [Claude Interceptor] 初始化拦截器...');
+        console.log('[TERMINAL] [Claude Interceptor] Initializing interceptor...');
 
         if (this.accountInfo) {
-            console.log('[TERMINAL] [Claude Interceptor] 当前账号:',
+            console.log('[TERMINAL] [Claude Interceptor] Current account:',
                 this.accountInfo.type === ClaudeInterceptor.PROVIDER_TYPE_CLAUDE_OFFICIAL
                     ? this.accountInfo.emailAddress
                     : this.accountInfo.name
             );
         } else {
-            console.warn('[TERMINAL] [Claude Interceptor] 警告: 未找到账号配置');
+            console.warn('[TERMINAL] [Claude Interceptor] Warning: No account configuration found');
         }
 
         this.instrumentFetch();
         this.instrumentNodeHTTP();
 
-        console.log('[TERMINAL] [Claude Interceptor] 拦截器初始化完成');
-        console.log('[SILENT] [Claude Interceptor] 配置文件监听已启用，支持热更新');
+        console.log('[TERMINAL] [Claude Interceptor] Interceptor initialization completed');
+        console.log('[SILENT] [Claude Interceptor] Config file monitoring enabled with hot reload support');
     }
 
     /**
@@ -519,9 +545,9 @@ class ClaudeInterceptor {
             });
             this.lastConfigHash = this.simpleHash(configData);
 
-            console.log('[TERMINAL] [Claude Interceptor] 配置已刷新');
+            console.log('[TERMINAL] [Claude Interceptor] Configuration refreshed');
         } catch (error) {
-            console.error('[SILENT] [Claude Interceptor] 刷新配置失败:', error.message);
+            console.error('[SILENT] [Claude Interceptor] Failed to refresh config:', error.message);
         }
     }
 
@@ -541,13 +567,13 @@ class ClaudeInterceptor {
 
             // 如果配置发生变化，则更新
             if (currentHash !== this.lastConfigHash) {
-                console.log('[TERMINAL] [Claude Interceptor] 检测到配置变化，正在更新...');
+                console.log('[TERMINAL] [Claude Interceptor] Config change detected, updating...');
                 this.refreshConfig();
                 return true;
             }
             return false;
         } catch (error) {
-            console.warn('[SILENT] [Claude Interceptor] 检查配置变化失败:', error.message);
+            console.warn('[SILENT] [Claude Interceptor] Failed to check config changes:', error.message);
             return false;
         }
     }
@@ -559,21 +585,21 @@ class ClaudeInterceptor {
         try {
             const settingsPath = this.getSettingsPath();
             if (!settingsPath || !fs.existsSync(settingsPath)) {
-                console.warn('[SILENT] [Claude Interceptor] 配置文件不存在，跳过监听设置');
+                console.warn('[SILENT] [Claude Interceptor] Config file does not exist, skipping monitor setup');
                 return;
             }
 
             // 监听配置文件变化
             this.settingsWatcher = fs.watchFile(settingsPath, (curr, prev) => {
                 if (curr.mtime > prev.mtime) {
-                    console.log('[SILENT] [Claude Interceptor] 配置文件已更新，重新加载配置');
+                    console.log('[SILENT] [Claude Interceptor] Config file updated, reloading configuration');
                     this.onConfigChanged();
                 }
             });
 
-            console.log('[SILENT] [Claude Interceptor] 配置文件监听已启动:', settingsPath);
+            console.log('[SILENT] [Claude Interceptor] Config file monitoring started:', settingsPath);
         } catch (error) {
-            console.warn('[SILENT] [Claude Interceptor] 设置配置文件监听失败:', error.message);
+            console.warn('[SILENT] [Claude Interceptor] Failed to setup config file monitoring:', error.message);
         }
     }
 
@@ -585,17 +611,22 @@ class ClaudeInterceptor {
             const oldAccountInfo = this.accountInfo;
             this.refreshConfig();
 
+            // 重置状态以便重新显示日志
+            this.lastLoggedAuth = null;
+            this.lastLoggedAccount = null;
+            this.hasLoggedInterception = false;
+
             // 通知配置变更
             if (oldAccountInfo?.emailAddress !== this.accountInfo?.emailAddress ||
                 oldAccountInfo?.type !== this.accountInfo?.type) {
-                console.log('[TERMINAL] [Claude Interceptor] 账号配置已变更:',
+                console.log('[TERMINAL] [Claude Interceptor] Account configuration changed:',
                     this.accountInfo
                         ? `${this.accountInfo.type} - ${this.accountInfo.emailAddress || this.accountInfo.name}`
                         : 'None'
                 );
             }
         } catch (error) {
-            console.error('[SILENT] [Claude Interceptor] 处理配置变更失败:', error.message);
+            console.error('[SILENT] [Claude Interceptor] Failed to handle config change:', error.message);
         }
     }
 
@@ -617,7 +648,7 @@ class ClaudeInterceptor {
 
             return path.join(userDataPath, 'settings.json');
         } catch (error) {
-            console.warn('[SILENT] [Claude Interceptor] 获取配置路径失败:', error.message);
+            console.warn('[SILENT] [Claude Interceptor] Failed to get config path:', error.message);
             return null;
         }
     }
@@ -643,10 +674,10 @@ class ClaudeInterceptor {
             if (this.settingsWatcher) {
                 fs.unwatchFile(this.getSettingsPath());
                 this.settingsWatcher = null;
-                console.log('[SILENT] [Claude Interceptor] 配置文件监听已停止');
+                console.log('[SILENT] [Claude Interceptor] Config file monitoring stopped');
             }
         } catch (error) {
-            console.warn('[SILENT] [Claude Interceptor] 清理监听器失败:', error.message);
+            console.warn('[SILENT] [Claude Interceptor] Failed to cleanup monitor:', error.message);
         }
     }
 
@@ -669,7 +700,7 @@ class ClaudeInterceptor {
             }
 
             if (!userDataPath) {
-                console.warn('[SILENT] [Claude Interceptor] 无法确定用户数据目录');
+                console.warn('[SILENT] [Claude Interceptor] Unable to determine user data directory');
                 return null;
             }
 
@@ -681,7 +712,7 @@ class ClaudeInterceptor {
 
             return null;
         } catch (error) {
-            console.warn('[SILENT] [Claude Interceptor] 加载设置文件失败:', error.message);
+            console.warn('[SILENT] [Claude Interceptor] Failed to load settings file:', error.message);
             return null;
         }
     }
@@ -716,7 +747,7 @@ class ClaudeInterceptor {
             }
 
             if (!userDataPath) {
-                console.warn('[SILENT] [Claude Interceptor] 无法确定用户数据目录');
+                console.warn('[SILENT] [Claude Interceptor] Unable to determine user data directory');
                 return false;
             }
 
@@ -729,7 +760,7 @@ class ClaudeInterceptor {
             fs.writeFileSync(settingsPath, JSON.stringify(settingsData, null, 2));
             return true;
         } catch (error) {
-            console.error('[SILENT] [Claude Interceptor] 保存设置文件失败:', error.message);
+            console.error('[SILENT] [Claude Interceptor] Failed to save settings file:', error.message);
             return false;
         }
     }
@@ -759,7 +790,7 @@ class ClaudeInterceptor {
 
             return { provider: activeProvider, account };
         } catch (error) {
-            console.warn('[SILENT] [Claude Interceptor] 获取活动账号失败:', error.message);
+            console.warn('[SILENT] [Claude Interceptor] Failed to get active account:', error.message);
             return null;
         }
     }
@@ -791,7 +822,7 @@ class ClaudeInterceptor {
 
             return claudeProvider.accounts.find(acc => acc.authorization === authorization) || null;
         } catch (error) {
-            console.warn('[SILENT] [Claude Interceptor] 查找账号失败:', error.message);
+            console.warn('[SILENT] [Claude Interceptor] Failed to find account:', error.message);
             return null;
         }
     }
@@ -814,7 +845,7 @@ class ClaudeInterceptor {
 
             return false;
         } catch (error) {
-            console.error('[SILENT] [Claude Interceptor] 更新authorization失败:', error.message);
+            console.error('[SILENT] [Claude Interceptor] Failed to update authorization:', error.message);
             return false;
         }
     }
@@ -825,7 +856,7 @@ let globalInterceptor = null;
 
 function initializeClaudeInterceptor() {
     if (globalInterceptor) {
-        console.warn('[SILENT] [Claude Interceptor] 拦截器已初始化');
+        console.warn('[SILENT] [Claude Interceptor] Interceptor already initialized');
         return globalInterceptor;
     }
 
