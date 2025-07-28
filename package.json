@@ -4,10 +4,10 @@
   "version": "1.0.0",
   "description": "A cross-platform desktop GUI wrapper for claude-code",
   "main": "dist/main/main.js",
-  "homepage": "https://github.com/yangkui/cc-copilot",
+  "homepage": "https://cc-copilot.com",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/yangkui/cc-copilot.git"
+    "url": "git+https://github.com/yaakua/cc-copilot.com.git"
   },
   "author": {
     "name": "yangkui",
@@ -15,6 +15,9 @@
   },
   "license": "MIT",
   "build": {
+     "appId": "com.yourcompany.yourapp",
+    "productName": "Your App",
+    "afterSign": "scripts/notarize.js",
     "directories": {
       "buildResources": "resources"
     },
@@ -29,13 +32,15 @@
       "!.vscode"
     ],
     "mac": {
-      "icon": "resources/icon.png"
+      "icon": "resources/cc-copilot-icon512.png",
+      "category": "public.app-category.developer-tools",
+      "identity": "Developer ID Application: Oliver O (4MQ3AWP5NR)"
     },
     "win": {
-      "icon": "resources/icon.png"
+      "icon": "resources/cc-copilot-icon512.png"
     },
     "linux": {
-      "icon": "resources/icon.png"
+      "icon": "resources/cc-copilot-icon512.png"
     }
   },
   "scripts": {
