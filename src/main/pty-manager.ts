@@ -6,6 +6,7 @@ import { logger } from './logger'
 import path from 'path'
 import { claudePathManager } from './claude-path-manager'
 import { ClaudeChannelInfo } from '../shared/types'
+import { SettingsManager } from './settings'
 
 export interface PtyOptions {
   workingDirectory?: string
@@ -32,16 +33,19 @@ export class PtyManager {
   private hasDetectedClaudePrompt: boolean = false
   private startTime: number = 0
   private allOutputBuffer: string = '' // 完整输出缓冲区用于调试
+  private settingsManager: SettingsManager | null = null
 
   constructor(
     mainWindow: BrowserWindow,
     sessionId: string,
     onSessionReadyCallback?: (claudeSessionId: string) => void,
-    onProcessExitCallback?: (sessionId: string, exitCode: number, signal?: string) => void
+    onProcessExitCallback?: (sessionId: string, exitCode: number, signal?: string) => void,
+    settingsManager?: SettingsManager
   ) {
     this.mainWindow = mainWindow;
     this.sessionId = sessionId;
     this.currentEnv = { ...process.env };
+    this.settingsManager = settingsManager || null;
 
     if (onSessionReadyCallback) {
       this.onSessionReady = onSessionReadyCallback;
@@ -127,15 +131,24 @@ export class PtyManager {
       // 先获取claude命令的实际路径
       const claudeCommand = await this.getClaudeCommandPath();
 
+      // 构建Claude命令参数，根据设置决定是否添加 --dangerously-skip-permissions
+      const claudeArgs = [...(options.args || [])];
+      
+      // 检查是否应该跳过权限检查
+      const shouldSkipPermissions = this.settingsManager?.getSkipPermissions() ?? true;
+      if (shouldSkipPermissions && !claudeArgs.includes('--dangerously-skip-permissions')) {
+        claudeArgs.unshift('--dangerously-skip-permissions');
+      }
+      
       // 使用 node --require 启动 claude
       const command = 'node';
-      const args = ['--require', interceptorScript, claudeCommand, ...(options.args || [])];
+      const args = ['--require', interceptorScript, claudeCommand, ...claudeArgs];
 
       // 保存启动参数用于错误诊断
       this.lastInterceptorScript = interceptorScript;
       this.lastClaudeCommand = claudeCommand;
       this.lastWorkingDirectory = workingDirectory;
-      this.lastArgs = options.args || [];
+      this.lastArgs = claudeArgs;
 
       logger.info(`创建专用 PTY 进程: command=${command}, args=[${args.join(', ')}], cwd=${workingDirectory}`, 'pty-manager')
       logger.info(`使用拦截器脚本: ${interceptorScript}`, 'pty-manager')

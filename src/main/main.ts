@@ -195,7 +195,7 @@ function getOrCreatePtyManager(sessionId: string, mainWindow: BrowserWindow): Pt
     logger.info(`已清理PTY管理器: ${sessionId}`, 'main');
   };
 
-  const manager = new PtyManager(mainWindow, sessionId, onSessionReady, onProcessExit);
+  const manager = new PtyManager(mainWindow, sessionId, onSessionReady, onProcessExit, settingsManager);
   ptyManagers.set(sessionId, manager);
   return manager;
 }
@@ -309,7 +309,7 @@ async function detectClaudeAuthorization(accountEmail: string): Promise<{ succes
     
     // 如果没有使用已有会话，创建临时PTY管理器并启动
     if (!useExistingSession) {
-      const detectionPtyManager = new PtyManager(BrowserWindow.getFocusedWindow()!, tempSessionId)
+      const detectionPtyManager = new PtyManager(BrowserWindow.getFocusedWindow()!, tempSessionId, undefined, undefined, settingsManager)
       logger.info(`创建新的临时PTY管理器: ${tempSessionId}`, 'main')
       
       try {

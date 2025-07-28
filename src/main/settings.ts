@@ -61,6 +61,7 @@ export interface AppSettings {
     fontSize: number
     fontFamily: string
     theme: 'dark' | 'light'
+    skipPermissions: boolean
   }
 
   // 项目过滤配置
@@ -83,7 +84,8 @@ const defaultSettings: AppSettings = {
   terminal: {
     fontSize: 14,
     fontFamily: 'Monaco, Consolas, monospace',
-    theme: 'dark'
+    theme: 'dark',
+    skipPermissions: true
   },
   projectFilter: {
     hiddenDirectories: [
@@ -408,6 +410,29 @@ export class SettingsManager extends EventEmitter {
         }
         return directoryName === pattern
       })
+  }
+
+  // 获取终端配置
+  getTerminalConfig() {
+    return this.store.get('terminal', defaultSettings.terminal)
+  }
+
+  // 更新终端配置
+  updateTerminalConfig(config: Partial<AppSettings['terminal']>): void {
+    const current = this.store.get('terminal', defaultSettings.terminal)
+    const updated = { ...current, ...config }
+    this.store.set('terminal', updated)
+    this.emit('terminal:config-updated', updated)
+  }
+
+  // 获取是否跳过权限检查
+  getSkipPermissions(): boolean {
+    return this.store.get('terminal.skipPermissions', defaultSettings.terminal.skipPermissions)
+  }
+
+  // 设置是否跳过权限检查
+  setSkipPermissions(skipPermissions: boolean): void {
+    this.updateTerminalConfig({ skipPermissions })
   }
 
   // 读取Claude配置文件

@@ -63,6 +63,7 @@ const Settings: React.FC<SettingsProps> = ({
   })
   const [serviceProviders, setServiceProviders] = useState<ServiceProvider[]>([])
   const [detectingAuth, setDetectingAuth] = useState<Record<string, boolean>>({})
+  const [skipPermissions, setSkipPermissions] = useState<boolean>(true)
   const [activeTab, setActiveTab] = useState<'general' | 'accounts' | 'providers' | 'proxy' | 'language'>('general')
 
   useEffect(() => {
@@ -82,6 +83,9 @@ const Settings: React.FC<SettingsProps> = ({
       // Load service providers
       const providers = await window.api.getServiceProviders()
       setServiceProviders(providers || [])
+      
+      // Load terminal settings
+      setSkipPermissions(settings?.terminal?.skipPermissions ?? true)
       
       // Convert third-party service providers to AI providers for the UI
       // Only load providers that were created from AI provider settings (have third_party_ prefix)
@@ -118,7 +122,7 @@ const Settings: React.FC<SettingsProps> = ({
 
   const saveSettings = async () => {
     try {
-      // Save proxy settings
+      // Save proxy settings and terminal settings
       const settingsToSave = {
         proxyConfig: {
           enabled: proxySettings.enabled,
@@ -127,6 +131,9 @@ const Settings: React.FC<SettingsProps> = ({
             username: proxySettings.username || '',
             password: proxySettings.password || ''
           } : undefined
+        },
+        terminal: {
+          skipPermissions: skipPermissions
         }
       }
       await window.api.updateSettings(settingsToSave)
@@ -364,6 +371,37 @@ const Settings: React.FC<SettingsProps> = ({
                       </code>
                     </>
                   )}
+                </div>
+                
+                <div>
+                  <h3 className="text-lg font-medium mb-3">{t('settings.terminalSettings')}</h3>
+                  <div className="space-y-4">
+                    <div className="flex items-start space-x-3">
+                      <input
+                        type="checkbox"
+                        id="skip-permissions"
+                        checked={skipPermissions}
+                        onChange={(e) => setSkipPermissions(e.target.checked)}
+                        className="mt-1"
+                      />
+                      <div className="flex-1">
+                        <label htmlFor="skip-permissions" className="text-sm font-medium cursor-pointer">
+                          {t('settings.skipPermissions')}
+                        </label>
+                        <p className="text-xs text-gray-400 mt-1">
+                          {t('settings.skipPermissionsDesc')}
+                        </p>
+                        <div className="mt-2 p-3 bg-yellow-900/30 border border-yellow-700/50 rounded text-sm">
+                          <p className="text-yellow-300 font-medium">
+                            {t('settings.skipPermissionsWarning')}
+                          </p>
+                          <p className="text-yellow-200 mt-1">
+                            {t('settings.skipPermissionsWarningDesc')}
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
                 </div>
                 
                 <div>
