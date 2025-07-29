@@ -4,6 +4,12 @@
 
 CC Copilot 是一个专业的 Claude Code 桌面图形界面应用，核心特点是**多项目/多会话管理**和**多账号/多渠道快速切换**。无需退出 Claude 命令就能瞬间切换不同的账号、API 渠道或项目环境，让您的 AI 开发工作流更加高效流畅。
 
+## 软件截图
+![CC Copilot 软件截图](./resources/软件截图2.png)
+
+## 软件下载
+ - 请访问官网下载最新版本：[CC Copilot 官网 https://cc-copilot.com](https://cc-copilot.com)
+
 ## 核心优势
 
 ### 🚀 多账号/多渠道热切换
