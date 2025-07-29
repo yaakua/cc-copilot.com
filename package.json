@@ -15,9 +15,9 @@
   },
   "license": "MIT",
   "build": {
-     "appId": "com.yourcompany.yourapp",
-    "productName": "Your App",
-    "afterSign": "scripts/notarize.js",
+    "appId": "com.cc-copilot.cc-copilot",
+    "productName": "CC Copilot",
+    "afterSign": "./scripts/notarize.js",
     "directories": {
       "buildResources": "resources"
     },
@@ -34,7 +34,7 @@
     "mac": {
       "icon": "resources/cc-copilot-icon512.png",
       "category": "public.app-category.developer-tools",
-      "identity": "Developer ID Application: Oliver O (4MQ3AWP5NR)"
+      "identity": "Oliver O (4MQ3AWP5NR)"
     },
     "win": {
       "icon": "resources/cc-copilot-icon512.png"
