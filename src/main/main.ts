@@ -20,6 +20,10 @@ let settingsManager: SettingsManager
 const ptyManagers = new Map<string, PtyManager>()
 let currentActiveSessionId: string | null = null
 
+// Session creation queue to prevent concurrent creation conflicts
+const sessionCreationQueue = new Map<string, Promise<Session | null>>()
+const projectCreationLocks = new Set<string>()
+
 // IPC handlers setup flag
 let ipcHandlersSetup = false
 
@@ -142,6 +146,146 @@ function createWindow(): void {
   if (!ipcHandlersSetup) {
     setupIpcHandlers(mainWindow)
     ipcHandlersSetup = true
+  }
+}
+
+// Check for authentication before creating session
+async function checkAuthenticationForSession(): Promise<{ isAuthenticated: boolean, error?: string, loginInstructions?: string }> {
+  try {
+    // Check if Claude CLI is available
+    const pathResult = claudePathManager.getCachedResult()
+    if (!pathResult || !pathResult.isFound) {
+      return {
+        isAuthenticated: false,
+        error: 'Claude CLI 未安装或未找到',
+        loginInstructions: `请先安装 Claude CLI：
+1. npm install -g @anthropic-ai/claude-code
+2. 安装完成后重新检测`
+      }
+    }
+
+    // Check if user has configured any accounts
+    const activeResult = settingsManager.getCurrentActiveAccount()
+    if (!activeResult) {
+      return {
+        isAuthenticated: false,
+        error: '未配置可用的账号',
+        loginInstructions: `请配置 Claude 账号：
+
+方式一：Claude 官方账号
+1. 在终端运行: claude login
+2. 按提示完成登录验证
+3. 登录成功后重新创建会话
+
+方式二：配置第三方 API 提供商
+1. 点击设置按钮
+2. 在账号管理中添加第三方服务提供商
+3. 配置 API Key 和服务地址`
+      }
+    }
+
+    // If we have a third-party account, authentication check is passed
+    if (activeResult.accountType === 'third-party') {
+      return { isAuthenticated: true }
+    }
+
+    // For Claude official accounts, we need to run a quick detection to verify login status
+    const result = await claudePathManager.detectClaudePath()
+    if (!result.isFound) {
+      return {
+        isAuthenticated: false,
+        error: result.error || 'Claude CLI 验证失败',
+        loginInstructions: `Claude CLI 验证失败，请尝试：
+1. 在终端运行: claude login
+2. 按提示完成登录验证
+3. 登录成功后重新创建会话
+
+如果仍有问题，请检查网络连接或：
+1. 点击设置按钮
+2. 切换到第三方服务提供商
+3. 配置 API Key 和服务地址
+4. 保存配置后重新创建会话`
+      }
+    }
+
+    return { isAuthenticated: true }
+  } catch (error) {
+    logger.error('检查认证状态失败', 'main', error as Error)
+    return {
+      isAuthenticated: false,
+      error: `检查认证状态失败: ${(error as Error).message}`,
+      loginInstructions: '请检查 Claude CLI 安装状态和账号配置'
+    }
+  }
+}
+
+async function createSessionInternal(projectId: string, mainWindow: BrowserWindow): Promise<Session | null> {
+  const project = sessionManager.getProjectById(projectId);
+  if (!project) {
+    logger.error(`创建会话失败: 未找到项目 ${projectId}`, 'main');
+    return null;
+  }
+
+  // Check authentication before creating session
+  const authCheck = await checkAuthenticationForSession()
+  if (!authCheck.isAuthenticated) {
+    logger.warn(`创建会话失败: ${authCheck.error}`, 'main')
+    
+    // Send authentication error to renderer
+    safelySendToRenderer(mainWindow, 'session:auth-required', {
+      error: authCheck.error,
+      loginInstructions: authCheck.loginInstructions
+    })
+    
+    return { error: authCheck.error, loginInstructions: authCheck.loginInstructions } as any
+  }
+
+  // Add a small delay to prevent race conditions when creating multiple sessions quickly
+  if (projectCreationLocks.has(projectId)) {
+    logger.info(`项目 ${projectId} 正在创建会话，等待300ms`, 'main');
+    await new Promise(resolve => setTimeout(resolve, 300));
+  }
+  
+  projectCreationLocks.add(projectId);
+  
+  try {
+    logger.info(`为项目 ${project.name} 创建新会话，工作目录: ${project.path}`, 'main');
+    
+    // Create a temporary session for UI display
+    const newSession: Session = {
+      id: `sess-${Date.now()}`,
+      name: 'New Session',
+      projectId: projectId,
+      createdAt: new Date().toISOString(),
+      lastActiveAt: new Date().toISOString(),
+      isTemporary: true, // Will be updated when Claude CLI creates the real session
+      isLoading: true, // Will be cleared when Claude CLI creates the real session
+    };
+    sessionManager.addSession(newSession);
+
+    // Immediately start Claude CLI for this session
+    currentActiveSessionId = newSession.id;
+    const ptyManager = getOrCreatePtyManager(newSession.id, mainWindow);
+    
+    try {
+      await ptyManager.start({
+        workingDirectory: project.path,
+        args: [], // No resume args since this is a new session
+      });
+      
+      logger.info(`Claude CLI已启动，会话: ${newSession.id}，工作目录: ${project.path}`, 'main');
+    } catch (error) {
+      logger.error(`启动Claude CLI失败，会话: ${newSession.id}`, 'main', error as Error);
+      // Still send the session to UI even if Claude CLI failed to start
+    }
+
+    safelySendToRenderer(mainWindow, 'session:created', newSession);
+    return newSession;
+  } finally {
+    // Remove project lock after a delay to prevent rapid successive requests
+    setTimeout(() => {
+      projectCreationLocks.delete(projectId);
+    }, 500);
   }
 }
 
@@ -641,142 +785,27 @@ function setupIpcHandlers(mainWindow: BrowserWindow): void {
     }
   });
 
-  // Check for authentication before creating session
-  async function checkAuthenticationForSession(): Promise<{ isAuthenticated: boolean, error?: string, loginInstructions?: string }> {
-    try {
-      // Check if Claude CLI is available
-      const pathResult = claudePathManager.getCachedResult()
-      if (!pathResult || !pathResult.isFound) {
-        return {
-          isAuthenticated: false,
-          error: 'Claude CLI 未安装或未找到',
-          loginInstructions: `请先安装 Claude CLI：
-1. npm install -g @anthropic-ai/claude-code
-2. 安装完成后重新检测`
-        }
-      }
-
-      // Check if user has configured any accounts
-      const activeResult = settingsManager.getCurrentActiveAccount()
-      if (!activeResult) {
-        return {
-          isAuthenticated: false,
-          error: '未配置可用的账号',
-          loginInstructions: `请配置 Claude 账号：
-
-方式一：Claude 官方账号
-1. 在终端运行: claude login
-2. 按提示完成登录验证
-3. 登录成功后重新创建会话
-
-方式二：配置第三方 API 提供商
-1. 点击设置按钮
-2. 在账号管理中添加第三方服务提供商
-3. 配置 API Key 和服务地址`
-        }
-      }
-
-      // If it's a Claude official account, check if it has authorization
-      if (activeResult.provider.type === 'claude_official') {
-        const claudeAccount = activeResult.account as ClaudeAccount
-        if (!claudeAccount.authorization) {
-          return {
-            isAuthenticated: false,
-            error: `Claude 账号 ${claudeAccount.emailAddress} 未完成授权`,
-            loginInstructions: `请重新登录 Claude 账号：
-
-1. 在终端运行: claude login
-2. 根据提示打开浏览器或者粘贴api key
-3. 按提示完成登录验证
-4. 登录成功后重新创建会话
-
-或者点击设置中的"检测授权"按钮自动获取授权信息`
-          }
-        }
-      }
-
-      // If it's a third party account, check if it has valid API key
-      if (activeResult.provider.type === 'third_party') {
-        const thirdPartyAccount = activeResult.account as ThirdPartyAccount
-        if (!thirdPartyAccount.apiKey || !thirdPartyAccount.baseUrl) {
-          return {
-            isAuthenticated: false,
-            error: `第三方账号 ${thirdPartyAccount.name} 配置不完整`,
-            loginInstructions: `请完善第三方账号配置：
-
-1. 点击右上角设置按钮
-2. 在账号管理中编辑 ${thirdPartyAccount.name}
-3. 确保 API Key 和服务地址已正确配置
-4. 保存配置后重新创建会话`
-          }
-        }
-      }
-
-      return { isAuthenticated: true }
-    } catch (error) {
-      logger.error('检查认证状态失败', 'main', error as Error)
-      return {
-        isAuthenticated: false,
-        error: `检查认证状态失败: ${(error as Error).message}`,
-        loginInstructions: '请检查 Claude CLI 安装状态和账号配置'
-      }
-    }
-  }
 
   // Session management
   ipcMain.handle('session:create', async (_, projectId: string) => {
-    const project = sessionManager.getProjectById(projectId);
-    if (!project) {
-      logger.error(`创建会话失败: 未找到项目 ${projectId}`, 'main');
-      return null;
+    // Check if there's already a session creation in progress for this project
+    const queueKey = `create-${projectId}`;
+    if (sessionCreationQueue.has(queueKey)) {
+      logger.info(`会话创建已在队列中，等待完成: ${projectId}`, 'main');
+      return await sessionCreationQueue.get(queueKey);
     }
 
-    // Check authentication before creating session
-    const authCheck = await checkAuthenticationForSession()
-    if (!authCheck.isAuthenticated) {
-      logger.warn(`创建会话失败: ${authCheck.error}`, 'main')
-      
-      // Send authentication error to renderer
-      safelySendToRenderer(mainWindow, 'session:auth-required', {
-        error: authCheck.error,
-        loginInstructions: authCheck.loginInstructions
-      })
-      
-      return { error: authCheck.error, loginInstructions: authCheck.loginInstructions }
-    }
-
-    logger.info(`为项目 ${project.name} 创建新会话，工作目录: ${project.path}`, 'main');
-    
-    // Create a temporary session for UI display
-    const newSession: Session = {
-      id: `sess-${Date.now()}`,
-      name: 'New Session',
-      projectId: projectId,
-      createdAt: new Date().toISOString(),
-      lastActiveAt: new Date().toISOString(),
-      isTemporary: true, // Will be updated when Claude CLI creates the real session
-      isLoading: true, // Will be cleared when Claude CLI creates the real session
-    };
-    sessionManager.addSession(newSession);
-
-    // Immediately start Claude CLI for this session
-    currentActiveSessionId = newSession.id;
-    const ptyManager = getOrCreatePtyManager(newSession.id, mainWindow);
+    // Add to queue
+    const creationPromise = createSessionInternal(projectId, mainWindow);
+    sessionCreationQueue.set(queueKey, creationPromise);
     
     try {
-      await ptyManager.start({
-        workingDirectory: project.path,
-        args: [], // No resume args since this is a new session
-      });
-      
-      logger.info(`Claude CLI已启动，会话: ${newSession.id}，工作目录: ${project.path}`, 'main');
-    } catch (error) {
-      logger.error(`启动Claude CLI失败，会话: ${newSession.id}`, 'main', error as Error);
-      // Still send the session to UI even if Claude CLI failed to start
+      const result = await creationPromise;
+      return result;
+    } finally {
+      // Remove from queue when done
+      sessionCreationQueue.delete(queueKey);
     }
-
-    safelySendToRenderer(mainWindow, 'session:created', newSession);
-    return newSession;
   });
 
   ipcMain.handle('session:activate', async (_, sessionId: string) => {
@@ -1269,6 +1298,10 @@ app.on('window-all-closed', async () => {
     }
   }
   ptyManagers.clear()
+  
+  // Clear session creation queue
+  sessionCreationQueue.clear()
+  projectCreationLocks.clear()
   
   logger.info('清理完成', 'main')
   

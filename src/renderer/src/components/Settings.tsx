@@ -312,7 +312,7 @@ const Settings: React.FC<SettingsProps> = ({
           </div>
 
           {/* Tab Content */}
-          <div className="flex-1 p-6 overflow-auto">
+          <div className="flex-1 p-6 overflow-auto min-h-[500px]">
             {activeTab === 'general' && (
               <div className="space-y-6">
                 <div>

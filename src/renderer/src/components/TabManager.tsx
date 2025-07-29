@@ -84,7 +84,7 @@ const TabManager: React.FC<TabManagerProps> = ({
               <div
                 key={tab.sessionId}
                 onClick={() => handleTabClick(tab.sessionId)}
-                className={`flex items-center gap-2 px-4 py-2.5 border-b-2 cursor-pointer transition-colors ${
+                className={`group flex items-center gap-2 px-4 py-2.5 border-b-2 cursor-pointer transition-colors ${
                   tab.isActive ? 'tab-item-active' : ''
                 }`}
                 style={{
@@ -108,7 +108,7 @@ const TabManager: React.FC<TabManagerProps> = ({
                 </span>
                 <button
                   onClick={(e) => handleCloseTab(e, tab.sessionId)}
-                  className="ml-1 opacity-0 hover:opacity-100 transition-opacity"
+                  className="ml-1 opacity-0 group-hover:opacity-100 transition-opacity"
                   style={{ color: 'var(--text-tertiary)' }}
                   onMouseEnter={(e) => e.currentTarget.style.color = 'var(--text-primary)'}
                   onMouseLeave={(e) => e.currentTarget.style.color = 'var(--text-tertiary)'}
@@ -124,7 +124,7 @@ const TabManager: React.FC<TabManagerProps> = ({
         </div>
         
         {/* Terminal Content */}
-        <div className="flex-grow p-4 terminal-font overflow-y-auto" style={{ backgroundColor: 'var(--bg-primary)', color: 'var(--text-secondary)' }}>
+        <div className="flex-grow terminal-font overflow-y-auto" style={{ backgroundColor: 'var(--bg-primary)', color: 'var(--text-secondary)' }}>
           {tabs.map((tab) => (
             <div
               key={tab.sessionId}

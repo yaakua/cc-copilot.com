@@ -183,7 +183,7 @@ export class PtyManager {
         }
       }
       
-      // 设置会话就绪检测超时（15秒）
+      // 设置会话就绪检测超时（8秒）
       this.startTime = Date.now()
       this.setupSessionReadyTimeout()
       
@@ -667,7 +667,7 @@ export class PtyManager {
    * 设置会话就绪检测超时
    */
   private setupSessionReadyTimeout(): void {
-    // 15秒超时
+    // 8秒超时（减少等待时间）
     this.sessionReadyTimeout = setTimeout(() => {
       if (!this.hasDetectedClaudePrompt && this.onSessionReady) {
         const elapsed = Date.now() - this.startTime
@@ -687,7 +687,7 @@ export class PtyManager {
         this.hasDetectedClaudePrompt = true
         this.onSessionReady(fallbackSessionId)
       }
-    }, 15000)
+    }, 8000)
   }
 
   /**
