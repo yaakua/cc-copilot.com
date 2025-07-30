@@ -110,7 +110,7 @@ export class Logger {
         meta: entry.meta
       }) + '\n'
 
-      fs.appendFileSync(this.currentLogFile, logLine)
+      fs.appendFileSync(this.currentLogFile, logLine, 'utf8')
     } catch (error) {
       console.error('写入日志文件失败:', error)
     }
@@ -275,7 +275,7 @@ export class Logger {
   // Get recent log entries for debugging
   public getRecentLogs(lines: number = 100): string[] {
     try {
-      const content = fs.readFileSync(this.currentLogFile, 'utf-8')
+      const content = fs.readFileSync(this.currentLogFile, 'utf8')
       const logLines = content.trim().split('\n').filter(line => line.trim())
       return logLines.slice(-lines)
     } catch (error) {

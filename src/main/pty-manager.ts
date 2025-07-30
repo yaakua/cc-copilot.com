@@ -1,4 +1,4 @@
-import * as pty from 'node-pty'
+import * as pty from '@lydell/node-pty'
 import { BrowserWindow } from 'electron'
 import * as os from 'os'
 import * as fs from 'fs'
@@ -115,6 +115,10 @@ export class PtyManager {
         PATH: userShellPath ? `${userShellPath}:${process.env.PATH || ''}` : process.env.PATH,
         // 确保 HOME 目录也被正确设置，很多 CLI 工具依赖它
         HOME: os.homedir(),
+        // 设置 UTF-8 编码环境变量
+        LANG: 'en_US.UTF-8',
+        LC_ALL: 'en_US.UTF-8',
+        LC_CTYPE: 'en_US.UTF-8',
       };
 
       // 记录关键环境变量以便调试
@@ -127,22 +131,47 @@ export class PtyManager {
 
       // 获取拦截器脚本路径（需要处理 asar 包的情况）
       const interceptorScript = await this.getInterceptorScriptPath();
+      logger.info(`拦截器脚本路径: ${interceptorScript}`, 'pty-manager');
 
       // 先获取claude命令的实际路径
       const claudeCommand = await this.getClaudeCommandPath();
+      logger.info(`Claude命令路径: ${claudeCommand}`, 'pty-manager');
 
       // 构建Claude命令参数，根据设置决定是否添加 --dangerously-skip-permissions
       const claudeArgs = [...(options.args || [])];
+      logger.info(`初始Claude参数: [${claudeArgs.join(', ')}]`, 'pty-manager');
       
       // 检查是否应该跳过权限检查
       const shouldSkipPermissions = this.settingsManager?.getSkipPermissions() ?? true;
+      logger.info(`跳过权限检查设置: ${shouldSkipPermissions}`, 'pty-manager');
+      
       if (shouldSkipPermissions && !claudeArgs.includes('--dangerously-skip-permissions')) {
         claudeArgs.unshift('--dangerously-skip-permissions');
+        logger.info('已添加 --dangerously-skip-permissions 参数', 'pty-manager');
       }
       
-      // 使用 node --require 启动 claude
-      const command = 'node';
-      const args = ['--require', interceptorScript, claudeCommand, ...claudeArgs];
+      // 检测 claudeCommand 是否为 shell 脚本
+      const isShellScript = await this.isShellScript(claudeCommand);
+      logger.info(`Claude命令是否为shell脚本: ${isShellScript}`, 'pty-manager');
+      
+      let command: string;
+      let args: string[];
+      
+      if (isShellScript) {
+        // 如果是 shell 脚本，使用 cmd.exe 执行
+        command = 'cmd.exe';
+        args = ['/c', claudeCommand, ...claudeArgs];
+        logger.info('使用cmd.exe执行shell脚本', 'pty-manager');
+      } else {
+        // 如果不是 shell 脚本，使用 node --require 执行
+        command = 'C:\\Program Files\\nodejs\\node.exe';
+        args = ['--require', interceptorScript, claudeCommand, ...claudeArgs];
+        logger.info('使用node --require执行', 'pty-manager');
+      }
+      
+      logger.info(`最终命令构建: command=${command}`, 'pty-manager');
+      logger.info(`最终参数构建: args=[${args.join(', ')}]`, 'pty-manager');
+      logger.info(`工作目录: ${workingDirectory}`, 'pty-manager');
 
       // 保存启动参数用于错误诊断
       this.lastInterceptorScript = interceptorScript;
@@ -160,7 +189,7 @@ export class PtyManager {
         cwd: workingDirectory,
         env: mergedEnv,
         encoding: 'utf8',
-        useConpty: os.platform() === 'win32' && os.release().startsWith('10')
+        handleFlowControl: true
       })
 
       logger.info(`专用 Claude PTY 进程已创建，PID: ${this.ptyProcess.pid}`, 'pty-manager')
@@ -192,6 +221,14 @@ export class PtyManager {
     } catch (error) {
       const errorMessage = (error as Error).message
       logger.error('启动专用 Claude 进程失败', 'pty-manager', error as Error)
+      
+      // 记录详细的诊断信息
+      logger.error(`诊断信息:`, 'pty-manager');
+      logger.error(`- 最后使用的拦截器脚本: ${this.lastInterceptorScript}`, 'pty-manager');
+      logger.error(`- 最后使用的Claude命令: ${this.lastClaudeCommand}`, 'pty-manager');
+      logger.error(`- 最后使用的工作目录: ${this.lastWorkingDirectory}`, 'pty-manager');
+      logger.error(`- 最后使用的参数: [${this.lastArgs.join(', ')}]`, 'pty-manager');
+      logger.error(`- 错误消息: ${errorMessage}`, 'pty-manager');
 
       let userFriendlyMessage = `\r\n\x1b[31mError: Failed to start Claude process.\x1b[0m\r\n`
       if (errorMessage.includes('ENOENT')) {
@@ -397,7 +434,7 @@ export class PtyManager {
       // Call the exit callback if provided
       if (this.onProcessExit) {
         try {
-          this.onProcessExit(this.sessionId, exitCode, signal)
+          this.onProcessExit(this.sessionId, exitCode ?? 0, signal?.toString())
         } catch (error) {
           logger.warn(`退出回调执行失败: ${(error as Error).message}`, 'pty-manager')
         }
@@ -452,11 +489,25 @@ export class PtyManager {
    * 获取Claude命令的完整路径
    */
   private async getClaudeCommandPath(): Promise<string> {
+    logger.info('开始获取Claude命令路径...', 'pty-manager')
+    
     try {
       const claudePath = await claudePathManager.getClaudePath();
+      logger.info(`从路径管理器获取到的Claude路径: ${claudePath || 'null'}`, 'pty-manager')
+      
       if (claudePath) {
-        logger.info(`使用统一路径管理器获取到Claude路径: ${claudePath}`, 'pty-manager');
-        return claudePath;
+        // 验证文件是否存在
+        const fs = await import('fs');
+        const path = await import('path');
+        
+        try {
+          await fs.promises.access(claudePath, fs.constants.F_OK);
+          logger.info(`Claude路径验证成功: ${claudePath}`, 'pty-manager');
+          return claudePath;
+        } catch (accessError) {
+          logger.error(`Claude路径验证失败: ${claudePath} - ${(accessError as Error).message}`, 'pty-manager');
+          throw new Error(`Claude CLI文件不存在: ${claudePath}`);
+        }
       } else {
         const error = 'Claude CLI command not found in PATH';
         logger.error(error, 'pty-manager');
@@ -465,6 +516,40 @@ export class PtyManager {
     } catch (error) {
       logger.error('通过路径管理器获取Claude路径失败', 'pty-manager', error as Error);
       throw error;
+    }
+  }
+
+  private async isShellScript(filePath: string): Promise<boolean> {
+    try {
+      const fs = await import('fs');
+      const content = await fs.promises.readFile(filePath, 'utf8');
+      
+      // 检查文件内容是否包含 shell 脚本的特征
+      const shellScriptIndicators = [
+        '#!/bin/bash',
+        '#!/bin/sh',
+        '#!/usr/bin/env bash',
+        '#!/usr/bin/env sh',
+        'basedir=',
+        'dirname',
+        'sed -e',
+        'case "$0"',
+        'exec "$basedir/node"'
+      ];
+      
+      const hasShellScriptContent = shellScriptIndicators.some(indicator => 
+        content.includes(indicator)
+      );
+      
+      logger.info(`文件 ${filePath} 是否为shell脚本: ${hasShellScriptContent}`, 'pty-manager');
+      if (hasShellScriptContent) {
+        logger.info(`检测到的shell脚本内容片段: ${content.substring(0, 200)}...`, 'pty-manager');
+      }
+      
+      return hasShellScriptContent;
+    } catch (error) {
+      logger.error(`检查文件是否为shell脚本时出错: ${(error as Error).message}`, 'pty-manager');
+      return false;
     }
   }
 

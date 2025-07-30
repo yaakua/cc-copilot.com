@@ -24,6 +24,8 @@
     "electronDownload": {
       "mirror": "https://npmmirror.com/mirrors/electron/"
     },
+    "buildDependenciesFromSource": false,
+    "npmRebuild": false,
     "files": [
       "dist/**/*",
       "!src",
@@ -44,16 +46,16 @@
     }
   },
   "scripts": {
-    "dev": "electron-vite dev",
+    "dev": "chcp 65001 && electron-vite dev",
     "build": "electron-vite build",
     "build:win": "npm run build && electron-builder --win",
     "build:mac": "npm run build && electron-builder --mac",
     "build:linux": "npm run build && electron-builder --linux",
     "preview": "electron-vite preview",
-    "postinstall": "electron-builder install-app-deps"
+    "postinstall": "electron-builder install-app-deps",
+    "postinstall:win": "electron-builder install-app-deps --platform=win64"
   },
   "devDependencies": {
-    "@rollup/rollup-darwin-arm64": "^4.45.1",
     "@types/express": "^5.0.3",
     "@types/react": "^18.0.0",
     "@types/react-dom": "^18.0.0",
@@ -69,6 +71,7 @@
   "dependencies": {
     "@electron-toolkit/preload": "^3.0.0",
     "@electron-toolkit/utils": "^3.0.0",
+    "@lydell/node-pty": "^1.1.0",
     "@xterm/addon-fit": "^0.10.0",
     "@xterm/xterm": "^5.5.0",
     "electron-store": "8.1.0",
@@ -78,13 +81,12 @@
     "http-proxy-middleware": "^3.0.0",
     "i18next": "^25.3.2",
     "i18next-browser-languagedetector": "^8.2.0",
-    "node-pty": "^1.0.0",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "react-i18next": "^15.6.1",
+    "rollup": "^4.46.2",
     "shell-path": "^3.0.0",
     "uuid": "^11.1.0"
   },
-
   "packageManager": "yarn@1.22.22+sha512.a6b2f7906b721bba3d67d4aff083df04dad64c399707841b7acf00f6b133b7ac24255f2652fa22ae3534329dc6180534e98d17432037ff6fd140556e2bb3137e"
 }

@@ -47,8 +47,18 @@ export class ClaudePathManager {
    * 获取Claude CLI路径，如果未检测过则先进行检测
    */
   public async getClaudePath(): Promise<string | null> {
+    logger.info('开始获取Claude CLI路径...', 'claude-path-manager')
+    
     const result = await this.detectClaudePath()
-    return result.isFound ? result.path || null : null
+    
+    if (result.isFound && result.path) {
+      logger.info(`成功获取Claude路径: ${result.path}`, 'claude-path-manager')
+      return result.path
+    } else {
+      logger.error(`获取Claude路径失败: ${result.error || '未知错误'}`, 'claude-path-manager')
+      logger.error(`检测结果详情: isFound=${result.isFound}, path=${result.path || 'null'}, version=${result.version || 'unknown'}`, 'claude-path-manager')
+      return null
+    }
   }
 
   /**
@@ -103,8 +113,11 @@ export class ClaudePathManager {
     }
 
     try {
+      logger.info('开始发现所有可用的Claude安装...', 'claude-path-manager')
       // 发现所有可用的Claude安装
       const installations = await this.discoverAllInstallations()
+      
+      logger.info(`发现Claude安装数量: ${installations.length}`, 'claude-path-manager')
       
       if (installations.length === 0) {
         result.error = '在所有已知路径中都未找到Claude CLI'
@@ -118,12 +131,14 @@ export class ClaudePathManager {
       }
 
       // 选择最佳安装
+      logger.info('开始选择最佳Claude安装...', 'claude-path-manager')
       const bestInstallation = this.selectBestInstallation(installations)
       if (bestInstallation) {
         logger.info(`选择Claude安装: path=${bestInstallation.path}, version=${bestInstallation.version || 'unknown'}, source=${bestInstallation.source}`, 'claude-path-manager')
         result.isFound = true
         result.path = bestInstallation.path
         result.version = bestInstallation.version
+        logger.info('Claude路径检测完成，找到有效安装', 'claude-path-manager')
         return result
       }
 
@@ -140,36 +155,53 @@ export class ClaudePathManager {
 
   private async discoverAllInstallations(): Promise<ClaudeInstallation[]> {
     const installations: ClaudeInstallation[] = []
+    logger.info('开始发现所有Claude安装...', 'claude-path-manager')
 
     // 1. 尝试which命令
+    logger.info('步骤1: 尝试使用which/where命令查找Claude...', 'claude-path-manager')
     const whichInstallation = await this.tryWhichCommand()
     if (whichInstallation) {
+      logger.info(`which命令找到Claude: ${whichInstallation.path}`, 'claude-path-manager')
       installations.push(whichInstallation)
+    } else {
+      logger.info('which命令未找到Claude', 'claude-path-manager')
     }
 
     // 2. 检查NVM路径
+    logger.info('步骤2: 检查NVM路径中的Claude...', 'claude-path-manager')
     const nvmInstallations = await this.findNvmInstallations()
+    logger.info(`NVM路径中找到Claude安装数量: ${nvmInstallations.length}`, 'claude-path-manager')
     installations.push(...nvmInstallations)
 
     // 3. 检查标准路径
+    logger.info('步骤3: 检查标准路径中的Claude...', 'claude-path-manager')
     const standardInstallations = await this.findStandardInstallations()
+    logger.info(`标准路径中找到Claude安装数量: ${standardInstallations.length}`, 'claude-path-manager')
     installations.push(...standardInstallations)
 
     // 4. 检查PATH中的claude命令
+    logger.info('步骤4: 检查PATH中的claude命令...', 'claude-path-manager')
     const pathInstallation = await this.checkPathCommand()
     if (pathInstallation) {
+      logger.info(`PATH中找到Claude: ${pathInstallation.path}`, 'claude-path-manager')
       installations.push(pathInstallation)
+    } else {
+      logger.info('PATH中未找到Claude', 'claude-path-manager')
     }
 
     // 去重（按路径）
     const uniquePaths = new Set<string>()
-    return installations.filter(install => {
+    const filteredInstallations = installations.filter(install => {
       if (uniquePaths.has(install.path)) {
+        logger.debug(`跳过重复的Claude安装: ${install.path}`, 'claude-path-manager')
         return false
       }
       uniquePaths.add(install.path)
       return true
     })
+
+    logger.info(`去重后Claude安装总数: ${filteredInstallations.length}`, 'claude-path-manager')
+    return filteredInstallations
   }
 
   private async tryWhichCommand(): Promise<ClaudeInstallation | null> {

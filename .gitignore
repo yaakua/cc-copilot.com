@@ -39,3 +39,5 @@ Thumbs.db
 
 # Claude specific
 .claude/
+package-lock.json
+bun.lock
