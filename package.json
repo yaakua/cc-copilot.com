@@ -1,6 +1,6 @@
 {
   "name": "cc-copilot",
-  "productName": "CC Copilot",
+  "productName": "CC-Copilot",
   "version": "1.0.0",
   "description": "A cross-platform desktop GUI wrapper for claude-code",
   "main": "dist/main/main.js",
@@ -16,7 +16,7 @@
   "license": "MIT",
   "build": {
     "appId": "com.cc-copilot.cc-copilot",
-    "productName": "CC Copilot",
+    "productName": "CC-Copilot",
     "afterSign": "./scripts/notarize.js",
     "directories": {
       "buildResources": "resources"
@@ -50,7 +50,7 @@
     "dev:win": "chcp 65001 && electron-vite dev",
     "build": "electron-vite build",
     "build:win": "npm run build && electron-builder --win",
-    "build:mac": "npm run build && electron-builder --mac",
+    "build:mac": "export ELECTRON_BUILDER_ALLOW_UNRESOLVED_DEPENDENCIES=true npm run build && electron-builder --mac",
     "build:linux": "npm run build && electron-builder --linux",
     "preview": "electron-vite preview",
     "postinstall": "electron-builder install-app-deps",
@@ -63,7 +63,6 @@
     "@types/uuid": "^9.0.8",
     "@vitejs/plugin-react": "^4.0.0",
     "autoprefixer": "^10.4.0",
-    "electron": "^30.0.0",
     "electron-builder": "^25.0.0",
     "postcss": "^8.4.0",
     "tailwindcss": "^3.3.0",
@@ -76,6 +75,7 @@
     "@lydell/node-pty": "^1.1.0",
     "@xterm/addon-fit": "^0.10.0",
     "@xterm/xterm": "^5.5.0",
+    "electron": "^30.0.0",
     "electron-store": "8.1.0",
     "electron-vite": "^4.0.0",
     "express": "^4.21.2",

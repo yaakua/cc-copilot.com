@@ -157,16 +157,35 @@ export class PtyManager {
       let command: string;
       let args: string[];
       
-      if (isShellScript) {
-        // 如果是 shell 脚本，使用 cmd.exe 执行
-        command = 'cmd.exe';
-        args = ['/c', claudeCommand, ...claudeArgs];
-        logger.info('使用cmd.exe执行shell脚本', 'pty-manager');
+      const platform = os.platform();
+      
+      if (platform === 'win32') {
+        if (isShellScript) {
+          // Windows: 如果是 shell 脚本，使用 cmd.exe 执行
+          command = 'cmd.exe';
+          args = ['/c', claudeCommand, ...claudeArgs];
+          logger.info('Windows: 使用cmd.exe执行shell脚本', 'pty-manager');
+        } else {
+          // Windows: 使用 node --require 执行
+          // 尝试从PATH中查找node.exe，而不是硬编码路径
+          const nodePath = process.env.NODE_PATH || 'node.exe';
+          command = nodePath;
+          args = ['--require', interceptorScript, claudeCommand, ...claudeArgs];
+          logger.info('Windows: 使用node --require执行', 'pty-manager');
+        }
       } else {
-        // 如果不是 shell 脚本，使用 node --require 执行
-        command = 'C:\\Program Files\\nodejs\\node.exe';
-        args = ['--require', interceptorScript, claudeCommand, ...claudeArgs];
-        logger.info('使用node --require执行', 'pty-manager');
+        // macOS/Linux: 统一使用 shell 执行
+        if (isShellScript) {
+          // 如果是 shell 脚本，直接执行
+          command = claudeCommand;
+          args = claudeArgs;
+          logger.info('Unix: 直接执行shell脚本', 'pty-manager');
+        } else {
+          // 如果不是 shell 脚本，使用 node --require 执行
+          command = 'node';
+          args = ['--require', interceptorScript, claudeCommand, ...claudeArgs];
+          logger.info('Unix: 使用node --require执行', 'pty-manager');
+        }
       }
       
       logger.info(`最终命令构建: command=${command}`, 'pty-manager');
