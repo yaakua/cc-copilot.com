@@ -1267,6 +1267,14 @@ function setupIpcHandlers(mainWindow: BrowserWindow): void {
 
 // App lifecycle
 app.whenReady().then(() => {
+  // 设置控制台编码为 UTF-8
+  console.log('process.platform', process.platform);
+  if (process.platform === 'win32') {
+    process.env.LANG = 'en_US.UTF-8';
+    process.env.LC_ALL = 'en_US.UTF-8';
+    process.env.LC_CTYPE = 'en_US.UTF-8'; 
+  }
+  
   logger.info('应用程序准备就绪，正在初始化...', 'main')
   electronApp.setAppUserModelId('com.cccopilot')
   
