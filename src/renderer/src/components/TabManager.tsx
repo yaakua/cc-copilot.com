@@ -124,11 +124,12 @@ const TabManager: React.FC<TabManagerProps> = ({
         </div>
         
         {/* Terminal Content */}
-        <div className="flex-grow terminal-font overflow-y-auto" style={{ backgroundColor: 'var(--bg-primary)', color: 'var(--text-secondary)' }}>
+        <div className="flex-1 terminal-font min-h-0" style={{ backgroundColor: 'var(--bg-primary)', color: 'var(--text-secondary)' }}>
           {tabs.map((tab) => (
             <div
               key={tab.sessionId}
               className={`h-full w-full ${tab.isActive ? 'block' : 'hidden'}`}
+              style={{ height: '100%' }}
             >
               <Terminal sessionId={tab.sessionId} isActive={tab.isActive} session={tab.session} />
             </div>

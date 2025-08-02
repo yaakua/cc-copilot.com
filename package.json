@@ -32,15 +32,15 @@
       "!.vscode"
     ],
     "mac": {
-      "icon": "resources/cc-copilot-icon512.png",
+      "icon": "resources/cc-copilot-icon1024.png",
       "category": "public.app-category.developer-tools",
       "identity": "Oliver O (4MQ3AWP5NR)"
     },
     "win": {
-      "icon": "resources/cc-copilot-icon512.png"
+      "icon": "resources/cc-copilot-icon1024.png"
     },
     "linux": {
-      "icon": "resources/cc-copilot-icon512.png"
+      "icon": "resources/cc-copilot-icon1024.png"
     }
   },
   "scripts": {

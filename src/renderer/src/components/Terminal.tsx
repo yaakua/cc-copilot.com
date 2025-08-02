@@ -87,8 +87,10 @@ const Terminal: React.FC<TerminalProps> = ({ sessionId, isActive, session }) => 
 
     terminal.open(terminalRef.current)
 
-    // Initial resize with multiple checks
-    fitAddon.fit()
+    // Initial resize with multiple checks to ensure proper sizing
+    setTimeout(() => fitAddon.fit(), 0)
+    setTimeout(() => fitAddon.fit(), 10)
+    setTimeout(() => fitAddon.fit(), 100)
 
     // Welcome message
     terminal.write(`\x1b[36mCC Copilot Terminal - ${session.name}\x1b[0m\r\n\r\n`)
@@ -117,28 +119,53 @@ const Terminal: React.FC<TerminalProps> = ({ sessionId, isActive, session }) => 
   // Effect for handling active state changes and resize
   useEffect(() => {
     const handleResize = () => {
-      if (isActive && fitAddonRef.current && xtermInstanceRef.current) {
+      if (fitAddonRef.current && xtermInstanceRef.current && terminalRef.current) {
         try {
-          fitAddonRef.current.fit()
-          const { cols, rows } = xtermInstanceRef.current
-          window.api?.resizeTerminal(cols, rows, sessionId)
+          // Ensure container has proper dimensions
+          const container = terminalRef.current
+          if (container.offsetWidth > 0 && container.offsetHeight > 0) {
+            fitAddonRef.current.fit()
+            const { cols, rows } = xtermInstanceRef.current
+            window.api?.resizeTerminal(cols, rows, sessionId)
+          }
         } catch (e) {
           logger.warn('窗口调整大小时终端调整失败', e as Error)
         }
       }
     }
 
+    // Create a ResizeObserver to watch container size changes
+    let resizeObserver: ResizeObserver | null = null
+    if (terminalRef.current) {
+      resizeObserver = new ResizeObserver(() => {
+        // Use RAF to ensure DOM has updated
+        requestAnimationFrame(handleResize)
+      })
+      resizeObserver.observe(terminalRef.current)
+    }
+
+    // Also listen for window resize events
+    window.addEventListener('resize', handleResize)
+
     if (isActive) {
       // Focus and resize when becoming active
       xtermInstanceRef.current?.focus()
-      handleResize() // Initial fit for active tab
-      window.addEventListener('resize', handleResize)
-    } else {
-      window.removeEventListener('resize', handleResize)
+      
+      // Use multiple timeouts to ensure proper sizing
+      const resizeTimeout1 = setTimeout(handleResize, 10)
+      const resizeTimeout2 = setTimeout(handleResize, 100)
+
+      return () => {
+        window.removeEventListener('resize', handleResize)
+        resizeObserver?.disconnect()
+        clearTimeout(resizeTimeout1)
+        clearTimeout(resizeTimeout2)
+      }
     }
 
     return () => {
       window.removeEventListener('resize', handleResize)
+      resizeObserver?.disconnect()
     }
   }, [isActive, sessionId])
 
@@ -162,7 +189,16 @@ const Terminal: React.FC<TerminalProps> = ({ sessionId, isActive, session }) => 
   }
 
   return (
-    <div className="h-full w-full bg-black" ref={terminalRef} />
+    <div 
+      className="h-full w-full bg-black" 
+      ref={terminalRef} 
+      style={{ 
+        height: '100%', 
+        width: '100%',
+        overflow: 'hidden',
+        position: 'relative'
+      }} 
+    />
   )
 }
 
