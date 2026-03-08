@@ -1,0 +1,216 @@
+import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
+
+export const COMMANDS = {
+  createProject: "create_project",
+  createSession: "create_session",
+  saveProviderProfile: "save_provider_profile",
+  deleteProviderProfile: "delete_provider_profile",
+  assignPaneProfile: "assign_pane_profile",
+  testProviderProfile: "test_provider_profile",
+  launchProviderLogin: "launch_provider_login",
+  openPane: "open_pane",
+  closePane: "close_pane",
+  focusPane: "focus_pane",
+  getDashboardState: "get_dashboard_state",
+  getRemoteStatus: "get_remote_status",
+  sendComposerMessage: "send_composer_message",
+  startComposerStream: "start_composer_stream",
+  cancelPaneRun: "cancel_pane_run",
+  toggleRemoteTunnel: "toggle_remote_tunnel",
+} as const;
+
+export type BackendProviderKind = "anthropic" | "openAi" | "mock";
+export type BackendConnectionState = "connected" | "degraded" | "disconnected";
+export type BackendSessionStatus = "idle" | "busy" | "error";
+
+export interface BackendRemoteState {
+  connection: BackendConnectionState;
+  frp: {
+    enabled: boolean;
+    serverAddr: string;
+    status: BackendConnectionState;
+    note: string;
+  };
+  updatedAt: number;
+}
+
+export interface BackendMessageRecord {
+  id: string;
+  sessionId: string;
+  role: "user" | "assistant" | "system";
+  content: string;
+  createdAt: number;
+}
+
+export interface BackendDashboardState {
+  projects: Array<{
+    id: string;
+    name: string;
+    path: string;
+    sessionIds: string[];
+    updatedAt: number;
+  }>;
+  sessions: Array<{
+    id: string;
+    projectId: string;
+    title: string;
+    provider: BackendProviderKind;
+    profileId?: string | null;
+    status: BackendSessionStatus;
+    updatedAt: number;
+    lastMessagePreview: string;
+  }>;
+  panes: Array<{
+    id: string;
+    sessionId: string;
+    title: string;
+    profileId?: string | null;
+    status: "open" | "closed";
+    isFocused: boolean;
+  }>;
+  providerProfiles?: Array<{
+    id: string;
+    provider: BackendProviderKind;
+    label: string;
+    authKind?: "apiKey" | "system";
+    baseUrl: string;
+    model?: string | null;
+    apiKeyPresent: boolean;
+  }>;
+  providers: Array<{
+    provider: BackendProviderKind;
+    status: BackendConnectionState;
+    note: string;
+    latencyMs: number;
+  }>;
+  messages?: BackendMessageRecord[];
+  remote: BackendRemoteState;
+  activeProjectId?: string | null;
+  activeSessionId?: string | null;
+}
+
+export interface BackendComposerStreamEvent {
+  paneId: string;
+  sessionId: string;
+  messageId: string;
+  stage: "started" | "delta" | "finished" | "failed";
+  role: "user" | "assistant" | "system";
+  chunk?: string | null;
+}
+
+export interface BackendProviderConnectionTestResult {
+  provider: BackendProviderKind;
+  ok: boolean;
+  latencyMs: number;
+  message: string;
+}
+
+export interface BackendProviderAuthLaunchResult {
+  provider: BackendProviderKind;
+  message: string;
+}
+
+export async function getDashboardState() {
+  return invoke<BackendDashboardState>(COMMANDS.getDashboardState);
+}
+
+export async function getRemoteStatus() {
+  return invoke<BackendRemoteState>(COMMANDS.getRemoteStatus);
+}
+
+export async function createProject(input: { name: string; path: string }) {
+  return invoke(COMMANDS.createProject, { input });
+}
+
+export async function createSession(input: {
+  projectId: string;
+  title: string;
+  provider: "anthropic" | "openAi";
+  profileId?: string | null;
+}) {
+  return invoke(COMMANDS.createSession, { input });
+}
+
+export async function saveProviderProfile(input: {
+  id?: string | null;
+  provider: "anthropic" | "openAi";
+  label: string;
+  authKind?: "apiKey" | "system";
+  baseUrl: string;
+  apiKey: string;
+  model?: string | null;
+}) {
+  return invoke(COMMANDS.saveProviderProfile, { input });
+}
+
+export async function deleteProviderProfile(profileId: string) {
+  return invoke(COMMANDS.deleteProviderProfile, { input: { profileId } });
+}
+
+export async function assignPaneProfile(input: {
+  paneId: string;
+  profileId?: string | null;
+}) {
+  return invoke(COMMANDS.assignPaneProfile, { input });
+}
+
+export async function testProviderProfile(input: {
+  profileId?: string | null;
+  provider: "anthropic" | "openAi";
+  label?: string | null;
+  authKind?: "apiKey" | "system";
+  baseUrl: string;
+  apiKey: string;
+  model?: string | null;
+}) {
+  return invoke<BackendProviderConnectionTestResult>(COMMANDS.testProviderProfile, { input });
+}
+
+export async function launchProviderLogin(input: {
+  provider: "anthropic" | "openAi";
+}) {
+  return invoke<BackendProviderAuthLaunchResult>(COMMANDS.launchProviderLogin, { input });
+}
+
+export async function openPane(input: {
+  sessionId: string;
+  title: string;
+  kind: "chat";
+  profileId?: string | null;
+  focus: boolean;
+}) {
+  return invoke(COMMANDS.openPane, { input });
+}
+
+export async function closePane(paneId: string) {
+  return invoke(COMMANDS.closePane, { target: { paneId } });
+}
+
+export async function focusPane(paneId: string) {
+  return invoke(COMMANDS.focusPane, { target: { paneId } });
+}
+
+export async function toggleRemoteTunnel(enabled: boolean) {
+  return invoke<BackendRemoteState>(COMMANDS.toggleRemoteTunnel, { input: { enabled } });
+}
+
+export async function sendComposerMessage(input: { paneId: string; content: string }) {
+  return invoke(COMMANDS.sendComposerMessage, { input });
+}
+
+export async function startComposerStream(input: { paneId: string; content: string }) {
+  return invoke<void>(COMMANDS.startComposerStream, { input });
+}
+
+export async function cancelPaneRun(input: { paneId: string }) {
+  return invoke<void>(COMMANDS.cancelPaneRun, { input });
+}
+
+export function onComposerStream(
+  handler: (event: BackendComposerStreamEvent) => void,
+) {
+  return listen<BackendComposerStreamEvent>("composer://stream", (event) => {
+    handler(event.payload);
+  });
+}

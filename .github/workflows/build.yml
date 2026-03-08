@@ -1,0 +1,46 @@
+name: build
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+jobs:
+  macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install frontend dependencies
+        run: npm install
+      - name: Build web app
+        run: npm run build:web
+      - name: Run Rust tests
+        run: cargo test
+        working-directory: src-tauri
+      - name: Build macOS app
+        run: npm run build:mac
+
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install frontend dependencies
+        run: npm install
+      - name: Build web app
+        run: npm run build:web
+      - name: Run Rust tests
+        run: cargo test
+        working-directory: src-tauri
+      - name: Build Windows app
+        run: npm run build:win
