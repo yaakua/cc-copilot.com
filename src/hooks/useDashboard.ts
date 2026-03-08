@@ -1,15 +1,19 @@
 import { useEffect, useMemo, useState } from "react";
+import { open } from "@tauri-apps/plugin-dialog";
 import {
   assignPaneProfile,
   closePane,
   createProject,
   createSession,
+  deleteProject,
   deleteProviderProfile,
+  deleteSession,
   focusPane,
   getDashboardState,
   getRemoteStatus,
   launchProviderLogin,
   openPane,
+  replacePaneSession,
   onComposerStream,
   saveProviderProfile,
   cancelPaneRun,
@@ -25,6 +29,7 @@ import type {
   Pane,
   ProviderProfile,
   Project,
+  SessionSummary,
 } from "../types/domain";
 
 export function useDashboard() {
@@ -166,6 +171,18 @@ export function useDashboard() {
     }
     return currentProject.sessions.find((session) => session.id === activePane.sessionId) ?? null;
   }, [activePane, currentProject]);
+  const openSessionIds = useMemo(
+    () => new Set(dashboard.workspace.panes.map((pane) => pane.sessionId)),
+    [dashboard.workspace.panes],
+  );
+  const openSessionCounts = useMemo(
+    () =>
+      dashboard.workspace.panes.reduce<Record<string, number>>((counts, pane) => {
+        counts[pane.sessionId] = (counts[pane.sessionId] ?? 0) + 1;
+        return counts;
+      }, {}),
+    [dashboard.workspace.panes],
+  );
 
   const canAddPane = dashboard.workspace.panes.length < 4;
   const canClosePane = dashboard.workspace.panes.length > 1;
@@ -199,18 +216,29 @@ export function useDashboard() {
   }
 
   async function handleCreateProject() {
-    const nextIndex = dashboard.projects.length + 1;
+    const selectedPath = await open({
+      directory: true,
+      multiple: false,
+      title: "选择工作区文件夹",
+    });
+
+    if (!selectedPath || Array.isArray(selectedPath)) {
+      return;
+    }
+
+    const name = basename(selectedPath);
+    const now = new Date().toISOString();
     const optimisticProject: Project = {
-      id: `project-${nextIndex}`,
-      name: `Workspace ${nextIndex}`,
-      path: `/Users/yangkui/workspace/project-${nextIndex}`,
+      id: `project-${Math.random().toString(36).slice(2, 8)}`,
+      name,
+      path: selectedPath,
       sessions: [],
-      lastActiveAt: new Date().toISOString(),
+      lastActiveAt: now,
     };
 
     setDashboard((current) => ({
       ...current,
-      projects: [optimisticProject, ...current.projects],
+      projects: [...current.projects, optimisticProject],
       workspace: {
         ...current.workspace,
         projectId: optimisticProject.id,
@@ -219,12 +247,76 @@ export function useDashboard() {
 
     try {
       await createProject({
-        name: optimisticProject.name,
-        path: optimisticProject.path,
+        name,
+        path: selectedPath,
       });
+      setRequestError(null);
+      await refreshFromBackend();
+    } catch (error) {
+      setRequestError(
+        error instanceof Error ? error.message : "Failed to add workspace.",
+      );
+      await refreshFromBackend();
+    }
+  }
+
+  async function handleDeleteProject(projectId: string) {
+    // Optimistic UI update
+    setDashboard((current) => {
+      const projects = current.projects.filter((p) => p.id !== projectId);
+      const workspace = { ...current.workspace };
+      if (workspace.projectId === projectId) {
+        workspace.projectId = projects.length > 0 ? projects[0].id : null;
+      }
+      return { ...current, projects, workspace };
+    });
+
+    try {
+      await deleteProject({ projectId });
       await refreshFromBackend();
     } catch {
-      // Keep optimistic state in local preview mode.
+      // Revert optimism if failed or local preview
+      await refreshFromBackend();
+    }
+  }
+
+  async function handleDeleteSession(projectId: string, sessionId: string) {
+    setDashboard((current) => {
+      const projects = current.projects.map((project) =>
+        project.id === projectId
+          ? {
+            ...project,
+            sessions: project.sessions.filter((session) => session.id !== sessionId),
+          }
+          : project,
+      );
+      const nextPanes = current.workspace.panes.filter((pane) => pane.sessionId !== sessionId);
+      const nextActivePaneId =
+        current.workspace.activePaneId &&
+        nextPanes.some((pane) => pane.id === current.workspace.activePaneId)
+          ? current.workspace.activePaneId
+          : nextPanes[0]?.id ?? null;
+
+      return {
+        ...current,
+        projects,
+        workspace: {
+          ...current.workspace,
+          panes: nextPanes,
+          activePaneId: nextActivePaneId,
+          selectedPaneIds: current.workspace.selectedPaneIds.filter((paneId) =>
+            nextPanes.some((pane) => pane.id === paneId),
+          ),
+          layout: deriveLayout(nextPanes.length),
+        },
+      };
+    });
+
+    try {
+      await deleteSession({ projectId, sessionId });
+      await refreshFromBackend();
+    } catch {
+      await refreshFromBackend();
     }
   }
 
@@ -246,120 +338,171 @@ export function useDashboard() {
       (dashboard.projects.find((project) => project.id === projectId)?.sessions.length ?? 0) + 1;
     const sessionId = `session-${Math.random().toString(36).slice(2, 8)}`;
 
-    setDashboard((current) => ({
-      ...current,
-      projects: current.projects.map((project) =>
+    const optimisticSession: SessionSummary = {
+      id: sessionId,
+      title: `New session ${nextIndex}`,
+      provider: options.provider,
+      profileId: options.profileId,
+      providerSessionId: null,
+      lastActiveAt: now,
+      status: "idle",
+      imported: false,
+      unreadCount: 0,
+    };
+
+    setDashboard((current) => {
+      const activePaneId = current.workspace.activePaneId;
+      const hasActivePane = Boolean(activePaneId);
+      const projects = current.projects.map((project) =>
         project.id === projectId
           ? {
-              ...project,
-              lastActiveAt: now,
-              sessions: [
-                {
-                  id: sessionId,
-                  title: `New session ${project.sessions.length + 1}`,
-                  provider: options.provider,
-                  profileId: options.profileId,
-                  lastActiveAt: now,
-                  status: "idle",
-                  imported: false,
-                  unreadCount: 0,
-                },
-                ...project.sessions,
-              ],
-            }
+            ...project,
+            lastActiveAt: now,
+            sessions: [optimisticSession, ...project.sessions],
+          }
           : project,
-      ),
-      workspace: {
-        ...current.workspace,
-        projectId,
-      },
-    }));
+      );
+
+      if (!hasActivePane) {
+        const nextPane = createPaneFromSession(optimisticSession);
+        return {
+          ...current,
+          projects,
+          workspace: {
+            ...current.workspace,
+            projectId,
+            panes: [nextPane],
+            activePaneId: nextPane.id,
+            selectedPaneIds: [nextPane.id],
+            layout: deriveLayout(1),
+          },
+        };
+      }
+
+      return {
+        ...current,
+        projects,
+        workspace: {
+          ...current.workspace,
+          projectId,
+          panes: current.workspace.panes.map((pane) =>
+            pane.id === activePaneId ? createPaneFromSession(optimisticSession, pane.id) : pane,
+          ),
+          selectedPaneIds: activePaneId ? [activePaneId] : [],
+        },
+      };
+    });
 
     try {
-      await createSession({
+      const createdSession = await createSession({
         projectId,
         title: `New session ${nextIndex}`,
         provider: options.provider === "codex" ? "openAi" : "anthropic",
         profileId: options.profileId,
       });
+      const activePaneId = dashboard.workspace.activePaneId;
+      if (activePaneId) {
+        await replacePaneSession({
+          paneId: activePaneId,
+          sessionId: createdSession.id,
+          title: createdSession.title,
+          profileId: createdSession.profileId ?? options.profileId,
+          focus: true,
+        });
+      } else {
+        await openPane({
+          sessionId: createdSession.id,
+          title: createdSession.title,
+          kind: "chat",
+          profileId: createdSession.profileId ?? options.profileId,
+          focus: true,
+        });
+      }
       await refreshFromBackend();
     } catch {
       // Keep optimistic preview.
     }
   }
 
-  async function handleOpenSession(projectId: string, sessionId: string) {
-    const sessionTitle =
-      dashboard.projects
-        .find((project) => project.id === projectId)
-        ?.sessions.find((session) => session.id === sessionId)?.title ?? "Workspace session";
+  async function handleOpenSession(
+    projectId: string,
+    sessionId: string,
+    mode: "replace" | "split" = "replace",
+  ) {
+    const project =
+      dashboard.projects.find((candidate) => candidate.id === projectId) ?? null;
+    const session =
+      project?.sessions.find((candidate) => candidate.id === sessionId) ?? null;
+    if (!project || !session) {
+      return;
+    }
 
-    setDashboard((current) => {
-      const project = current.projects.find((item) => item.id === projectId);
-      const session = project?.sessions.find((item) => item.id === sessionId);
+    const existingPane = dashboard.workspace.panes.find((pane) => pane.sessionId === sessionId);
+    if (existingPane && mode === "replace") {
+      await handleFocusPane(existingPane.id, projectId);
+      return;
+    }
 
-      if (!session) {
-        return current;
-      }
+    if (mode === "split") {
+      await handleAddPaneWithOptions({
+        projectId,
+        sessionId,
+        profileId: session.profileId,
+      });
+      return;
+    }
 
-      const existingPane = current.workspace.panes.find((pane) => pane.sessionId === sessionId);
-      if (existingPane) {
+    const targetPaneId = dashboard.workspace.activePaneId;
+    if (!targetPaneId) {
+      setDashboard((current) => {
+        const nextPane = createPaneFromSession(session);
         return {
           ...current,
           workspace: {
             ...current.workspace,
-            activePaneId: existingPane.id,
-            selectedPaneIds: [existingPane.id],
+            projectId,
+            panes: [nextPane],
+            activePaneId: nextPane.id,
+            selectedPaneIds: [nextPane.id],
+            layout: deriveLayout(1),
           },
         };
+      });
+
+      try {
+        await openPane({
+          sessionId,
+          title: session.title,
+          kind: "chat",
+          profileId: session.profileId,
+          focus: true,
+        });
+        await refreshFromBackend();
+      } catch {
+        // Local preview mode fallback.
       }
+      return;
+    }
 
-      if (current.workspace.panes.length >= 4) {
-        return current;
-      }
-
-      const nextPane: Pane = {
-        id: `pane-${Math.random().toString(36).slice(2, 8)}`,
-        sessionId,
-        title: session.title,
-        provider: session.provider,
-        profileId: session.profileId,
-        status: session.status,
-        selected: false,
-        messages: [
-          {
-            id: `message-${Math.random().toString(36).slice(2, 8)}`,
-            kind: "session_meta",
-            role: "system",
-            body: `Workspace attached to ${session.title}.`,
-            createdAt: new Date().toISOString(),
-          },
-        ],
-      };
-
-      const nextPanes = [...current.workspace.panes, nextPane];
-      return {
-        ...current,
-        workspace: {
-          ...current.workspace,
-          projectId,
-          panes: nextPanes,
-          activePaneId: nextPane.id,
-          selectedPaneIds: [nextPane.id],
-          layout: deriveLayout(nextPanes.length),
-        },
-      };
-    });
+    setDashboard((current) => ({
+      ...current,
+      workspace: {
+        ...current.workspace,
+        projectId,
+        panes: current.workspace.panes.map((pane) =>
+          pane.id === targetPaneId ? createPaneFromSession(session, targetPaneId) : pane,
+        ),
+        activePaneId: targetPaneId,
+        selectedPaneIds: [targetPaneId],
+      },
+    }));
 
     try {
-      await openPane({
+      await replacePaneSession({
+        paneId: targetPaneId,
         sessionId,
-        title: sessionTitle,
-        kind: "chat",
-        profileId:
-          dashboard.projects
-            .find((project) => project.id === projectId)
-            ?.sessions.find((session) => session.id === sessionId)?.profileId ?? null,
+        title: session.title,
+        profileId: session.profileId,
         focus: true,
       });
       await refreshFromBackend();
@@ -381,16 +524,20 @@ export function useDashboard() {
     }
 
     return handleAddPaneWithOptions({
+      projectId: project.id,
       sessionId: sourceSession.id,
       profileId: activePane?.profileId ?? sourceSession.profileId,
     });
   }
 
   async function handleAddPaneWithOptions(options: {
+    projectId?: string;
     sessionId: string;
     profileId: string | null;
   }) {
-    const project = currentProject;
+    const project = options.projectId
+      ? dashboard.projects.find((candidate) => candidate.id === options.projectId) ?? null
+      : currentProject;
     if (!project || dashboard.workspace.panes.length >= 4) {
       return;
     }
@@ -412,6 +559,7 @@ export function useDashboard() {
         title: nextTitle,
         provider: sourceSession.provider,
         profileId: options.profileId,
+        providerSessionId: sourceSession.providerSessionId,
         status: sourceSession.status,
         selected: false,
         messages:
@@ -423,6 +571,7 @@ export function useDashboard() {
         ...current,
         workspace: {
           ...current.workspace,
+          projectId: project.id,
           panes: nextPanes,
           activePaneId: nextPane.id,
           selectedPaneIds: [nextPane.id],
@@ -475,12 +624,14 @@ export function useDashboard() {
     }
   }
 
-  async function handleFocusPane(paneId: string) {
+  async function handleFocusPane(paneId: string, projectId?: string) {
     setDashboard((current) => ({
       ...current,
       workspace: {
         ...current.workspace,
+        projectId: projectId ?? findProjectIdByPane(current.projects, current.workspace.panes, paneId),
         activePaneId: paneId,
+        selectedPaneIds: [paneId],
       },
     }));
 
@@ -637,26 +788,42 @@ export function useDashboard() {
     }
 
     const createdAt = new Date().toISOString();
+    const optimisticTitle = deriveOptimisticSessionTitle(content);
     setDashboard((current) => ({
       ...current,
+      projects: current.projects.map((project) => ({
+        ...project,
+        sessions: project.sessions.map((session) =>
+          shouldRetitleSession(session.title, session.id, targetPaneIds, current.workspace.panes)
+            ? { ...session, title: optimisticTitle }
+            : session,
+        ),
+      })),
       workspace: {
         ...current.workspace,
         panes: current.workspace.panes.map((pane) =>
           targetPaneIds.includes(pane.id)
             ? {
-                ...pane,
-                status: "running",
-                messages: [
-                  ...pane.messages,
-                  {
-                    id: `message-${Math.random().toString(36).slice(2, 8)}`,
-                    kind: "message",
-                    role: "user",
-                    body: content,
-                    createdAt,
-                  },
-                ],
-              }
+              ...pane,
+              title: renamePaneTitleOptimistically(
+                pane.title,
+                optimisticTitle,
+                pane.sessionId,
+                [pane.id],
+                current.workspace.panes,
+              ),
+              status: "running",
+              messages: [
+                ...pane.messages,
+                {
+                  id: `message-${Math.random().toString(36).slice(2, 8)}`,
+                  kind: "message",
+                  role: "user",
+                  body: content,
+                  createdAt,
+                },
+              ],
+            }
             : pane,
         ),
       },
@@ -706,12 +873,16 @@ export function useDashboard() {
     currentProject,
     activePane,
     activeSession,
+    openSessionIds,
+    openSessionCounts,
     paneProfiles,
     profiles,
     canAddPane,
     canClosePane,
     threadStats,
     handleCreateProject,
+    handleDeleteProject,
+    handleDeleteSession,
     handleCreateSession,
     handleCreateSessionWithOptions,
     handleOpenSession,
@@ -767,4 +938,96 @@ function defaultProfileForProvider(
   provider: "claude" | "codex",
 ) {
   return profiles.find((profile) => profile.provider === provider) ?? null;
+}
+
+function createPaneFromSession(session: SessionSummary, paneId?: string): Pane {
+  return {
+    id: paneId ?? `pane-${Math.random().toString(36).slice(2, 8)}`,
+    sessionId: session.id,
+    title: session.title,
+    provider: session.provider,
+    profileId: session.profileId,
+    providerSessionId: session.providerSessionId,
+    status: session.status,
+    selected: false,
+    messages: [createWorkspaceAttachedMessage(session.title)],
+  };
+}
+
+function createWorkspaceAttachedMessage(title: string): Pane["messages"][number] {
+  return {
+    id: `message-${Math.random().toString(36).slice(2, 8)}`,
+    kind: "session_meta",
+    role: "system",
+    body: `Workspace attached to ${title}.`,
+    createdAt: new Date().toISOString(),
+  };
+}
+
+function findProjectIdByPane(
+  projects: Project[],
+  panes: Pane[],
+  paneId: string,
+) {
+  const pane = panes.find((candidate) => candidate.id === paneId);
+  if (!pane) {
+    return null;
+  }
+
+  return (
+    projects.find((project) =>
+      project.sessions.some((session) => session.id === pane.sessionId),
+    )?.id ?? null
+  );
+}
+
+function basename(path: string) {
+  const normalized = path.replace(/[\\/]+$/, "");
+  const parts = normalized.split(/[/\\]/);
+  return parts[parts.length - 1] || path;
+}
+
+function shouldRetitleSession(
+  title: string,
+  sessionId: string,
+  targetPaneIds: string[],
+  panes: Pane[],
+) {
+  if (!title.trim().startsWith("New session")) {
+    return false;
+  }
+
+  return targetPaneIds.some((paneId) => {
+    const pane = panes.find((candidate) => candidate.id === paneId);
+    return pane?.sessionId === sessionId;
+  });
+}
+
+function renamePaneTitleOptimistically(
+  title: string,
+  optimisticTitle: string,
+  sessionId: string,
+  targetPaneIds: string[],
+  panes: Pane[],
+) {
+  if (!shouldRetitleSession(title, sessionId, targetPaneIds, panes)) {
+    return title;
+  }
+
+  const match = title.match(/^New session.*?( \/ Pane \d+)?$/);
+  return match?.[1] ? `${optimisticTitle}${match[1]}` : optimisticTitle;
+}
+
+function deriveOptimisticSessionTitle(content: string) {
+  const firstLine = content
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .find(Boolean) ?? "New session";
+
+  return truncateTitle(firstLine, 40);
+}
+
+function truncateTitle(value: string, maxChars: number) {
+  const chars = Array.from(value);
+  return chars.length > maxChars ? `${chars.slice(0, maxChars).join("")}…` : value;
 }

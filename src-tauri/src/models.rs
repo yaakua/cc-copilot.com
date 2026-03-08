@@ -48,6 +48,8 @@ pub struct SessionRecord {
     pub provider: ProviderKind,
     #[serde(default)]
     pub profile_id: Option<String>,
+    #[serde(default)]
+    pub provider_session_id: Option<String>,
     pub status: SessionStatus,
     pub last_message_preview: String,
     pub created_at: TimestampMs,
@@ -206,6 +208,19 @@ pub struct CreateProjectInput {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
+pub struct DeleteProjectInput {
+    pub project_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct DeleteSessionInput {
+    pub project_id: String,
+    pub session_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
 pub struct CreateSessionInput {
     pub project_id: String,
     pub title: String,
@@ -219,6 +234,16 @@ pub struct OpenPaneInput {
     pub session_id: String,
     pub title: String,
     pub kind: PaneKind,
+    pub profile_id: Option<String>,
+    pub focus: Option<bool>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ReplacePaneSessionInput {
+    pub pane_id: String,
+    pub session_id: String,
+    pub title: String,
     pub profile_id: Option<String>,
     pub focus: Option<bool>,
 }

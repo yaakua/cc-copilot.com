@@ -3,13 +3,16 @@ import { listen } from "@tauri-apps/api/event";
 
 export const COMMANDS = {
   createProject: "create_project",
+  deleteProject: "delete_project",
   createSession: "create_session",
+  deleteSession: "delete_session",
   saveProviderProfile: "save_provider_profile",
   deleteProviderProfile: "delete_provider_profile",
   assignPaneProfile: "assign_pane_profile",
   testProviderProfile: "test_provider_profile",
   launchProviderLogin: "launch_provider_login",
   openPane: "open_pane",
+  replacePaneSession: "replace_pane_session",
   closePane: "close_pane",
   focusPane: "focus_pane",
   getDashboardState: "get_dashboard_state",
@@ -57,6 +60,7 @@ export interface BackendDashboardState {
     title: string;
     provider: BackendProviderKind;
     profileId?: string | null;
+    providerSessionId?: string | null;
     status: BackendSessionStatus;
     updatedAt: number;
     lastMessagePreview: string;
@@ -88,6 +92,18 @@ export interface BackendDashboardState {
   remote: BackendRemoteState;
   activeProjectId?: string | null;
   activeSessionId?: string | null;
+}
+
+export interface BackendSessionRecord {
+  id: string;
+  projectId: string;
+  title: string;
+  provider: BackendProviderKind;
+  profileId?: string | null;
+  providerSessionId?: string | null;
+  status: BackendSessionStatus;
+  updatedAt: number;
+  lastMessagePreview: string;
 }
 
 export interface BackendComposerStreamEvent {
@@ -123,13 +139,21 @@ export async function createProject(input: { name: string; path: string }) {
   return invoke(COMMANDS.createProject, { input });
 }
 
+export async function deleteProject(input: { projectId: string }) {
+  return invoke(COMMANDS.deleteProject, { input });
+}
+
 export async function createSession(input: {
   projectId: string;
   title: string;
   provider: "anthropic" | "openAi";
   profileId?: string | null;
 }) {
-  return invoke(COMMANDS.createSession, { input });
+  return invoke<BackendSessionRecord>(COMMANDS.createSession, { input });
+}
+
+export async function deleteSession(input: { projectId: string; sessionId: string }) {
+  return invoke<BackendSessionRecord>(COMMANDS.deleteSession, { input });
 }
 
 export async function saveProviderProfile(input: {
@@ -181,6 +205,16 @@ export async function openPane(input: {
   focus: boolean;
 }) {
   return invoke(COMMANDS.openPane, { input });
+}
+
+export async function replacePaneSession(input: {
+  paneId: string;
+  sessionId: string;
+  title: string;
+  profileId?: string | null;
+  focus: boolean;
+}) {
+  return invoke(COMMANDS.replacePaneSession, { input });
 }
 
 export async function closePane(paneId: string) {

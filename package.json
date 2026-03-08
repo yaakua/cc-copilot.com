@@ -14,17 +14,27 @@
     "tauri": "tauri"
   },
   "dependencies": {
+    "@tailwindcss/typography": "^0.5.19",
+    "@tauri-apps/api": "2.9.1",
+    "@tauri-apps/plugin-dialog": "^2.6.0",
+    "@tauri-apps/plugin-opener": "2.5.1",
+    "clsx": "^2.1.1",
+    "lucide-react": "^0.577.0",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
-    "@tauri-apps/api": "2.9.1",
-    "@tauri-apps/plugin-opener": "2.5.1"
+    "react-markdown": "^10.1.0",
+    "remark-gfm": "^4.0.1",
+    "tailwind-merge": "^3.5.0"
   },
   "devDependencies": {
+    "@tauri-apps/cli": "2.9.1",
     "@types/react": "^19.1.8",
     "@types/react-dom": "^19.1.6",
     "@vitejs/plugin-react": "^4.6.0",
+    "autoprefixer": "^10.4.27",
+    "postcss": "^8.5.8",
+    "tailwindcss": "^3.4.19",
     "typescript": "~5.8.3",
-    "vite": "^7.0.4",
-    "@tauri-apps/cli": "2.9.1"
+    "vite": "^7.0.4"
   }
 }

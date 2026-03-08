@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
+import { Settings2, Key, Globe, Trash2, Plus, Play, Check } from "lucide-react";
 import type { ProviderKind, ProviderProfile, ProviderState } from "../../../types/domain";
 import { maskApiKeyState, nextProfileDefaults, providerAccent } from "../useProviderProfiles";
+import { cn } from "../../../lib/utils";
 
 interface ProfileSettingsPanelProps {
   profiles: ProviderProfile[];
@@ -90,52 +92,60 @@ export function ProfileSettingsPanel({
   }, [providers, selectedProfile]);
 
   return (
-    <section className="detail-card profile-settings-card">
-      <div className="detail-card-header">
-        <div className="detail-card-title">
-          <span>账号配置</span>
-          <strong>Pane profiles</strong>
+    <section className="p-5 rounded-2xl border bg-card text-card-foreground shadow-sm flex flex-col gap-6">
+      <div className="flex flex-col gap-4">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <Settings2 size={18} className="text-muted-foreground" />
+            <h3 className="font-semibold leading-none tracking-tight">账号配置</h3>
+          </div>
+          <span className={cn(
+            "px-2.5 py-1 text-[10px] uppercase tracking-wider font-bold rounded-full",
+            activePaneId ? "bg-green-100 text-green-700" : "bg-muted text-muted-foreground"
+          )}>
+            {activePaneId ? "已启用" : "待绑定"}
+          </span>
         </div>
-        <div className="profile-header-actions">
+
+        <div className="flex items-center gap-2 mt-1">
           <button
-            className="toolbar-button"
+            className="flex-1 py-1.5 px-3 rounded text-sm font-medium border bg-background hover:bg-muted transition-colors focus:ring-2 focus:ring-ring"
             onClick={() => onLaunchProviderLogin("claude")}
             type="button"
           >
             Connect Claude
           </button>
           <button
-            className="toolbar-button"
+            className="flex-1 py-1.5 px-3 rounded text-sm font-medium border bg-background hover:bg-muted transition-colors focus:ring-2 focus:ring-ring"
             onClick={() => onLaunchProviderLogin("codex")}
             type="button"
           >
             Connect Codex
           </button>
-          <span className="detail-badge detail-badge-ready">
-            {activePaneId ? "已启用" : "待绑定"}
-          </span>
         </div>
       </div>
 
-      <div className="profile-list">
+      {/* Profiles List */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-1 xl:grid-cols-2 gap-2">
         {profiles.map((profile) => (
           <button
-            className={
+            className={cn(
+              "flex items-center gap-3 p-3 rounded-xl border text-left transition-all focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-1",
               profile.id === selectedProfileId
-                ? "profile-pill profile-pill-active"
-                : "profile-pill"
-            }
+                ? "border-primary bg-primary/5 shadow-sm"
+                : "bg-background hover:bg-muted/50"
+            )}
             key={profile.id}
             onClick={() => setSelectedProfileId(profile.id)}
             type="button"
           >
             <span
-              className="profile-pill-dot"
+              className="w-2.5 h-2.5 rounded-full flex-shrink-0"
               style={{ backgroundColor: providerAccent(profile) }}
             />
-            <div className="profile-pill-copy">
-              <strong>{profile.label}</strong>
-              <span>
+            <div className="flex flex-col truncate">
+              <strong className="text-sm font-medium truncate">{profile.label}</strong>
+              <span className="text-[11px] text-muted-foreground truncate">
                 {profile.provider} · {maskApiKeyState(profile)}
               </span>
             </div>
@@ -143,11 +153,15 @@ export function ProfileSettingsPanel({
         ))}
       </div>
 
-      <div className="profile-editor">
-        <div className="profile-editor-grid">
-          <label className="profile-field">
-            <span>Provider</span>
+      <div className="h-px bg-border" />
+
+      {/* Profile Editor */}
+      <div className="flex flex-col gap-4">
+        <div className="grid grid-cols-2 gap-3">
+          <label className="flex flex-col gap-1.5 text-sm">
+            <span className="font-medium text-muted-foreground">Provider</span>
             <select
+              className="px-3 py-2 rounded-md border bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring"
               onChange={(event) =>
                 setDraft((current) => ({
                   ...current,
@@ -161,9 +175,10 @@ export function ProfileSettingsPanel({
             </select>
           </label>
 
-          <label className="profile-field">
-            <span>Label</span>
+          <label className="flex flex-col gap-1.5 text-sm">
+            <span className="font-medium text-muted-foreground">Label</span>
             <input
+              className="px-3 py-2 rounded-md border bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring"
               onChange={(event) =>
                 setDraft((current) => ({ ...current, label: event.currentTarget.value }))
               }
@@ -172,9 +187,10 @@ export function ProfileSettingsPanel({
             />
           </label>
 
-          <label className="profile-field">
-            <span>Auth</span>
+          <label className="flex flex-col gap-1.5 text-sm">
+            <span className="font-medium text-muted-foreground">Auth</span>
             <select
+              className="px-3 py-2 rounded-md border bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring"
               onChange={(event) =>
                 setDraft((current) => ({
                   ...current,
@@ -191,9 +207,10 @@ export function ProfileSettingsPanel({
             </select>
           </label>
 
-          <label className="profile-field">
-            <span>Model</span>
+          <label className="flex flex-col gap-1.5 text-sm">
+            <span className="font-medium text-muted-foreground">Model</span>
             <input
+              className="px-3 py-2 rounded-md border bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring"
               onChange={(event) =>
                 setDraft((current) => ({ ...current, model: event.currentTarget.value }))
               }
@@ -202,47 +219,56 @@ export function ProfileSettingsPanel({
             />
           </label>
 
-          <label className="profile-field profile-field-wide">
-            <span>Base URL</span>
-            <input
-              disabled={draft.authKind === "system"}
-              onChange={(event) =>
-                setDraft((current) => ({ ...current, baseUrl: event.currentTarget.value }))
-              }
-              placeholder={
-                draft.authKind === "system"
-                  ? "系统登录模式下不需要 Base URL"
-                  : draft.provider === "claude"
-                  ? "留空直连官方 Claude，填写则按 gateway/foundry 方式启动"
-                  : "https://api.example.com/v1"
-              }
-              value={draft.baseUrl}
-            />
+          <label className="col-span-2 flex flex-col gap-1.5 text-sm">
+            <span className="font-medium text-muted-foreground">Base URL</span>
+            <div className="relative flex items-center">
+              <Globe className="absolute left-3 text-muted-foreground/50" size={16} />
+              <input
+                className="pl-9 pr-3 py-2 w-full rounded-md border bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring disabled:opacity-50 disabled:cursor-not-allowed"
+                disabled={draft.authKind === "system"}
+                onChange={(event) =>
+                  setDraft((current) => ({ ...current, baseUrl: event.currentTarget.value }))
+                }
+                placeholder={
+                  draft.authKind === "system"
+                    ? "系统登录不需要 Base URL"
+                    : draft.provider === "claude"
+                      ? "留空直连官方 Claude，填写则按 gateway/foundry 方式启动"
+                      : "https://api.example.com/v1"
+                }
+                value={draft.baseUrl}
+              />
+            </div>
           </label>
 
-          <label className="profile-field profile-field-wide">
-            <span>API Key</span>
-            <input
-              disabled={draft.authKind === "system"}
-              onChange={(event) =>
-                setDraft((current) => ({ ...current, apiKey: event.currentTarget.value }))
-              }
-              placeholder={
-                draft.authKind === "system"
-                  ? "系统登录模式下不需要 API Key"
-                  : selectedProfile
-                    ? "留空则保留当前 Key"
-                    : "sk-..."
-              }
-              type="password"
-              value={draft.apiKey}
-            />
+          <label className="col-span-2 flex flex-col gap-1.5 text-sm">
+            <span className="font-medium text-muted-foreground">API Key</span>
+            <div className="relative flex items-center">
+              <Key className="absolute left-3 text-muted-foreground/50" size={16} />
+              <input
+                className="pl-9 pr-3 py-2 w-full rounded-md border bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring disabled:opacity-50 disabled:cursor-not-allowed"
+                disabled={draft.authKind === "system"}
+                onChange={(event) =>
+                  setDraft((current) => ({ ...current, apiKey: event.currentTarget.value }))
+                }
+                placeholder={
+                  draft.authKind === "system"
+                    ? "系统登录不需要 API Key"
+                    : selectedProfile
+                      ? "留空则保留当前 Key"
+                      : "sk-..."
+                }
+                type="password"
+                value={draft.apiKey}
+              />
+            </div>
           </label>
         </div>
 
-        <div className="profile-editor-actions">
+        {/* Actions */}
+        <div className="flex flex-wrap items-center justify-end gap-2 mt-2">
           <button
-            className="toolbar-button"
+            className="flex items-center justify-center gap-1.5 px-3 py-1.5 border rounded-md text-sm font-medium bg-background hover:bg-muted transition-colors focus:ring-2"
             onClick={() => {
               setSelectedProfileId(null);
               setDraft({
@@ -253,19 +279,21 @@ export function ProfileSettingsPanel({
             }}
             type="button"
           >
-            新建
+            <Plus size={16} /> 新建
           </button>
-          {selectedProfile ? (
+
+          {selectedProfile && (
             <button
-              className="toolbar-button"
+              className="flex items-center justify-center gap-1.5 px-3 py-1.5 border border-destructive/20 text-destructive rounded-md text-sm font-medium bg-destructive/5 hover:bg-destructive/10 transition-colors focus:ring-2"
               onClick={() => onDeleteProfile(selectedProfile.id)}
               type="button"
             >
-              删除
+              <Trash2 size={16} /> 删除
             </button>
-          ) : null}
+          )}
+
           <button
-            className="toolbar-button"
+            className="flex items-center justify-center gap-1.5 px-3 py-1.5 border rounded-md text-sm font-medium bg-secondary text-secondary-foreground hover:bg-secondary/80 transition-colors focus:ring-2"
             disabled={isTesting}
             onClick={async () => {
               setIsTesting(true);
@@ -291,10 +319,11 @@ export function ProfileSettingsPanel({
             }}
             type="button"
           >
-            {isTesting ? "测试中..." : "测试连接"}
+            <Play size={16} /> {isTesting ? "测试中..." : "测试连接"}
           </button>
+
           <button
-            className="toolbar-button toolbar-button-primary"
+            className="flex items-center justify-center gap-1.5 px-4 py-1.5 border border-primary rounded-md text-sm font-medium bg-primary text-primary-foreground hover:bg-primary/90 transition-colors shadow-sm focus:ring-2"
             onClick={() =>
               onSaveProfile({
                 id: selectedProfile?.id ?? null,
@@ -310,20 +339,19 @@ export function ProfileSettingsPanel({
             }
             type="button"
           >
-            保存配置
+            <Check size={16} /> 保存配置
           </button>
         </div>
-        {testFeedback ? (
-          <p
-            className={
-              testFeedback.ok
-                ? "profile-test-feedback profile-test-feedback-ok"
-                : "profile-test-feedback"
-            }
-          >
+
+        {/* Feedback Message */}
+        {testFeedback && (
+          <div className={cn(
+            "mt-2 p-3 text-sm rounded-lg border",
+            testFeedback.ok ? "bg-green-50 text-green-700 border-green-200" : "bg-destructive/10 text-destructive border-destructive/20"
+          )}>
             {testFeedback.message}
-          </p>
-        ) : null}
+          </div>
+        )}
       </div>
     </section>
   );

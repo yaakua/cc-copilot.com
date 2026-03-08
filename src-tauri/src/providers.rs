@@ -124,6 +124,7 @@ where
         on_delta(MessageRole::Assistant, &content);
         return MessageCompletion {
             session_id: dispatch.session_id.clone(),
+            provider_session_id: dispatch.provider_session_id.clone(),
             assistant_role: MessageRole::Assistant,
             assistant_content: content,
             session_status: SessionStatus::Idle,
@@ -140,16 +141,20 @@ where
         ProviderKind::Mock => {
             let content = mock_assistant_reply(&dispatch.user_message.content);
             on_delta(MessageRole::Assistant, &content);
-            Ok(content)
+            Ok(ProviderStreamResult {
+                content,
+                provider_session_id: dispatch.provider_session_id.clone(),
+            })
         }
     };
     let latency_ms = started_at.elapsed().as_millis().min(u32::MAX as u128) as u32;
 
     match attempt {
-        Ok(content) => MessageCompletion {
+        Ok(result) => MessageCompletion {
             session_id: dispatch.session_id.clone(),
+            provider_session_id: result.provider_session_id,
             assistant_role: MessageRole::Assistant,
-            assistant_content: content,
+            assistant_content: result.content,
             session_status: SessionStatus::Idle,
             provider_status: ConnectionState::Connected,
             provider_latency_ms: latency_ms,
@@ -157,6 +162,7 @@ where
         },
         Err(error) => MessageCompletion {
             session_id: dispatch.session_id.clone(),
+            provider_session_id: dispatch.provider_session_id.clone(),
             assistant_role: MessageRole::System,
             assistant_content: format!(
                 "{}\n\nFallback preview:\n{}",
@@ -175,20 +181,34 @@ fn run_codex_stream<F, G>(
     dispatch: &MessageDispatch,
     on_delta: &mut F,
     on_started: &mut G,
-) -> Result<String, String>
+) -> Result<ProviderStreamResult, String>
 where
     F: FnMut(MessageRole, &str),
     G: FnMut(u32),
 {
     let mut command = Command::new("codex");
-    command.current_dir(&dispatch.project_path).args([
-        "exec",
-        "--json",
-        "--skip-git-repo-check",
-        "--dangerously-bypass-approvals-and-sandbox",
-        "-C",
-        &dispatch.project_path,
-    ]);
+    command.current_dir(&dispatch.project_path);
+    if let Some(provider_session_id) = dispatch.provider_session_id.as_deref() {
+        command.args([
+            "exec",
+            "resume",
+            provider_session_id,
+            "--json",
+            "--skip-git-repo-check",
+            "--dangerously-bypass-approvals-and-sandbox",
+            "-C",
+            &dispatch.project_path,
+        ]);
+    } else {
+        command.args([
+            "exec",
+            "--json",
+            "--skip-git-repo-check",
+            "--dangerously-bypass-approvals-and-sandbox",
+            "-C",
+            &dispatch.project_path,
+        ]);
+    }
     if dispatch.api_key.is_none() {
         if let Some(model) = dispatch.model.as_deref() {
             command.args(["--model", model]);
@@ -215,10 +235,15 @@ where
 
     let stderr_handle = thread::spawn(move || read_to_string(stderr));
     let mut assistant_text = String::new();
+    let mut provider_session_id = dispatch.provider_session_id.clone();
 
     for line in BufReader::new(stdout).lines() {
         let line = line.map_err(|error| format!("failed to read codex output: {error}"))?;
-        if let Some(delta) = parse_codex_json_line(&line) {
+        let parsed = parse_codex_json_line(&line);
+        if provider_session_id.is_none() {
+            provider_session_id = parsed.provider_session_id;
+        }
+        if let Some(delta) = parsed.delta {
             assistant_text.push_str(&delta);
             on_delta(MessageRole::Assistant, &delta);
         }
@@ -232,7 +257,10 @@ where
         .map_err(|_| "failed to join codex stderr thread".to_string())?;
 
     if status.success() && !assistant_text.trim().is_empty() {
-        return Ok(assistant_text);
+        return Ok(ProviderStreamResult {
+            content: assistant_text,
+            provider_session_id,
+        });
     }
 
     Err(render_process_error(
@@ -246,14 +274,17 @@ fn run_claude_stream<F, G>(
     dispatch: &MessageDispatch,
     on_delta: &mut F,
     on_started: &mut G,
-) -> Result<String, String>
+) -> Result<ProviderStreamResult, String>
 where
     F: FnMut(MessageRole, &str),
     G: FnMut(u32),
 {
     let mut command = Command::new("claude");
-    command.current_dir(&dispatch.project_path).args([
-        "-p",
+    command.current_dir(&dispatch.project_path).arg("-p");
+    if let Some(provider_session_id) = dispatch.provider_session_id.as_deref() {
+        command.args(["--resume", provider_session_id]);
+    }
+    command.args([
         "--verbose",
         "--output-format",
         "stream-json",
@@ -284,11 +315,15 @@ where
 
     let stderr_handle = thread::spawn(move || read_to_string(stderr));
     let mut assistant_text = String::new();
+    let mut provider_session_id = dispatch.provider_session_id.clone();
     let mut claude_error: Option<String> = None;
 
     for line in BufReader::new(stdout).lines() {
         let line = line.map_err(|error| format!("failed to read claude output: {error}"))?;
         let parsed = parse_claude_json_line(&line, &assistant_text);
+        if provider_session_id.is_none() {
+            provider_session_id = parsed.provider_session_id.clone();
+        }
         if let Some(delta) = parsed.delta {
             assistant_text.push_str(&delta);
             on_delta(parsed.role.clone(), &delta);
@@ -316,7 +351,10 @@ where
     }
 
     if status.success() && !assistant_text.trim().is_empty() {
-        return Ok(assistant_text);
+        return Ok(ProviderStreamResult {
+            content: assistant_text,
+            provider_session_id,
+        });
     }
 
     Err(render_process_error(
@@ -452,7 +490,7 @@ fn run_codex_connection_test(config: &ProviderRuntimeConfig<'_>) -> Result<Strin
 
     if stdout
         .lines()
-        .filter_map(parse_codex_json_line)
+        .filter_map(|line| parse_codex_json_line(line).delta)
         .any(|line| line.trim() == "OK")
     {
         return Ok("Received expected OK confirmation from Codex CLI.".into());
@@ -504,23 +542,40 @@ fn run_claude_connection_test(config: &ProviderRuntimeConfig<'_>) -> Result<Stri
     Err("claude test did not return the expected confirmation.".into())
 }
 
-fn parse_codex_json_line(line: &str) -> Option<String> {
-    let value: Value = serde_json::from_str(line).ok()?;
-    if value.get("type")?.as_str()? != "item.completed" {
-        return None;
-    }
+fn parse_codex_json_line(line: &str) -> ProviderParsedLine {
+    let mut parsed = ProviderParsedLine::default();
+    let value: Value = match serde_json::from_str(line) {
+        Ok(value) => value,
+        Err(_) => return parsed,
+    };
+    match value.get("type").and_then(Value::as_str) {
+        Some("thread.started") => {
+            parsed.provider_session_id = value
+                .get("thread_id")
+                .and_then(Value::as_str)
+                .map(str::to_string);
+        }
+        Some("item.completed") => {
+            let item = match value.get("item") {
+                Some(item) => item,
+                None => return parsed,
+            };
+            if item.get("type").and_then(Value::as_str) != Some("agent_message") {
+                return parsed;
+            }
 
-    let item = value.get("item")?;
-    if item.get("type")?.as_str()? != "agent_message" {
-        return None;
+            let text = item
+                .get("text")
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .unwrap_or_default();
+            if !text.is_empty() {
+                parsed.delta = Some(text.to_string());
+            }
+        }
+        _ => {}
     }
-
-    let text = item.get("text")?.as_str()?.trim();
-    if text.is_empty() {
-        None
-    } else {
-        Some(text.to_string())
-    }
+    parsed
 }
 
 fn parse_claude_json_line(line: &str, previous_text: &str) -> ClaudeParsedLine {
@@ -531,6 +586,12 @@ fn parse_claude_json_line(line: &str, previous_text: &str) -> ClaudeParsedLine {
     };
 
     match value.get("type").and_then(Value::as_str) {
+        Some("system") => {
+            parsed.provider_session_id = value
+                .get("session_id")
+                .and_then(Value::as_str)
+                .map(str::to_string);
+        }
         Some("assistant") => {
             let message = match value.get("message") {
                 Some(message) => message,
@@ -538,6 +599,12 @@ fn parse_claude_json_line(line: &str, previous_text: &str) -> ClaudeParsedLine {
             };
             if let Some(error) = value.get("error").and_then(Value::as_str) {
                 parsed.error = Some(error.to_string());
+            }
+            if parsed.provider_session_id.is_none() {
+                parsed.provider_session_id = value
+                    .get("session_id")
+                    .and_then(Value::as_str)
+                    .map(str::to_string);
             }
 
             let content = message
@@ -557,6 +624,12 @@ fn parse_claude_json_line(line: &str, previous_text: &str) -> ClaudeParsedLine {
             }
         }
         Some("result") => {
+            if parsed.provider_session_id.is_none() {
+                parsed.provider_session_id = value
+                    .get("session_id")
+                    .and_then(Value::as_str)
+                    .map(str::to_string);
+            }
             let is_error = value
                 .get("is_error")
                 .and_then(Value::as_bool)
@@ -579,6 +652,17 @@ fn parse_claude_json_line(line: &str, previous_text: &str) -> ClaudeParsedLine {
     }
 
     parsed
+}
+
+#[derive(Default)]
+struct ProviderParsedLine {
+    delta: Option<String>,
+    provider_session_id: Option<String>,
+}
+
+struct ProviderStreamResult {
+    content: String,
+    provider_session_id: Option<String>,
 }
 
 fn probe_claude_health() -> ProviderHealth {
@@ -780,6 +864,7 @@ struct ClaudeParsedLine {
     role: MessageRole,
     delta: Option<String>,
     error: Option<String>,
+    provider_session_id: Option<String>,
 }
 
 impl Default for ClaudeParsedLine {
@@ -788,6 +873,7 @@ impl Default for ClaudeParsedLine {
             role: MessageRole::Assistant,
             delta: None,
             error: None,
+            provider_session_id: None,
         }
     }
 }

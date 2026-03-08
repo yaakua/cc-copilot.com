@@ -4,12 +4,12 @@ use tauri::State;
 use crate::{
     models::{
         AssignPaneProfileInput, CancelPaneRunInput, CreateProjectInput, CreateSessionInput,
-        DashboardState, DeleteProviderProfileInput, LaunchProviderLoginInput, OpenPaneInput,
-        PaneRecord, PaneTarget, ProjectRecord, ProviderAuthLaunchResult,
+        DashboardState, DeleteProviderProfileInput, DeleteSessionInput, LaunchProviderLoginInput,
+        OpenPaneInput, PaneRecord, PaneTarget, ProjectRecord, ProviderAuthLaunchResult,
         ProviderConnectionTestResult, ProviderProfileRecord, RemoteStatus,
-        SaveProviderProfileInput, SendComposerMessageInput, SendComposerMessageResult,
-        SessionRecord, SetWorkspaceLayoutInput, TestProviderProfileInput, ToggleRemoteTunnelInput,
-        WorkspaceSummary,
+        ReplacePaneSessionInput, SaveProviderProfileInput, SendComposerMessageInput,
+        SendComposerMessageResult, SessionRecord, SetWorkspaceLayoutInput,
+        TestProviderProfileInput, ToggleRemoteTunnelInput, WorkspaceSummary,
     },
     state::AppState,
 };
@@ -28,11 +28,27 @@ pub fn create_project(
 }
 
 #[tauri::command]
+pub fn delete_project(
+    state: State<'_, AppState>,
+    input: crate::models::DeleteProjectInput,
+) -> Result<ProjectRecord, String> {
+    state.delete_project(input)
+}
+
+#[tauri::command]
 pub fn create_session(
     state: State<'_, AppState>,
     input: CreateSessionInput,
 ) -> Result<SessionRecord, String> {
     state.create_session(input)
+}
+
+#[tauri::command]
+pub fn delete_session(
+    state: State<'_, AppState>,
+    input: DeleteSessionInput,
+) -> Result<SessionRecord, String> {
+    state.delete_session(input)
 }
 
 #[tauri::command]
@@ -78,6 +94,14 @@ pub fn launch_provider_login(
 #[tauri::command]
 pub fn open_pane(state: State<'_, AppState>, input: OpenPaneInput) -> Result<PaneRecord, String> {
     state.open_pane(input)
+}
+
+#[tauri::command]
+pub fn replace_pane_session(
+    state: State<'_, AppState>,
+    input: ReplacePaneSessionInput,
+) -> Result<PaneRecord, String> {
+    state.replace_pane_session(input)
 }
 
 #[tauri::command]

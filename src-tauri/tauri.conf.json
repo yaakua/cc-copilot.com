@@ -13,8 +13,11 @@
     "windows": [
       {
         "title": "cc-copilot-next",
-        "width": 800,
-        "height": 600
+        "width": 1440,
+        "height": 900,
+        "center": true,
+        "minWidth": 960,
+        "minHeight": 640
       }
     ],
     "security": {

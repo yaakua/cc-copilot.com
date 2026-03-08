@@ -1,102 +1,115 @@
-import type { Pane, SessionSummary, ThreadStats } from "../../../types/domain";
+import { Bot } from "lucide-react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
+import type { Pane } from "../../../types/domain";
+import { cn } from "../../../lib/utils";
 
 interface ThreadTimelineProps {
   activePane: Pane | null;
-  activeSession: SessionSummary | null;
-  projectName: string;
-  isHydrating: boolean;
-  threadStats: ThreadStats;
 }
 
 export function ThreadTimeline({
   activePane,
-  activeSession,
-  projectName,
-  isHydrating,
-  threadStats,
 }: ThreadTimelineProps) {
   const messages = activePane?.messages ?? [];
-  const providerLabel =
-    activeSession?.provider === "codex" || activePane?.provider === "codex"
-      ? "Codex CLI"
-      : "Claude Code";
-  const statusLabel = activeSession?.status ?? activePane?.status ?? "idle";
+  const isRunning = activePane?.status === "running";
 
   return (
-    <section className="thread-canvas">
-      <article className="thread-workstream">
-        <div className="thread-header-card">
-          <div className="thread-header-meta">
-            <span className="thread-path">{projectName}</span>
-            <span className="thread-runtime">{isHydrating ? "正在同步…" : "已同步本地状态"}</span>
+    <div className="flex flex-col h-full w-full max-w-4xl mx-auto p-4 md:p-5 lg:p-6 overflow-y-auto overflow-x-hidden space-y-6 scroll-smooth">
+
+
+
+      {/* Messages Transcript */}
+      <section className="space-y-4 flex-1 pb-8">
+        <div className="flex items-center justify-between">
+          <strong className="text-[15px] font-semibold text-foreground">
+            {activePane?.title ?? "当前激活窗口"}
+          </strong>
+          <div className="flex items-center gap-2">
+            {isRunning && (
+              <span className="inline-flex items-center gap-1 rounded-full bg-sky-50 px-2 py-0.5 text-xs font-medium text-sky-700">
+                <span className="h-1.5 w-1.5 rounded-full bg-sky-500 animate-pulse" />
+                正在响应
+              </span>
+            )}
+            <span className="text-xs font-medium text-muted-foreground bg-muted px-2 py-0.5 rounded-full">
+              {messages.length} 条消息
+            </span>
           </div>
-          <h2>{activePane?.title ?? "Main pane"}</h2>
-          <p>
-            主区现在直接围绕当前激活窗口渲染。窗口切换后，消息流、运行状态和发送目标都会跟着切换。
-          </p>
         </div>
 
-        <div className="thread-summary-grid">
-          <article className="thread-summary-card">
-            <span>Provider</span>
-            <strong>{providerLabel}</strong>
-            <p>当前会话已经绑定到底层命令适配器，优先走真实 CLI。</p>
-          </article>
-          <article className="thread-summary-card">
-            <span>状态</span>
-            <strong>{statusLabel}</strong>
-            <p>发送消息会写入本地状态，并在适配器返回后刷新当前会话。</p>
-          </article>
-          <article className="thread-summary-card">
-            <span>Diff</span>
-            <strong>
-              +{threadStats.positive} -{threadStats.negative}
-            </strong>
-            <p>统计基于当前激活窗口的消息流，错误和回退会在这里反映。</p>
-          </article>
-        </div>
-      </article>
-
-      <div className="thread-divider">
-        <span>Live transcript</span>
-      </div>
-
-      <article className="thread-transcript-card">
-        <div className="thread-transcript-header">
-          <strong>{activePane?.title ?? "当前激活窗口"}</strong>
-          <span>{messages.length} 条消息</span>
-        </div>
-
-        <div className="thread-transcript-list">
+        <div className="space-y-4">
           {messages.length > 0 ? (
-            messages.map((message) => (
-              <div
-                className={
-                  message.role === "assistant"
-                    ? "thread-message-bubble thread-message-bubble-assistant"
-                    : message.kind === "error"
-                      ? "thread-message-bubble thread-message-bubble-error"
-                      : message.role === "system"
-                        ? "thread-message-bubble thread-message-bubble-system"
-                        : "thread-message-bubble thread-message-bubble-user"
-                }
-                key={message.id}
-              >
-                <div className="thread-message-badge">
-                  <span>{message.role}</span>
-                  <time>{new Date(message.createdAt).toLocaleTimeString()}</time>
+            messages.map((message) => {
+              const isUser = message.role === "user";
+              const isSystem = message.role === "system";
+              const isError = message.kind === "error";
+              const isMeta = message.kind === "session_meta" || message.kind === "status";
+
+              return (
+                <div
+                  key={message.id}
+                  className={cn(
+                    "w-full flex",
+                    isUser ? "justify-end" : "justify-start"
+                  )}
+                >
+                  {isUser ? (
+                    <div className="max-w-[78%] rounded-[20px] bg-muted px-4 py-3 text-foreground shadow-sm">
+                      <div className="prose prose-sm dark:prose-invert max-w-none text-[14px] prose-p:my-0 prose-p:leading-relaxed prose-pre:bg-background prose-pre:text-foreground prose-code:text-primary">
+                        <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                          {message.body}
+                        </ReactMarkdown>
+                      </div>
+                    </div>
+                  ) : isSystem || isError || isMeta ? (
+                    <div className={cn(
+                      "max-w-[82%] rounded-2xl px-3.5 py-2.5 text-[13px] leading-6",
+                      isError
+                        ? "border border-red-200 bg-red-50 text-red-700"
+                        : "bg-orange-50/70 text-orange-700"
+                    )}>
+                      <div className="prose prose-sm dark:prose-invert max-w-none text-[13px] prose-p:my-0 prose-p:leading-relaxed prose-pre:bg-background prose-pre:text-foreground prose-code:text-primary">
+                        <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                          {message.body}
+                        </ReactMarkdown>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="max-w-[82%] px-1 py-1.5 text-foreground">
+                      <div className="prose prose-sm dark:prose-invert max-w-none text-[14px] prose-p:leading-relaxed prose-pre:bg-muted/50 prose-pre:text-foreground prose-code:text-primary">
+                        <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                          {message.body}
+                        </ReactMarkdown>
+                      </div>
+                    </div>
+                  )}
                 </div>
-                <p>{message.body}</p>
-              </div>
-            ))
+              );
+            })
           ) : (
-            <div className="thread-empty-state">
-              <strong>当前窗口还没有消息</strong>
-              <p>从下方输入区发送第一条指令，或者先从左侧切换到另一个会话。</p>
+            <div className="flex flex-col items-center justify-center py-20 px-4 text-center space-y-3 bg-muted/30 border border-dashed rounded-3xl">
+              <Bot size={48} className="text-muted-foreground/50 mb-2" />
+              <strong className="text-lg font-medium text-foreground">当前窗口还没有消息</strong>
+              <p className="text-sm text-muted-foreground max-w-md">
+                从下方输入区发送第一条指令，或者先从左侧切换到另一个会话。
+              </p>
+            </div>
+          )}
+
+          {isRunning && (
+            <div className="w-full flex justify-start">
+              <div className="max-w-[82%] px-1 py-1.5 text-foreground">
+                <div className="inline-flex items-center gap-1.5 rounded-2xl bg-muted/50 px-3 py-2">
+                  <span className="h-1.5 w-1.5 rounded-full bg-muted-foreground/70 animate-bounce [animation-delay:-0.3s]" />
+                  <span className="h-1.5 w-1.5 rounded-full bg-muted-foreground/70 animate-bounce [animation-delay:-0.15s]" />
+                  <span className="h-1.5 w-1.5 rounded-full bg-muted-foreground/70 animate-bounce" />
+                </div>
+              </div>
             </div>
           )}
         </div>
-      </article>
-    </section>
+      </section>
+    </div>
   );
 }

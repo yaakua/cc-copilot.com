@@ -17,6 +17,7 @@ pub struct MessageDispatch {
     pub session_id: String,
     pub project_path: String,
     pub provider: ProviderKind,
+    pub provider_session_id: Option<String>,
     pub profile_id: Option<String>,
     pub profile_label: Option<String>,
     pub base_url: Option<String>,
@@ -28,6 +29,7 @@ pub struct MessageDispatch {
 #[derive(Debug, Clone)]
 pub struct MessageCompletion {
     pub session_id: String,
+    pub provider_session_id: Option<String>,
     pub assistant_role: MessageRole,
     pub assistant_content: String,
     pub session_status: SessionStatus,
@@ -96,6 +98,96 @@ impl Store {
         Ok(project)
     }
 
+    pub fn delete_project(
+        &mut self,
+        input: crate::models::DeleteProjectInput,
+    ) -> Result<ProjectRecord, String> {
+        let index = self
+            .projects
+            .iter()
+            .position(|project| project.id == input.project_id)
+            .ok_or_else(|| "project not found".to_string())?;
+        let project = self.projects.remove(index);
+
+        if self.active_project_id.as_deref() == Some(project.id.as_str()) {
+            // Keep active project as the first one or None
+            self.active_project_id = self.projects.first().map(|p| p.id.clone());
+            if self.projects.is_empty() {
+                self.active_session_id = None;
+            }
+        }
+        Ok(project)
+    }
+
+    pub fn delete_session(
+        &mut self,
+        input: crate::models::DeleteSessionInput,
+    ) -> Result<SessionRecord, String> {
+        let project_index = self
+            .projects
+            .iter()
+            .position(|project| project.id == input.project_id)
+            .ok_or_else(|| "project not found".to_string())?;
+        let session_index = self
+            .sessions
+            .iter()
+            .position(|session| {
+                session.id == input.session_id && session.project_id == input.project_id
+            })
+            .ok_or_else(|| "session not found".to_string())?;
+
+        let session = self.sessions.remove(session_index);
+        self.projects[project_index]
+            .session_ids
+            .retain(|session_id| session_id != &session.id);
+        self.projects[project_index].updated_at = now_ms();
+
+        self.messages.retain(|message| message.session_id != session.id);
+        self.drafts.retain(|draft| draft.session_id != session.id);
+
+        let closed_session_id = session.id.clone();
+        let mut fallback_pane_id: Option<String> = None;
+        for pane in &mut self.panes {
+            if pane.session_id == closed_session_id && pane.status == PaneStatus::Open {
+                pane.status = PaneStatus::Closed;
+                pane.is_focused = false;
+                pane.updated_at = now_ms();
+            } else if pane.status == PaneStatus::Open {
+                fallback_pane_id = Some(pane.id.clone());
+            }
+        }
+
+        if self.active_session_id.as_deref() == Some(closed_session_id.as_str()) {
+            self.active_session_id = None;
+        }
+
+        if let Some(fallback_id) = fallback_pane_id {
+            if let Some(fallback_pane) = self
+                .panes
+                .iter_mut()
+                .find(|pane| pane.id == fallback_id && pane.status == PaneStatus::Open)
+            {
+                fallback_pane.is_focused = true;
+                fallback_pane.updated_at = now_ms();
+                self.active_session_id = Some(fallback_pane.session_id.clone());
+            }
+        }
+
+        let open_pane_count = self
+            .panes
+            .iter()
+            .filter(|pane| pane.status == PaneStatus::Open)
+            .count();
+        self.workspace.layout_mode = match open_pane_count {
+            0 | 1 => "single".into(),
+            2 => "dual".into(),
+            3 => "triple".into(),
+            _ => "quad".into(),
+        };
+
+        Ok(session)
+    }
+
     pub fn create_session(&mut self, input: CreateSessionInput) -> Result<SessionRecord, String> {
         let now = now_ms();
         let provider = input.provider.unwrap_or(ProviderKind::Mock);
@@ -118,13 +210,14 @@ impl Store {
             title: title.into(),
             provider,
             profile_id: input.profile_id,
+            provider_session_id: None,
             status: SessionStatus::Idle,
             last_message_preview: "New workspace session".into(),
             created_at: now,
             updated_at: now,
         };
 
-        self.projects[project_index].session_ids.push(session_id);
+        self.projects[project_index].session_ids.insert(0, session_id);
         self.projects[project_index].updated_at = now;
         self.active_project_id = Some(project_id);
         self.active_session_id = Some(session.id.clone());
@@ -190,6 +283,55 @@ impl Store {
             _ => "quad".into(),
         };
         Ok(pane)
+    }
+
+    pub fn replace_pane_session(
+        &mut self,
+        input: crate::models::ReplacePaneSessionInput,
+    ) -> Result<PaneRecord, String> {
+        let title = input.title.trim();
+        if title.is_empty() {
+            return Err("pane title cannot be empty".into());
+        }
+
+        let pane_index = self
+            .panes
+            .iter()
+            .position(|pane| pane.id == input.pane_id)
+            .ok_or_else(|| "pane not found".to_string())?;
+
+        if self.panes[pane_index].status == PaneStatus::Closed {
+            return Err("cannot replace a closed pane".into());
+        }
+
+        let session_index = self
+            .sessions
+            .iter()
+            .position(|session| session.id == input.session_id)
+            .ok_or_else(|| "session not found".to_string())?;
+
+        let now = now_ms();
+        let should_focus = input.focus.unwrap_or(true);
+        if should_focus {
+            for pane in &mut self.panes {
+                pane.is_focused = false;
+            }
+        }
+
+        let session_id = self.sessions[session_index].id.clone();
+        let pane = &mut self.panes[pane_index];
+        pane.session_id = session_id.clone();
+        pane.title = title.to_string();
+        pane.profile_id = input
+            .profile_id
+            .or_else(|| self.sessions[session_index].profile_id.clone());
+        pane.is_focused = should_focus;
+        pane.updated_at = now;
+
+        self.sessions[session_index].updated_at = now;
+        self.active_session_id = Some(session_id);
+
+        Ok(pane.clone())
     }
 
     pub fn close_pane(&mut self, target: PaneTarget) -> Result<PaneRecord, String> {
@@ -420,6 +562,22 @@ impl Store {
         };
         self.messages.push(message.clone());
 
+        let next_title = if should_auto_title(&self.sessions[session_index].title) {
+            Some(derive_session_title(content))
+        } else {
+            None
+        };
+        if let Some(title) = next_title.as_ref() {
+            let previous_title = self.sessions[session_index].title.clone();
+            self.sessions[session_index].title = title.clone();
+            sync_pane_titles_for_session(
+                &mut self.panes,
+                &session_id,
+                previous_title.as_str(),
+                title.as_str(),
+            );
+        }
+
         let draft = if let Some(draft) = self
             .drafts
             .iter_mut()
@@ -452,6 +610,7 @@ impl Store {
             session_id,
             project_path,
             provider: self.sessions[session_index].provider.clone(),
+            provider_session_id: self.sessions[session_index].provider_session_id.clone(),
             profile_id,
             profile_label: None,
             base_url: None,
@@ -502,6 +661,9 @@ impl Store {
         };
 
         self.sessions[session_index].status = completion.session_status;
+        if completion.provider_session_id.is_some() {
+            self.sessions[session_index].provider_session_id = completion.provider_session_id.clone();
+        }
         self.sessions[session_index].last_message_preview =
             truncate(&assistant_message.content, 72);
         self.sessions[session_index].updated_at = now;
@@ -618,6 +780,38 @@ fn clean_optional(value: Option<String>) -> Option<String> {
             Some(trimmed.to_string())
         }
     })
+}
+
+fn should_auto_title(title: &str) -> bool {
+    let trimmed = title.trim();
+    trimmed.starts_with("New session")
+}
+
+fn derive_session_title(content: &str) -> String {
+    let single_line = content
+        .lines()
+        .map(str::trim)
+        .find(|line| !line.is_empty())
+        .unwrap_or("New session");
+    truncate(single_line, 40)
+}
+
+fn sync_pane_titles_for_session(
+    panes: &mut [PaneRecord],
+    session_id: &str,
+    previous_title: &str,
+    next_title: &str,
+) {
+    for pane in panes.iter_mut().filter(|pane| pane.session_id == session_id) {
+        if pane.title == previous_title {
+            pane.title = next_title.to_string();
+            continue;
+        }
+
+        if let Some(suffix) = pane.title.strip_prefix(previous_title) {
+            pane.title = format!("{next_title}{suffix}");
+        }
+    }
 }
 
 pub fn now_ms() -> u64 {

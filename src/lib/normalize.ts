@@ -45,6 +45,7 @@ export function normalizeDashboardState(
       title: session.title,
       provider: normalizeProvider(session.provider),
       profileId: session.profileId ?? null,
+      providerSessionId: session.providerSessionId ?? null,
       lastActiveAt: new Date(session.updatedAt).toISOString(),
       status: normalizeSessionStatus(session.status),
       imported: false,
@@ -65,6 +66,7 @@ export function normalizeDashboardState(
         title: pane.title,
         provider: normalizeProvider(session?.provider ?? "mock"),
         profileId: pane.profileId ?? session?.profileId ?? null,
+        providerSessionId: session?.providerSessionId ?? null,
         status: normalizeSessionStatus(session?.status ?? "idle"),
         selected: false,
         messages:

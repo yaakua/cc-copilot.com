@@ -24,6 +24,7 @@ export interface SessionSummary {
   title: string;
   provider: ProviderKind;
   profileId: string | null;
+  providerSessionId: string | null;
   lastActiveAt: string;
   status: SessionStatus;
   imported: boolean;
@@ -44,6 +45,7 @@ export interface Pane {
   title: string;
   provider: ProviderKind;
   profileId: string | null;
+  providerSessionId: string | null;
   status: SessionStatus;
   selected: boolean;
   messages: ConversationEvent[];

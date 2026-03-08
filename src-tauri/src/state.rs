@@ -7,11 +7,11 @@ use std::{
 use crate::models::{
     AssignPaneProfileInput, CancelPaneRunInput, ComposerStreamEvent, ComposerStreamStage,
     CreateProjectInput, CreateSessionInput, DashboardState, DeleteProviderProfileInput,
-    LaunchProviderLoginInput, OpenPaneInput, PaneRecord, PaneTarget, ProfileAuthKind,
-    ProjectRecord, ProviderAuthLaunchResult, ProviderConnectionTestResult, ProviderProfileRecord,
-    RemoteStatus, SaveProviderProfileInput, SendComposerMessageInput, SendComposerMessageResult,
-    SessionRecord, SetWorkspaceLayoutInput, TestProviderProfileInput, ToggleRemoteTunnelInput,
-    WorkspaceSummary,
+    DeleteSessionInput, LaunchProviderLoginInput, OpenPaneInput, PaneRecord, PaneTarget,
+    ProfileAuthKind, ProjectRecord, ProviderAuthLaunchResult, ProviderConnectionTestResult,
+    ProviderProfileRecord, RemoteStatus, ReplacePaneSessionInput, SaveProviderProfileInput,
+    SendComposerMessageInput, SendComposerMessageResult, SessionRecord, SetWorkspaceLayoutInput,
+    TestProviderProfileInput, ToggleRemoteTunnelInput, WorkspaceSummary,
 };
 use crate::providers::{
     execute_message, launch_provider_login, probe_provider_health, stream_message,
@@ -71,8 +71,19 @@ impl AppState {
         self.mutate(|store| store.create_project(input))
     }
 
+    pub fn delete_project(
+        &self,
+        input: crate::models::DeleteProjectInput,
+    ) -> Result<ProjectRecord, String> {
+        self.mutate(|store| store.delete_project(input))
+    }
+
     pub fn create_session(&self, input: CreateSessionInput) -> Result<SessionRecord, String> {
         self.mutate(|store| store.create_session(input))
+    }
+
+    pub fn delete_session(&self, input: DeleteSessionInput) -> Result<SessionRecord, String> {
+        self.mutate(|store| store.delete_session(input))
     }
 
     pub fn save_provider_profile(
@@ -179,6 +190,10 @@ impl AppState {
 
     pub fn open_pane(&self, input: OpenPaneInput) -> Result<PaneRecord, String> {
         self.mutate(|store| store.open_pane(input))
+    }
+
+    pub fn replace_pane_session(&self, input: ReplacePaneSessionInput) -> Result<PaneRecord, String> {
+        self.mutate(|store| store.replace_pane_session(input))
     }
 
     pub fn close_pane(&self, target: PaneTarget) -> Result<PaneRecord, String> {
@@ -442,6 +457,7 @@ impl AppState {
 fn canceled_completion(session_id: &str) -> crate::store::MessageCompletion {
     crate::store::MessageCompletion {
         session_id: session_id.to_string(),
+        provider_session_id: None,
         assistant_role: crate::models::MessageRole::System,
         assistant_content: "Run canceled by user.".into(),
         session_status: crate::models::SessionStatus::Idle,
@@ -485,12 +501,15 @@ fn clean_optional_string(value: &str) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
+    use std::path::Path;
+
     use tempfile::tempdir;
 
     use super::AppState;
     use crate::models::{
         CreateProjectInput, CreateSessionInput, MessageRole, OpenPaneInput, PaneKind, PaneTarget,
-        SendComposerMessageInput, SetWorkspaceLayoutInput, ToggleRemoteTunnelInput,
+        ReplacePaneSessionInput, SendComposerMessageInput, SetWorkspaceLayoutInput,
+        ToggleRemoteTunnelInput, DeleteSessionInput,
     };
 
     #[test]
@@ -522,10 +541,14 @@ mod tests {
     #[test]
     fn focuses_newly_opened_pane() {
         let dir = tempdir().expect("temp dir should exist");
-        let state = AppState::new_for_path(dir.path().join("dashboard-state.json"));
+        let state = create_workspace_with_two_sessions(dir.path());
+        let session_id = {
+            let dashboard = state.dashboard_state().expect("dashboard should load");
+            dashboard.sessions[0].id.clone()
+        };
         let pane = state
             .open_pane(OpenPaneInput {
-                session_id: "session_1".into(),
+                session_id: session_id.clone(),
                 title: "Preview".into(),
                 kind: PaneKind::Preview,
                 profile_id: None,
@@ -538,16 +561,23 @@ mod tests {
             .panes
             .iter()
             .any(|candidate| candidate.id == pane.id && candidate.is_focused));
-        assert_eq!(dashboard.active_session_id.as_deref(), Some("session_1"));
+        assert_eq!(dashboard.active_session_id.as_deref(), Some(session_id.as_str()));
     }
 
     #[test]
     fn closing_focused_pane_promotes_fallback() {
         let dir = tempdir().expect("temp dir should exist");
-        let state = AppState::new_for_path(dir.path().join("dashboard-state.json"));
+        let state = create_workspace_with_two_sessions(dir.path());
+        let (source_session_id, source_pane_id) = {
+            let dashboard = state.dashboard_state().expect("dashboard should load");
+            (
+                dashboard.sessions[0].id.clone(),
+                dashboard.panes[0].id.clone(),
+            )
+        };
         let pane = state
             .open_pane(OpenPaneInput {
-                session_id: "session_1".into(),
+                session_id: source_session_id,
                 title: "Preview".into(),
                 kind: PaneKind::Preview,
                 profile_id: None,
@@ -562,22 +592,98 @@ mod tests {
         assert!(dashboard
             .panes
             .iter()
-            .any(|pane| pane.id == "pane_1" && pane.is_focused));
+            .any(|pane| pane.id == source_pane_id && pane.is_focused));
+    }
+
+    #[test]
+    fn replacing_pane_session_keeps_layout_and_focuses_target_session() {
+        let dir = tempdir().expect("temp dir should exist");
+        let state = create_workspace_with_two_sessions(dir.path());
+        let (pane_id, replacement_session_id) = {
+            let dashboard = state.dashboard_state().expect("dashboard should load");
+            (
+                dashboard.panes[0].id.clone(),
+                dashboard.sessions[1].id.clone(),
+            )
+        };
+        state
+            .replace_pane_session(ReplacePaneSessionInput {
+                pane_id: pane_id.clone(),
+                session_id: replacement_session_id.clone(),
+                title: "Streaming composer polish".into(),
+                profile_id: None,
+                focus: Some(true),
+            })
+            .expect("pane should be replaced");
+
+        let dashboard = state.dashboard_state().expect("dashboard should load");
+        let pane = dashboard
+            .panes
+            .iter()
+            .find(|pane| pane.id == pane_id)
+            .expect("pane should exist");
+        assert_eq!(pane.session_id, replacement_session_id);
+        assert!(pane.is_focused);
+        assert_eq!(dashboard.active_session_id.as_deref(), Some(pane.session_id.as_str()));
+    }
+
+    #[test]
+    fn deleting_session_removes_related_panes_and_messages() {
+        let dir = tempdir().expect("temp dir should exist");
+        let state = create_workspace_with_two_sessions(dir.path());
+        let (project_id, session_id) = {
+            let dashboard = state.dashboard_state().expect("dashboard should load");
+            (
+                dashboard.projects[0].id.clone(),
+                dashboard.sessions[1].id.clone(),
+            )
+        };
+        state
+            .open_pane(OpenPaneInput {
+                session_id: session_id.clone(),
+                title: "Streaming composer polish".into(),
+                kind: PaneKind::Chat,
+                profile_id: None,
+                focus: Some(false),
+            })
+            .expect("pane should open");
+
+        state
+            .delete_session(DeleteSessionInput {
+                project_id,
+                session_id: session_id.clone(),
+            })
+            .expect("session should delete");
+
+        let dashboard = state.dashboard_state().expect("dashboard should load");
+        assert!(!dashboard.sessions.iter().any(|session| session.id == session_id));
+        assert!(!dashboard
+            .panes
+            .iter()
+            .any(|pane| pane.session_id == session_id && pane.status == crate::models::PaneStatus::Open));
+        assert!(!dashboard.messages.iter().any(|message| message.session_id == session_id));
     }
 
     #[test]
     fn sending_message_updates_session_and_persists_conversation() {
         let dir = tempdir().expect("temp dir should exist");
         let path = dir.path().join("dashboard-state.json");
-        let state = AppState::new_for_path(path.clone());
+        let state = create_workspace_with_two_sessions(dir.path());
+        let (pane_id, session_id) = {
+            let dashboard = state.dashboard_state().expect("dashboard should load");
+            (
+                dashboard.panes[0].id.clone(),
+                dashboard.sessions[0].id.clone(),
+            )
+        };
         let result = state
             .send_composer_message(SendComposerMessageInput {
-                pane_id: "pane_1".into(),
+                pane_id,
                 content: "Need a remote status card in the dashboard".into(),
             })
             .expect("message should send");
 
-        assert_eq!(result.message.session_id, "session_1");
+        assert_eq!(result.message.session_id, session_id);
         assert!(matches!(
             result.assistant_message.role,
             MessageRole::Assistant | MessageRole::System
@@ -590,9 +696,9 @@ mod tests {
         let persisted_messages: Vec<_> = dashboard
             .messages
             .iter()
-            .filter(|message| message.session_id == "session_1")
+            .filter(|message| message.session_id == result.message.session_id)
             .collect();
-        assert!(persisted_messages.len() >= 3);
+        assert!(persisted_messages.len() >= 2);
         assert_eq!(
             persisted_messages[persisted_messages.len() - 2].role,
             MessageRole::User
@@ -619,5 +725,42 @@ mod tests {
         assert_eq!(workspace.layout_mode, "grid");
         assert!(!remote.frp.enabled);
         assert_eq!(remote.frp.active_tunnels, 0);
+    }
+
+    fn create_workspace_with_two_sessions(root: &Path) -> AppState {
+        let path = root.join("dashboard-state.json");
+        let state = AppState::new_for_path(path);
+        let project = state
+            .create_project(CreateProjectInput {
+                name: "sandbox".into(),
+                path: "/tmp/sandbox".into(),
+            })
+            .expect("project should be created");
+        let session_a = state
+            .create_session(CreateSessionInput {
+                project_id: project.id.clone(),
+                title: "Session A".into(),
+                provider: None,
+                profile_id: None,
+            })
+            .expect("session A should be created");
+        let _session_b = state
+            .create_session(CreateSessionInput {
+                project_id: project.id,
+                title: "Session B".into(),
+                provider: None,
+                profile_id: None,
+            })
+            .expect("session B should be created");
+        state
+            .open_pane(OpenPaneInput {
+                session_id: session_a.id,
+                title: "Main chat".into(),
+                kind: PaneKind::Chat,
+                profile_id: None,
+                focus: Some(true),
+            })
+            .expect("default pane should open");
+        state
     }
 }
