@@ -9,8 +9,9 @@ use std::{
 
 use crate::{
     models::{
-        ConnectionState, MessageRole, ProviderAuthLaunchResult, ProviderConnectionTestResult,
-        ProviderHealth, ProviderKind, SessionStatus,
+        ComposerStreamEventKind, ConnectionState, MessageRole, ProfileAuthKind,
+        ProviderAuthLaunchResult, ProviderConnectionTestResult, ProviderHealth, ProviderKind,
+        ProviderProfileRecord, SessionStatus,
     },
     store::{mock_assistant_reply, MessageCompletion, MessageDispatch},
 };
@@ -24,6 +25,7 @@ pub struct ProviderRuntimeConfig<'a> {
     pub base_url: Option<&'a str>,
     pub api_key: Option<&'a str>,
     pub model: Option<&'a str>,
+    pub runtime_home: Option<&'a str>,
 }
 
 pub fn probe_provider_health() -> Vec<ProviderHealth> {
@@ -40,7 +42,7 @@ pub fn probe_provider_health() -> Vec<ProviderHealth> {
 }
 
 pub fn execute_message(dispatch: &MessageDispatch) -> MessageCompletion {
-    stream_message(dispatch, |_, _| {}, |_| {})
+    stream_message(dispatch, |_| {}, |_| {})
 }
 
 pub fn test_provider_connection(config: ProviderRuntimeConfig<'_>) -> ProviderConnectionTestResult {
@@ -87,12 +89,35 @@ pub fn test_provider_connection(config: ProviderRuntimeConfig<'_>) -> ProviderCo
     }
 }
 
-pub fn launch_provider_login(provider: &ProviderKind) -> Result<ProviderAuthLaunchResult, String> {
+pub fn launch_provider_login(
+    provider: &ProviderKind,
+    profile: Option<&ProviderProfileRecord>,
+) -> Result<ProviderAuthLaunchResult, String> {
     let workspace = current_project_path();
     let message = match provider {
         ProviderKind::OpenAi => {
-            open_login_terminal("Codex CLI", &workspace, "codex login")?;
-            "Opened a terminal window for `codex login`.".to_string()
+            if let Some(profile) = profile {
+                if profile.auth_kind == ProfileAuthKind::Official {
+                    let runtime_home = profile
+                        .runtime_home
+                        .as_deref()
+                        .ok_or_else(|| "official Codex profile is missing runtime home".to_string())?;
+                    fs::create_dir_all(runtime_home)
+                        .map_err(|error| format!("failed to prepare Codex profile home: {error}"))?;
+                    let command = format!(
+                        "export CODEX_HOME=\"{}\"; codex login",
+                        escape_shell(runtime_home)
+                    );
+                    open_login_terminal("Codex CLI", &workspace, &command)?;
+                    format!("Opened a terminal window for `codex login` via profile {}.", profile.label)
+                } else {
+                    open_login_terminal("Codex CLI", &workspace, "codex login")?;
+                    "Opened a terminal window for `codex login`.".to_string()
+                }
+            } else {
+                open_login_terminal("Codex CLI", &workspace, "codex login")?;
+                "Opened a terminal window for `codex login`.".to_string()
+            }
         }
         ProviderKind::Anthropic => {
             let command =
@@ -116,12 +141,17 @@ pub fn stream_message<F, G>(
     mut on_started: G,
 ) -> MessageCompletion
 where
-    F: FnMut(MessageRole, &str),
+    F: FnMut(ProviderStreamChunk),
     G: FnMut(u32),
 {
     if cfg!(test) || env::var("CC_COPILOT_NEXT_DISABLE_PROVIDERS").as_deref() == Ok("1") {
         let content = mock_assistant_reply(&dispatch.user_message.content);
-        on_delta(MessageRole::Assistant, &content);
+        on_delta(ProviderStreamChunk {
+            message_id: format!("assistant-{}", dispatch.session_id),
+            role: MessageRole::Assistant,
+            kind: ComposerStreamEventKind::Message,
+            chunk: content.clone(),
+        });
         return MessageCompletion {
             session_id: dispatch.session_id.clone(),
             provider_session_id: dispatch.provider_session_id.clone(),
@@ -140,7 +170,12 @@ where
         ProviderKind::Anthropic => run_claude_stream(dispatch, &mut on_delta, &mut on_started),
         ProviderKind::Mock => {
             let content = mock_assistant_reply(&dispatch.user_message.content);
-            on_delta(MessageRole::Assistant, &content);
+            on_delta(ProviderStreamChunk {
+                message_id: format!("assistant-{}", dispatch.session_id),
+                role: MessageRole::Assistant,
+                kind: ComposerStreamEventKind::Message,
+                chunk: content.clone(),
+            });
             Ok(ProviderStreamResult {
                 content,
                 provider_session_id: dispatch.provider_session_id.clone(),
@@ -164,11 +199,7 @@ where
             session_id: dispatch.session_id.clone(),
             provider_session_id: dispatch.provider_session_id.clone(),
             assistant_role: MessageRole::System,
-            assistant_content: format!(
-                "{}\n\nFallback preview:\n{}",
-                provider_error_summary(dispatch, &error),
-                mock_assistant_reply(&dispatch.user_message.content)
-            ),
+            assistant_content: provider_error_summary(dispatch, &error),
             session_status: SessionStatus::Error,
             provider_status: ConnectionState::Disconnected,
             provider_latency_ms: latency_ms,
@@ -183,7 +214,7 @@ fn run_codex_stream<F, G>(
     on_started: &mut G,
 ) -> Result<ProviderStreamResult, String>
 where
-    F: FnMut(MessageRole, &str),
+    F: FnMut(ProviderStreamChunk),
     G: FnMut(u32),
 {
     let mut command = Command::new("codex");
@@ -192,12 +223,10 @@ where
         command.args([
             "exec",
             "resume",
-            provider_session_id,
             "--json",
             "--skip-git-repo-check",
             "--dangerously-bypass-approvals-and-sandbox",
-            "-C",
-            &dispatch.project_path,
+            provider_session_id,
         ]);
     } else {
         command.args([
@@ -239,13 +268,15 @@ where
 
     for line in BufReader::new(stdout).lines() {
         let line = line.map_err(|error| format!("failed to read codex output: {error}"))?;
-        let parsed = parse_codex_json_line(&line);
+        let parsed = parse_codex_json_line(&line, &dispatch.session_id);
         if provider_session_id.is_none() {
             provider_session_id = parsed.provider_session_id;
         }
         if let Some(delta) = parsed.delta {
-            assistant_text.push_str(&delta);
-            on_delta(MessageRole::Assistant, &delta);
+            if delta.role == MessageRole::Assistant && delta.kind == ComposerStreamEventKind::Message {
+                assistant_text.push_str(&delta.chunk);
+            }
+            on_delta(delta);
         }
     }
 
@@ -276,7 +307,7 @@ fn run_claude_stream<F, G>(
     on_started: &mut G,
 ) -> Result<ProviderStreamResult, String>
 where
-    F: FnMut(MessageRole, &str),
+    F: FnMut(ProviderStreamChunk),
     G: FnMut(u32),
 {
     let mut command = Command::new("claude");
@@ -325,8 +356,18 @@ where
             provider_session_id = parsed.provider_session_id.clone();
         }
         if let Some(delta) = parsed.delta {
-            assistant_text.push_str(&delta);
-            on_delta(parsed.role.clone(), &delta);
+            if parsed.role == MessageRole::Assistant {
+                assistant_text.push_str(&delta);
+            }
+            on_delta(ProviderStreamChunk {
+                message_id: parsed
+                    .message_id
+                    .clone()
+                    .unwrap_or_else(|| format!("assistant-{}", dispatch.session_id)),
+                role: parsed.role.clone(),
+                kind: parsed.kind.clone(),
+                chunk: delta,
+            });
         }
         if claude_error.is_none() {
             claude_error = parsed.error;
@@ -377,6 +418,7 @@ fn apply_codex_profile_env(
             base_url: dispatch.base_url.as_deref(),
             api_key: dispatch.api_key.as_deref(),
             model: dispatch.model.as_deref(),
+            runtime_home: dispatch.runtime_home.as_deref(),
         },
     )
 }
@@ -391,6 +433,7 @@ fn apply_claude_profile_env(command: &mut Command, dispatch: &MessageDispatch) {
             base_url: dispatch.base_url.as_deref(),
             api_key: dispatch.api_key.as_deref(),
             model: dispatch.model.as_deref(),
+            runtime_home: dispatch.runtime_home.as_deref(),
         },
     );
 }
@@ -399,6 +442,12 @@ fn apply_codex_runtime_env(
     command: &mut Command,
     config: ProviderRuntimeConfig<'_>,
 ) -> Result<(), String> {
+    if let Some(runtime_home) = config.runtime_home {
+        fs::create_dir_all(runtime_home)
+            .map_err(|error| format!("failed to prepare Codex runtime directory: {error}"))?;
+        command.env("CODEX_HOME", runtime_home);
+    }
+
     let Some(api_key) = config.api_key else {
         return Ok(());
     };
@@ -490,8 +539,8 @@ fn run_codex_connection_test(config: &ProviderRuntimeConfig<'_>) -> Result<Strin
 
     if stdout
         .lines()
-        .filter_map(|line| parse_codex_json_line(line).delta)
-        .any(|line| line.trim() == "OK")
+        .filter_map(|line| parse_codex_json_line(line, "connection-test").delta)
+        .any(|line| line.chunk.trim() == "OK")
     {
         return Ok("Received expected OK confirmation from Codex CLI.".into());
     }
@@ -542,7 +591,7 @@ fn run_claude_connection_test(config: &ProviderRuntimeConfig<'_>) -> Result<Stri
     Err("claude test did not return the expected confirmation.".into())
 }
 
-fn parse_codex_json_line(line: &str) -> ProviderParsedLine {
+fn parse_codex_json_line(line: &str, session_id: &str) -> ProviderParsedLine {
     let mut parsed = ProviderParsedLine::default();
     let value: Value = match serde_json::from_str(line) {
         Ok(value) => value,
@@ -560,17 +609,68 @@ fn parse_codex_json_line(line: &str) -> ProviderParsedLine {
                 Some(item) => item,
                 None => return parsed,
             };
-            if item.get("type").and_then(Value::as_str) != Some("agent_message") {
-                return parsed;
+            match item.get("type").and_then(Value::as_str) {
+                Some("agent_message") => {
+                    let text = item
+                        .get("text")
+                        .and_then(Value::as_str)
+                        .map(str::trim)
+                        .unwrap_or_default();
+                    if !text.is_empty() {
+                        parsed.delta = Some(ProviderStreamChunk {
+                            message_id: format!("assistant-{session_id}"),
+                            role: MessageRole::Assistant,
+                            kind: ComposerStreamEventKind::Message,
+                            chunk: text.to_string(),
+                        });
+                    }
+                }
+                Some("command_execution") => {
+                    let command = item
+                        .get("command")
+                        .and_then(Value::as_str)
+                        .map(summarize_command)
+                        .unwrap_or_else(|| "调用工具".to_string());
+                    let exit_code = item.get("exit_code").and_then(Value::as_i64);
+                    let item_id = item
+                        .get("id")
+                        .and_then(Value::as_str)
+                        .unwrap_or("tool");
+                    let suffix = match exit_code {
+                        Some(code) => format!(" 已完成 (exit {code})"),
+                        None => " 已完成".to_string(),
+                    };
+                    parsed.delta = Some(ProviderStreamChunk {
+                        message_id: format!("tool-{session_id}-{item_id}"),
+                        role: MessageRole::System,
+                        kind: ComposerStreamEventKind::ToolResult,
+                        chunk: format!("{command}{suffix}"),
+                    });
+                }
+                _ => {}
             }
-
-            let text = item
-                .get("text")
-                .and_then(Value::as_str)
-                .map(str::trim)
-                .unwrap_or_default();
-            if !text.is_empty() {
-                parsed.delta = Some(text.to_string());
+        }
+        Some("item.started") => {
+            let item = match value.get("item") {
+                Some(item) => item,
+                None => return parsed,
+            };
+            if item.get("type").and_then(Value::as_str) == Some("command_execution") {
+                let command = item
+                    .get("command")
+                    .and_then(Value::as_str)
+                    .map(summarize_command)
+                    .unwrap_or_else(|| "调用工具".to_string());
+                let item_id = item
+                    .get("id")
+                    .and_then(Value::as_str)
+                    .unwrap_or("tool");
+                parsed.delta = Some(ProviderStreamChunk {
+                    message_id: format!("tool-{session_id}-{item_id}"),
+                    role: MessageRole::System,
+                    kind: ComposerStreamEventKind::ToolCall,
+                    chunk: command,
+                });
             }
         }
         _ => {}
@@ -613,7 +713,13 @@ fn parse_claude_json_line(line: &str, previous_text: &str) -> ClaudeParsedLine {
                 .map(|items| {
                     items
                         .iter()
-                        .filter_map(|item| item.get("text").and_then(Value::as_str))
+                        .filter_map(|item| {
+                            if item.get("type").and_then(Value::as_str) == Some("text") {
+                                item.get("text").and_then(Value::as_str)
+                            } else {
+                                None
+                            }
+                        })
                         .collect::<String>()
                 })
                 .unwrap_or_default();
@@ -621,6 +727,14 @@ fn parse_claude_json_line(line: &str, previous_text: &str) -> ClaudeParsedLine {
             if !content.is_empty() {
                 parsed.role = MessageRole::Assistant;
                 parsed.delta = diff_suffix(previous_text, &content);
+                parsed.kind = ComposerStreamEventKind::Message;
+            } else if let Some(items) = message.get("content").and_then(Value::as_array) {
+                if let Some(process_event) = items.iter().find_map(parse_claude_process_item) {
+                    parsed.role = MessageRole::System;
+                    parsed.kind = process_event.kind;
+                    parsed.message_id = Some(process_event.message_id);
+                    parsed.delta = Some(process_event.chunk);
+                }
             }
         }
         Some("result") => {
@@ -656,8 +770,16 @@ fn parse_claude_json_line(line: &str, previous_text: &str) -> ClaudeParsedLine {
 
 #[derive(Default)]
 struct ProviderParsedLine {
-    delta: Option<String>,
+    delta: Option<ProviderStreamChunk>,
     provider_session_id: Option<String>,
+}
+
+#[derive(Clone)]
+pub struct ProviderStreamChunk {
+    pub message_id: String,
+    pub role: MessageRole,
+    pub kind: ComposerStreamEventKind,
+    pub chunk: String,
 }
 
 struct ProviderStreamResult {
@@ -730,6 +852,66 @@ fn render_process_error(command: &str, stdout: &str, stderr: &str) -> String {
         "command returned no output"
     };
     format!("{command} execution failed: {detail}")
+}
+
+fn summarize_command(command: &str) -> String {
+    let compact = command.split_whitespace().collect::<Vec<_>>().join(" ");
+    let compact = compact.trim();
+    if compact.is_empty() {
+        return "调用工具".to_string();
+    }
+    let preview = if compact.chars().count() > 80 {
+        format!("{}…", compact.chars().take(80).collect::<String>())
+    } else {
+        compact.to_string()
+    };
+    format!("调用工具: {preview}")
+}
+
+fn parse_claude_process_item(item: &Value) -> Option<ProviderStreamChunk> {
+    let item_type = item.get("type").and_then(Value::as_str)?;
+    match item_type {
+        "thinking" | "redacted_thinking" => Some(ProviderStreamChunk {
+            message_id: format!(
+                "thinking-{}",
+                item.get("id")
+                    .and_then(Value::as_str)
+                    .unwrap_or("claude")
+            ),
+            role: MessageRole::System,
+            kind: ComposerStreamEventKind::Status,
+            chunk: "正在思考".to_string(),
+        }),
+        "tool_use" => {
+            let name = item
+                .get("name")
+                .and_then(Value::as_str)
+                .unwrap_or("工具");
+            Some(ProviderStreamChunk {
+                message_id: format!(
+                    "tool-{}",
+                    item.get("id")
+                        .and_then(Value::as_str)
+                        .unwrap_or(name)
+                ),
+                role: MessageRole::System,
+                kind: ComposerStreamEventKind::ToolCall,
+                chunk: format!("调用工具: {name}"),
+            })
+        }
+        "tool_result" => Some(ProviderStreamChunk {
+            message_id: format!(
+                "tool-result-{}",
+                item.get("tool_use_id")
+                    .and_then(Value::as_str)
+                    .unwrap_or("claude")
+            ),
+            role: MessageRole::System,
+            kind: ComposerStreamEventKind::ToolResult,
+            chunk: "工具调用已完成".to_string(),
+        }),
+        _ => None,
+    }
 }
 
 fn provider_error_summary(dispatch: &MessageDispatch, error: &str) -> String {
@@ -815,6 +997,10 @@ fn escape_applescript_shell(value: &str) -> String {
     value.replace('\\', "\\\\").replace('"', "\\\"")
 }
 
+fn escape_shell(value: &str) -> String {
+    value.replace('\\', "\\\\").replace('"', "\\\"")
+}
+
 fn provider_name(provider: &ProviderKind) -> &'static str {
     match provider {
         ProviderKind::Anthropic => "Claude Code",
@@ -862,18 +1048,22 @@ fn timestamp_ms() -> u128 {
 
 struct ClaudeParsedLine {
     role: MessageRole,
+    kind: ComposerStreamEventKind,
     delta: Option<String>,
     error: Option<String>,
     provider_session_id: Option<String>,
+    message_id: Option<String>,
 }
 
 impl Default for ClaudeParsedLine {
     fn default() -> Self {
         Self {
             role: MessageRole::Assistant,
+            kind: ComposerStreamEventKind::Message,
             delta: None,
             error: None,
             provider_session_id: None,
+            message_id: None,
         }
     }
 }

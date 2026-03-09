@@ -16,9 +16,12 @@ export const COMMANDS = {
   closePane: "close_pane",
   focusPane: "focus_pane",
   getDashboardState: "get_dashboard_state",
+  getProviderAccountStatus: "get_provider_account_status",
+  getAvailableSkills: "get_available_skills",
   getRemoteStatus: "get_remote_status",
   sendComposerMessage: "send_composer_message",
   startComposerStream: "start_composer_stream",
+  retryComposerStream: "retry_composer_stream",
   cancelPaneRun: "cancel_pane_run",
   toggleRemoteTunnel: "toggle_remote_tunnel",
 } as const;
@@ -77,10 +80,11 @@ export interface BackendDashboardState {
     id: string;
     provider: BackendProviderKind;
     label: string;
-    authKind?: "apiKey" | "system";
+    authKind?: "apiKey" | "official" | "system";
     baseUrl: string;
     model?: string | null;
     apiKeyPresent: boolean;
+    runtimeHome?: string | null;
   }>;
   providers: Array<{
     provider: BackendProviderKind;
@@ -111,6 +115,7 @@ export interface BackendComposerStreamEvent {
   sessionId: string;
   messageId: string;
   stage: "started" | "delta" | "finished" | "failed";
+  kind: "message" | "status" | "toolCall" | "toolResult" | "error";
   role: "user" | "assistant" | "system";
   chunk?: string | null;
 }
@@ -127,8 +132,37 @@ export interface BackendProviderAuthLaunchResult {
   message: string;
 }
 
+export interface BackendProviderAccountStatus {
+  provider: BackendProviderKind;
+  isLoggedIn: boolean;
+  profileLabel?: string | null;
+  authKind?: "apiKey" | "official" | "system" | null;
+  authMode?: string | null;
+  accountEmail?: string | null;
+  accountPlan?: string | null;
+  accountId?: string | null;
+  runtimeHome?: string | null;
+  note?: string | null;
+}
+
+export interface BackendSkillSummary {
+  id: string;
+  name: string;
+  description: string;
+  path: string;
+  source: string;
+}
+
 export async function getDashboardState() {
   return invoke<BackendDashboardState>(COMMANDS.getDashboardState);
+}
+
+export async function getProviderAccountStatus(input: { paneId: string }) {
+  return invoke<BackendProviderAccountStatus>(COMMANDS.getProviderAccountStatus, { input });
+}
+
+export async function getAvailableSkills() {
+  return invoke<BackendSkillSummary[]>(COMMANDS.getAvailableSkills);
 }
 
 export async function getRemoteStatus() {
@@ -160,7 +194,7 @@ export async function saveProviderProfile(input: {
   id?: string | null;
   provider: "anthropic" | "openAi";
   label: string;
-  authKind?: "apiKey" | "system";
+  authKind?: "apiKey" | "official" | "system";
   baseUrl: string;
   apiKey: string;
   model?: string | null;
@@ -183,7 +217,7 @@ export async function testProviderProfile(input: {
   profileId?: string | null;
   provider: "anthropic" | "openAi";
   label?: string | null;
-  authKind?: "apiKey" | "system";
+  authKind?: "apiKey" | "official" | "system";
   baseUrl: string;
   apiKey: string;
   model?: string | null;
@@ -193,6 +227,7 @@ export async function testProviderProfile(input: {
 
 export async function launchProviderLogin(input: {
   provider: "anthropic" | "openAi";
+  profileId?: string | null;
 }) {
   return invoke<BackendProviderAuthLaunchResult>(COMMANDS.launchProviderLogin, { input });
 }
@@ -204,7 +239,14 @@ export async function openPane(input: {
   profileId?: string | null;
   focus: boolean;
 }) {
-  return invoke(COMMANDS.openPane, { input });
+  return invoke<{
+    id: string;
+    sessionId: string;
+    title: string;
+    profileId?: string | null;
+    status: "open" | "closed";
+    isFocused: boolean;
+  }>(COMMANDS.openPane, { input });
 }
 
 export async function replacePaneSession(input: {
@@ -235,6 +277,10 @@ export async function sendComposerMessage(input: { paneId: string; content: stri
 
 export async function startComposerStream(input: { paneId: string; content: string }) {
   return invoke<void>(COMMANDS.startComposerStream, { input });
+}
+
+export async function retryComposerStream(input: { paneId: string }) {
+  return invoke<void>(COMMANDS.retryComposerStream, { input });
 }
 
 export async function cancelPaneRun(input: { paneId: string }) {

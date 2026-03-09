@@ -47,6 +47,7 @@ export interface Pane {
   profileId: string | null;
   providerSessionId: string | null;
   status: SessionStatus;
+  isDraft?: boolean;
   selected: boolean;
   messages: ConversationEvent[];
 }
@@ -71,10 +72,25 @@ export interface ProviderProfile {
   id: string;
   provider: ProviderKind;
   label: string;
-  authKind: "apiKey" | "system";
+  authKind: "apiKey" | "official" | "system";
   baseUrl: string;
   model: string | null;
   apiKeyPresent: boolean;
+  runtimeHome?: string | null;
+}
+
+export interface ProviderSetupPrompt {
+  projectId: string;
+  paneId?: string | null;
+  provider: ProviderKind;
+  failureMessage: string;
+}
+
+export interface ProfileEditorIntent {
+  provider: ProviderKind;
+  authKind: "apiKey" | "official" | "system";
+  targetPaneId?: string | null;
+  requestId: number;
 }
 
 export interface RemoteState {

@@ -140,8 +140,49 @@ pub struct ProviderProfileRecord {
     pub model: Option<String>,
     #[serde(default)]
     pub api_key_present: bool,
+    #[serde(default)]
+    pub runtime_home: Option<String>,
     pub created_at: TimestampMs,
     pub updated_at: TimestampMs,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct GetProviderAccountStatusInput {
+    pub pane_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ProviderAccountStatus {
+    pub provider: ProviderKind,
+    pub is_logged_in: bool,
+    #[serde(default)]
+    pub profile_label: Option<String>,
+    #[serde(default)]
+    pub auth_kind: Option<ProfileAuthKind>,
+    #[serde(default)]
+    pub auth_mode: Option<String>,
+    #[serde(default)]
+    pub account_email: Option<String>,
+    #[serde(default)]
+    pub account_plan: Option<String>,
+    #[serde(default)]
+    pub account_id: Option<String>,
+    #[serde(default)]
+    pub runtime_home: Option<String>,
+    #[serde(default)]
+    pub note: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct SkillSummary {
+    pub id: String,
+    pub name: String,
+    pub description: String,
+    pub path: String,
+    pub source: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -156,6 +197,7 @@ pub enum ProviderKind {
 #[serde(rename_all = "camelCase")]
 pub enum ProfileAuthKind {
     ApiKey,
+    Official,
     System,
 }
 
@@ -269,6 +311,12 @@ pub struct SendComposerMessageInput {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
+pub struct RetryComposerMessageInput {
+    pub pane_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
 pub struct SetWorkspaceLayoutInput {
     pub layout_mode: String,
 }
@@ -329,6 +377,7 @@ pub struct DeleteProviderProfileInput {
 #[serde(rename_all = "camelCase")]
 pub struct LaunchProviderLoginInput {
     pub provider: ProviderKind,
+    pub profile_id: Option<String>,
 }
 
 fn default_profile_auth_kind() -> ProfileAuthKind {
@@ -349,6 +398,7 @@ pub struct ComposerStreamEvent {
     pub session_id: String,
     pub message_id: String,
     pub stage: ComposerStreamStage,
+    pub kind: ComposerStreamEventKind,
     pub role: MessageRole,
     pub chunk: Option<String>,
 }
@@ -360,4 +410,14 @@ pub enum ComposerStreamStage {
     Delta,
     Finished,
     Failed,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum ComposerStreamEventKind {
+    Message,
+    Status,
+    ToolCall,
+    ToolResult,
+    Error,
 }

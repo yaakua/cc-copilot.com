@@ -17,6 +17,8 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .invoke_handler(tauri::generate_handler![
             commands::get_dashboard_state,
+            commands::get_provider_account_status,
+            commands::get_available_skills,
             commands::create_project,
             commands::delete_project,
             commands::create_session,
@@ -33,6 +35,7 @@ pub fn run() {
             commands::set_workspace_layout,
             commands::send_composer_message,
             commands::start_composer_stream,
+            commands::retry_composer_stream,
             commands::cancel_pane_run,
             commands::get_remote_status,
             commands::toggle_remote_tunnel

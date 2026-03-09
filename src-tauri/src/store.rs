@@ -1,4 +1,5 @@
 use std::time::{SystemTime, UNIX_EPOCH};
+use std::{env, path::PathBuf};
 
 use serde::{Deserialize, Serialize};
 
@@ -6,9 +7,9 @@ use crate::models::{
     AssignPaneProfileInput, ComposerDraft, ComposerMessage, ConnectionState, CreateProjectInput,
     CreateSessionInput, DashboardState, DeleteProviderProfileInput, MessageRole, OpenPaneInput,
     PaneRecord, PaneStatus, PaneTarget, ProfileAuthKind, ProjectRecord, ProviderKind,
-    ProviderProfileRecord, RemoteStatus, SaveProviderProfileInput, SendComposerMessageInput,
-    SendComposerMessageResult, SessionRecord, SessionStatus, SetWorkspaceLayoutInput,
-    ToggleRemoteTunnelInput, WorkspaceSummary,
+    ProviderProfileRecord, RemoteStatus, RetryComposerMessageInput, SaveProviderProfileInput,
+    SendComposerMessageInput, SendComposerMessageResult, SessionRecord, SessionStatus,
+    SetWorkspaceLayoutInput, ToggleRemoteTunnelInput, WorkspaceSummary,
 };
 
 #[derive(Debug, Clone)]
@@ -23,6 +24,7 @@ pub struct MessageDispatch {
     pub base_url: Option<String>,
     pub api_key: Option<String>,
     pub model: Option<String>,
+    pub runtime_home: Option<String>,
     pub user_message: ComposerMessage,
 }
 
@@ -421,7 +423,24 @@ impl Store {
 
         let now = now_ms();
         let auth_kind = input.auth_kind.clone().unwrap_or(ProfileAuthKind::ApiKey);
+        let has_other_claude_official = self.provider_profiles.iter().any(|candidate| {
+            candidate.id != input.id.clone().unwrap_or_default()
+                && candidate.provider == ProviderKind::Anthropic
+                && candidate.auth_kind == ProfileAuthKind::Official
+        });
+        let runtime_home = match (&input.provider, &auth_kind) {
+            (ProviderKind::OpenAi, ProfileAuthKind::Official) => {
+                Some(codex_official_runtime_home(input.id.as_deref().unwrap_or("pending")))
+            }
+            _ => None,
+        };
         if let Some(profile_id) = input.id {
+            if input.provider == ProviderKind::Anthropic
+                && auth_kind == ProfileAuthKind::Official
+                && has_other_claude_official
+            {
+                return Err("Claude Code 目前只允许一个官方账号 profile".into());
+            }
             let profile = self
                 .provider_profiles
                 .iter_mut()
@@ -432,7 +451,11 @@ impl Store {
             profile.auth_kind = auth_kind.clone();
             profile.base_url = input.base_url.trim().to_string();
             profile.model = clean_optional(input.model);
-            profile.api_key_present = if profile.auth_kind == ProfileAuthKind::System {
+            profile.runtime_home = runtime_home;
+            profile.api_key_present = if matches!(
+                profile.auth_kind,
+                ProfileAuthKind::System | ProfileAuthKind::Official
+            ) {
                 false
             } else {
                 profile.api_key_present || !input.api_key.trim().is_empty()
@@ -441,15 +464,31 @@ impl Store {
             return Ok(profile.clone());
         }
 
+        if input.provider == ProviderKind::Anthropic
+            && auth_kind == ProfileAuthKind::Official
+            && has_other_claude_official
+        {
+            return Err("Claude Code 目前只允许一个官方账号 profile".into());
+        }
+
+        let profile_id = self.next_id("profile");
+
+        let provider = input.provider.clone();
         let profile = ProviderProfileRecord {
-            id: self.next_id("profile"),
-            provider: input.provider,
+            id: profile_id.clone(),
+            provider: provider.clone(),
             label: label.to_string(),
             auth_kind: auth_kind.clone(),
             base_url: input.base_url.trim().to_string(),
             model: clean_optional(input.model),
-            api_key_present: auth_kind != ProfileAuthKind::System
+            api_key_present: !matches!(auth_kind, ProfileAuthKind::System | ProfileAuthKind::Official)
                 && !input.api_key.trim().is_empty(),
+            runtime_home: match (&provider, &auth_kind) {
+                (ProviderKind::OpenAi, ProfileAuthKind::Official) => {
+                    Some(codex_official_runtime_home(&profile_id))
+                }
+                _ => None,
+            },
             created_at: now,
             updated_at: now,
         };
@@ -616,7 +655,73 @@ impl Store {
             base_url: None,
             api_key: None,
             model: None,
+            runtime_home: None,
             user_message: message,
+        })
+    }
+
+    pub fn retry_composer_message(
+        &mut self,
+        input: RetryComposerMessageInput,
+    ) -> Result<MessageDispatch, String> {
+        let now = now_ms();
+        let pane_index = self
+            .panes
+            .iter()
+            .position(|pane| pane.id == input.pane_id && pane.status == PaneStatus::Open)
+            .ok_or_else(|| "pane not found".to_string())?;
+        let pane_id = self.panes[pane_index].id.clone();
+        let session_id = self.panes[pane_index].session_id.clone();
+        let session_index = self
+            .sessions
+            .iter()
+            .position(|session| session.id == session_id)
+            .ok_or_else(|| "session not found".to_string())?;
+        let project_id = self.sessions[session_index].project_id.clone();
+        let project_path = self
+            .projects
+            .iter()
+            .find(|project| project.id == project_id)
+            .map(|project| project.path.clone())
+            .ok_or_else(|| "project not found".to_string())?;
+        let profile_id = self.panes[pane_index]
+            .profile_id
+            .clone()
+            .or_else(|| self.sessions[session_index].profile_id.clone());
+
+        if matches!(
+            self.messages.last(),
+            Some(message) if message.session_id == session_id && message.role == MessageRole::System
+        ) {
+            self.messages.pop();
+        }
+
+        let user_message = self
+            .messages
+            .iter()
+            .rev()
+            .find(|message| message.session_id == session_id && message.role == MessageRole::User)
+            .cloned()
+            .ok_or_else(|| "user message not found".to_string())?;
+
+        self.sessions[session_index].status = SessionStatus::Busy;
+        self.sessions[session_index].last_message_preview = truncate(&user_message.content, 72);
+        self.sessions[session_index].updated_at = now;
+        self.active_session_id = Some(session_id.clone());
+
+        Ok(MessageDispatch {
+            pane_id,
+            session_id,
+            project_path,
+            provider: self.sessions[session_index].provider.clone(),
+            provider_session_id: self.sessions[session_index].provider_session_id.clone(),
+            profile_id,
+            profile_label: None,
+            base_url: None,
+            api_key: None,
+            model: None,
+            runtime_home: None,
+            user_message,
         })
     }
 
@@ -819,4 +924,15 @@ pub fn now_ms() -> u64 {
         .duration_since(UNIX_EPOCH)
         .map(|duration| duration.as_millis() as u64)
         .unwrap_or(0)
+}
+
+fn codex_official_runtime_home(profile_id: &str) -> String {
+    let root = env::var_os("CC_COPILOT_NEXT_HOME")
+        .map(PathBuf::from)
+        .or_else(|| env::var_os("HOME").map(|home| PathBuf::from(home).join(".cc-copilot-next")))
+        .unwrap_or_else(|| PathBuf::from(".cc-copilot-next"));
+    root.join("codex-official-profiles")
+        .join(profile_id)
+        .to_string_lossy()
+        .into_owned()
 }

@@ -131,6 +131,11 @@ export function PaneGrid({
               </div>
             )}
             <strong className="text-xs truncate">{pane.title}</strong>
+            {pane.isDraft && (
+              <span className="text-[9px] font-semibold text-sky-700 bg-sky-50 px-1.5 py-0.5 rounded border border-sky-200 uppercase tracking-wider">
+                草稿
+              </span>
+            )}
             <span className="text-[9px] font-semibold text-muted-foreground bg-muted/60 px-1.5 py-0.5 rounded border uppercase tracking-wider">
               {pane.provider === "claude" ? "Claude" : "Codex"}
             </span>
@@ -223,7 +228,9 @@ export function PaneGrid({
           {previewMessages.length === 0 && (
             <div className="flex-1 flex flex-col items-center justify-center text-muted-foreground/50 gap-2">
               <Maximize2 size={24} />
-              <span className="text-xs font-medium">无消息记录</span>
+              <span className="text-xs font-medium">
+                {pane.isDraft ? "空白会话，发送后再创建" : "无消息记录"}
+              </span>
             </div>
           )}
         </div>

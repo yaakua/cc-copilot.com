@@ -1,17 +1,24 @@
+use base64::engine::general_purpose::{URL_SAFE, URL_SAFE_NO_PAD};
+use base64::Engine;
+use serde_json::Value;
 use std::{
     collections::{HashMap, HashSet},
+    env,
+    fs,
+    path::PathBuf,
     sync::{Arc, Mutex, MutexGuard},
     thread,
 };
 
 use crate::models::{
-    AssignPaneProfileInput, CancelPaneRunInput, ComposerStreamEvent, ComposerStreamStage,
+    AssignPaneProfileInput, CancelPaneRunInput, ComposerStreamEvent, ComposerStreamEventKind,
+    ComposerStreamStage,
     CreateProjectInput, CreateSessionInput, DashboardState, DeleteProviderProfileInput,
-    DeleteSessionInput, LaunchProviderLoginInput, OpenPaneInput, PaneRecord, PaneTarget,
-    ProfileAuthKind, ProjectRecord, ProviderAuthLaunchResult, ProviderConnectionTestResult,
-    ProviderProfileRecord, RemoteStatus, ReplacePaneSessionInput, SaveProviderProfileInput,
-    SendComposerMessageInput, SendComposerMessageResult, SessionRecord, SetWorkspaceLayoutInput,
-    TestProviderProfileInput, ToggleRemoteTunnelInput, WorkspaceSummary,
+    DeleteSessionInput, GetProviderAccountStatusInput, LaunchProviderLoginInput, OpenPaneInput, PaneRecord, PaneTarget,
+    ProfileAuthKind, ProjectRecord, ProviderAccountStatus, ProviderAuthLaunchResult, ProviderConnectionTestResult,
+    ProviderKind, ProviderProfileRecord, RemoteStatus, ReplacePaneSessionInput, RetryComposerMessageInput,
+    SaveProviderProfileInput, SendComposerMessageInput, SendComposerMessageResult, SessionRecord,
+    SetWorkspaceLayoutInput, TestProviderProfileInput, ToggleRemoteTunnelInput, WorkspaceSummary,
 };
 use crate::providers::{
     execute_message, launch_provider_login, probe_provider_health, stream_message,
@@ -71,6 +78,39 @@ impl AppState {
         self.mutate(|store| store.create_project(input))
     }
 
+    pub fn get_provider_account_status(
+        &self,
+        input: GetProviderAccountStatusInput,
+    ) -> Result<ProviderAccountStatus, String> {
+        let store = self.lock()?;
+        let pane = store
+            .panes
+            .iter()
+            .find(|pane| pane.id == input.pane_id)
+            .cloned()
+            .ok_or_else(|| "pane not found".to_string())?;
+        let session = store
+            .sessions
+            .iter()
+            .find(|session| session.id == pane.session_id)
+            .cloned()
+            .ok_or_else(|| "session not found".to_string())?;
+        let profile = pane
+            .profile_id
+            .as_ref()
+            .and_then(|profile_id| {
+                store.provider_profiles.iter().find(|profile| &profile.id == profile_id)
+            })
+            .cloned();
+        drop(store);
+
+        resolve_provider_account_status(session.provider, profile.as_ref())
+    }
+
+    pub fn get_available_skills(&self) -> Result<Vec<crate::models::SkillSummary>, String> {
+        list_available_skills()
+    }
+
     pub fn delete_project(
         &self,
         input: crate::models::DeleteProjectInput,
@@ -98,7 +138,7 @@ impl AppState {
         }
 
         let profile = self.mutate(|store| store.save_provider_profile(input.clone()))?;
-        if auth_kind == ProfileAuthKind::System {
+        if matches!(auth_kind, ProfileAuthKind::System | ProfileAuthKind::Official) {
             let _ = self.secrets.delete_profile_api_key(&profile.id);
         } else if has_api_key {
             self.secrets
@@ -113,6 +153,9 @@ impl AppState {
     ) -> Result<ProviderProfileRecord, String> {
         let profile = self.mutate(|store| store.delete_provider_profile(input.clone()))?;
         self.secrets.delete_profile_api_key(&input.profile_id)?;
+        if let Some(runtime_home) = profile.runtime_home.as_deref() {
+            let _ = std::fs::remove_dir_all(runtime_home);
+        }
         Ok(profile)
     }
 
@@ -124,7 +167,21 @@ impl AppState {
         &self,
         input: LaunchProviderLoginInput,
     ) -> Result<ProviderAuthLaunchResult, String> {
-        let result = launch_provider_login(&input.provider)?;
+        let profile = if let Some(profile_id) = clean_optional_string(&input.profile_id.unwrap_or_default()) {
+            let store = self.lock()?;
+            let profile = store
+                .provider_profiles
+                .iter()
+                .find(|profile| profile.id == profile_id)
+                .cloned()
+                .ok_or_else(|| "profile not found".to_string())?;
+            drop(store);
+            Some(profile)
+        } else {
+            None
+        };
+
+        let result = launch_provider_login(&input.provider, profile.as_ref())?;
         self.refresh_provider_health()?;
         Ok(result)
     }
@@ -144,6 +201,7 @@ impl AppState {
         let mut base_url = trimmed_base_url;
         let mut api_key = trimmed_api_key;
         let mut model = trimmed_model;
+        let mut runtime_home: Option<String> = None;
 
         if let Some(profile_id) = trimmed_profile_id.clone() {
             let store = self.lock()?;
@@ -169,7 +227,8 @@ impl AppState {
             if model.is_none() {
                 model = profile.model;
             }
-            if api_key.is_none() && profile.auth_kind != ProfileAuthKind::System {
+            runtime_home = clean_optional_string(&profile.runtime_home.unwrap_or_default());
+            if api_key.is_none() && profile.auth_kind == ProfileAuthKind::ApiKey {
                 api_key = self.secrets.get_profile_api_key(&profile.id)?;
             }
         }
@@ -179,12 +238,13 @@ impl AppState {
             profile_id: trimmed_profile_id.as_deref(),
             profile_label: profile_label.as_deref(),
             base_url: base_url.as_deref(),
-            api_key: if auth_kind == ProfileAuthKind::System {
+            api_key: if matches!(auth_kind, ProfileAuthKind::System | ProfileAuthKind::Official) {
                 None
             } else {
                 api_key.as_deref()
             },
             model: model.as_deref(),
+            runtime_home: runtime_home.as_deref(),
         }))
     }
 
@@ -250,8 +310,22 @@ impl AppState {
                 ComposerStreamEvent {
                     pane_id: dispatch.pane_id.clone(),
                     session_id: dispatch.session_id.clone(),
+                    message_id: format!("status-{}", dispatch.session_id),
+                    stage: ComposerStreamStage::Started,
+                    kind: ComposerStreamEventKind::Status,
+                    role: crate::models::MessageRole::System,
+                    chunk: Some("正在思考".to_string()),
+                },
+            );
+
+            let _ = app.emit(
+                "composer://stream",
+                ComposerStreamEvent {
+                    pane_id: dispatch.pane_id.clone(),
+                    session_id: dispatch.session_id.clone(),
                     message_id: stream_message_id.clone(),
                     stage: ComposerStreamStage::Started,
+                    kind: ComposerStreamEventKind::Message,
                     role: crate::models::MessageRole::Assistant,
                     chunk: None,
                 },
@@ -259,16 +333,17 @@ impl AppState {
 
             let completion = stream_message(
                 &dispatch,
-                |role, chunk| {
+                |delta| {
                     let _ = app.emit(
                         "composer://stream",
                         ComposerStreamEvent {
                             pane_id: dispatch.pane_id.clone(),
                             session_id: dispatch.session_id.clone(),
-                            message_id: stream_message_id.clone(),
+                            message_id: delta.message_id,
                             stage: ComposerStreamStage::Delta,
-                            role,
-                            chunk: Some(chunk.to_string()),
+                            kind: delta.kind,
+                            role: delta.role,
+                            chunk: Some(delta.chunk),
                         },
                     );
                 },
@@ -297,6 +372,11 @@ impl AppState {
                             session_id: completion.session_id,
                             message_id: stream_message_id,
                             stage: ComposerStreamStage::Finished,
+                            kind: if completion.assistant_role == crate::models::MessageRole::System {
+                                ComposerStreamEventKind::Error
+                            } else {
+                                ComposerStreamEventKind::Message
+                            },
                             role: completion.assistant_role,
                             chunk: None,
                         },
@@ -310,6 +390,115 @@ impl AppState {
                             session_id: dispatch.session_id,
                             message_id: stream_message_id,
                             stage: ComposerStreamStage::Failed,
+                            kind: ComposerStreamEventKind::Error,
+                            role: crate::models::MessageRole::System,
+                            chunk: Some(error),
+                        },
+                    );
+                }
+            }
+        });
+
+        Ok(())
+    }
+
+    pub fn retry_composer_stream(
+        &self,
+        app: AppHandle,
+        input: RetryComposerMessageInput,
+    ) -> Result<(), String> {
+        let dispatch =
+            self.resolve_dispatch(self.mutate(|store| store.retry_composer_message(input))?)?;
+        let app_state = self.clone();
+
+        thread::spawn(move || {
+            let stream_message_id = format!("stream-{}", dispatch.session_id);
+            let _ = app.emit(
+                "composer://stream",
+                ComposerStreamEvent {
+                    pane_id: dispatch.pane_id.clone(),
+                    session_id: dispatch.session_id.clone(),
+                    message_id: format!("status-{}", dispatch.session_id),
+                    stage: ComposerStreamStage::Started,
+                    kind: ComposerStreamEventKind::Status,
+                    role: crate::models::MessageRole::System,
+                    chunk: Some("正在思考".to_string()),
+                },
+            );
+
+            let _ = app.emit(
+                "composer://stream",
+                ComposerStreamEvent {
+                    pane_id: dispatch.pane_id.clone(),
+                    session_id: dispatch.session_id.clone(),
+                    message_id: stream_message_id.clone(),
+                    stage: ComposerStreamStage::Started,
+                    kind: ComposerStreamEventKind::Message,
+                    role: crate::models::MessageRole::Assistant,
+                    chunk: None,
+                },
+            );
+
+            let completion = stream_message(
+                &dispatch,
+                |delta| {
+                    let _ = app.emit(
+                        "composer://stream",
+                        ComposerStreamEvent {
+                            pane_id: dispatch.pane_id.clone(),
+                            session_id: dispatch.session_id.clone(),
+                            message_id: delta.message_id,
+                            stage: ComposerStreamStage::Delta,
+                            kind: delta.kind,
+                            role: delta.role,
+                            chunk: Some(delta.chunk),
+                        },
+                    );
+                },
+                |pid| {
+                    let _ = app_state.track_active_run(&dispatch.pane_id, pid);
+                },
+            );
+
+            let completion = if app_state
+                .is_run_canceled(&dispatch.pane_id)
+                .unwrap_or(false)
+            {
+                app_state.clear_run_canceled(&dispatch.pane_id).ok();
+                canceled_completion(&dispatch.session_id)
+            } else {
+                completion
+            };
+            app_state.finish_active_run(&dispatch.pane_id).ok();
+
+            match app_state.mutate(|store| store.complete_composer_message(completion.clone())) {
+                Ok(_) => {
+                    let _ = app.emit(
+                        "composer://stream",
+                        ComposerStreamEvent {
+                            pane_id: dispatch.pane_id.clone(),
+                            session_id: completion.session_id,
+                            message_id: stream_message_id,
+                            stage: ComposerStreamStage::Finished,
+                            kind: if completion.assistant_role == crate::models::MessageRole::System {
+                                ComposerStreamEventKind::Error
+                            } else {
+                                ComposerStreamEventKind::Message
+                            },
+                            role: completion.assistant_role,
+                            chunk: None,
+                        },
+                    );
+                }
+                Err(error) => {
+                    let _ = app.emit(
+                        "composer://stream",
+                        ComposerStreamEvent {
+                            pane_id: dispatch.pane_id,
+                            session_id: dispatch.session_id,
+                            message_id: stream_message_id,
+                            stage: ComposerStreamStage::Failed,
+                            kind: ComposerStreamEventKind::Error,
                             role: crate::models::MessageRole::System,
                             chunk: Some(error),
                         },
@@ -435,6 +624,7 @@ impl AppState {
         dispatch.profile_label = Some(profile.label);
         dispatch.base_url = clean_optional_string(&profile.base_url);
         dispatch.model = profile.model;
+        dispatch.runtime_home = clean_optional_string(&profile.runtime_home.unwrap_or_default());
         if profile.auth_kind == ProfileAuthKind::ApiKey {
             let api_key = self
                 .secrets
@@ -497,6 +687,258 @@ fn clean_optional_string(value: &str) -> Option<String> {
     } else {
         Some(trimmed.to_string())
     }
+}
+
+fn resolve_provider_account_status(
+    provider: ProviderKind,
+    profile: Option<&ProviderProfileRecord>,
+) -> Result<ProviderAccountStatus, String> {
+    match provider {
+        ProviderKind::OpenAi => resolve_codex_account_status(profile),
+        ProviderKind::Anthropic => Ok(ProviderAccountStatus {
+            provider,
+            is_logged_in: false,
+            profile_label: profile.map(|value| value.label.clone()),
+            auth_kind: profile.map(|value| value.auth_kind.clone()),
+            auth_mode: None,
+            account_email: None,
+            account_plan: None,
+            account_id: None,
+            runtime_home: profile.and_then(|value| clean_optional_string(value.runtime_home.as_deref().unwrap_or_default())),
+            note: Some("Claude Code 当前只显示会话绑定信息，暂未解析官方账号详情。".into()),
+        }),
+        ProviderKind::Mock => Ok(ProviderAccountStatus {
+            provider,
+            is_logged_in: false,
+            profile_label: profile.map(|value| value.label.clone()),
+            auth_kind: profile.map(|value| value.auth_kind.clone()),
+            auth_mode: None,
+            account_email: None,
+            account_plan: None,
+            account_id: None,
+            runtime_home: None,
+            note: Some("Mock provider does not expose account metadata.".into()),
+        }),
+    }
+}
+
+fn resolve_codex_account_status(
+    profile: Option<&ProviderProfileRecord>,
+) -> Result<ProviderAccountStatus, String> {
+    let runtime_home = profile
+        .and_then(|value| clean_optional_string(value.runtime_home.as_deref().unwrap_or_default()))
+        .or_else(default_codex_home_string);
+    let profile_label = profile.map(|value| value.label.clone());
+    let auth_kind = profile.map(|value| value.auth_kind.clone());
+
+    let Some(runtime_home) = runtime_home else {
+        return Ok(ProviderAccountStatus {
+            provider: ProviderKind::OpenAi,
+            is_logged_in: false,
+            profile_label,
+            auth_kind,
+            auth_mode: None,
+            account_email: None,
+            account_plan: None,
+            account_id: None,
+            runtime_home: None,
+            note: Some("No Codex runtime home was resolved for this pane.".into()),
+        });
+    };
+
+    let auth_path = PathBuf::from(&runtime_home).join("auth.json");
+    if !auth_path.exists() {
+        return Ok(ProviderAccountStatus {
+            provider: ProviderKind::OpenAi,
+            is_logged_in: false,
+            profile_label,
+            auth_kind,
+            auth_mode: None,
+            account_email: None,
+            account_plan: None,
+            account_id: None,
+            runtime_home: Some(runtime_home),
+            note: Some("Codex auth.json was not found for the current runtime.".into()),
+        });
+    }
+
+    let auth_contents = fs::read_to_string(&auth_path)
+        .map_err(|error| format!("failed to read Codex auth.json: {error}"))?;
+    let auth_value: Value = serde_json::from_str(&auth_contents)
+        .map_err(|error| format!("failed to parse Codex auth.json: {error}"))?;
+
+    let auth_mode = auth_value
+        .get("auth_mode")
+        .and_then(Value::as_str)
+        .map(|value| value.to_string());
+    let account_id = auth_value
+        .get("tokens")
+        .and_then(|value| value.get("account_id"))
+        .and_then(Value::as_str)
+        .map(|value| value.to_string());
+
+    let token_claims = auth_value
+        .get("tokens")
+        .and_then(|value| value.get("access_token"))
+        .and_then(Value::as_str)
+        .and_then(decode_jwt_payload)
+        .or_else(|| {
+            auth_value
+                .get("tokens")
+                .and_then(|value| value.get("id_token"))
+                .and_then(Value::as_str)
+                .and_then(decode_jwt_payload)
+        });
+
+    let account_email = token_claims
+        .as_ref()
+        .and_then(|claims| claims.get("https://api.openai.com/profile"))
+        .and_then(|value| value.get("email"))
+        .and_then(Value::as_str)
+        .map(|value| value.to_string())
+        .or_else(|| {
+            token_claims
+                .as_ref()
+                .and_then(|claims| claims.get("email"))
+                .and_then(Value::as_str)
+                .map(|value| value.to_string())
+        });
+
+    let account_plan = token_claims
+        .as_ref()
+        .and_then(|claims| claims.get("https://api.openai.com/auth"))
+        .and_then(|value| value.get("chatgpt_plan_type"))
+        .and_then(Value::as_str)
+        .map(|value| value.to_string());
+
+    Ok(ProviderAccountStatus {
+        provider: ProviderKind::OpenAi,
+        is_logged_in: true,
+        profile_label,
+        auth_kind,
+        auth_mode,
+        account_email,
+        account_plan,
+        account_id,
+        runtime_home: Some(runtime_home),
+        note: Some("Resolved from the active Codex runtime auth.json.".into()),
+    })
+}
+
+fn default_codex_home_string() -> Option<String> {
+    let path = env::var("CODEX_HOME")
+        .ok()
+        .map(PathBuf::from)
+        .or_else(|| env::var("HOME").ok().map(|home| PathBuf::from(home).join(".codex")))?;
+    Some(path.to_string_lossy().to_string())
+}
+
+fn decode_jwt_payload(token: &str) -> Option<Value> {
+    let payload = token.split('.').nth(1)?;
+    let bytes = URL_SAFE_NO_PAD
+        .decode(payload)
+        .or_else(|_| URL_SAFE.decode(payload))
+        .ok()?;
+    serde_json::from_slice(&bytes).ok()
+}
+
+fn list_available_skills() -> Result<Vec<crate::models::SkillSummary>, String> {
+    let home = env::var_os("HOME")
+        .map(PathBuf::from)
+        .or_else(|| env::var_os("USERPROFILE").map(PathBuf::from))
+        .ok_or_else(|| "home directory not found".to_string())?;
+    let roots = [
+        (home.join(".agents").join("skills"), "agents"),
+        (home.join(".codex").join("skills"), "codex"),
+    ];
+
+    let mut results = Vec::new();
+    for (root, source) in roots {
+        collect_skill_summaries(&root, source, 3, &mut results)?;
+    }
+    results.sort_by(|left, right| left.name.to_lowercase().cmp(&right.name.to_lowercase()));
+    results.dedup_by(|left, right| left.name == right.name && left.path == right.path);
+    Ok(results)
+}
+
+fn collect_skill_summaries(
+    dir: &PathBuf,
+    source: &str,
+    depth: usize,
+    results: &mut Vec<crate::models::SkillSummary>,
+) -> Result<(), String> {
+    if depth == 0 || !dir.exists() {
+        return Ok(());
+    }
+
+    let entries = fs::read_dir(dir)
+        .map_err(|error| format!("failed to read skills directory {}: {error}", dir.display()))?;
+    for entry in entries {
+        let entry = entry.map_err(|error| format!("failed to read skills entry: {error}"))?;
+        let path = entry.path();
+        if path.is_dir() {
+            let skill_md = path.join("SKILL.md");
+            if skill_md.exists() {
+                if let Some(skill) = parse_skill_summary(&skill_md, source)? {
+                    results.push(skill);
+                }
+                continue;
+            }
+            collect_skill_summaries(&path, source, depth - 1, results)?;
+        }
+    }
+
+    Ok(())
+}
+
+fn parse_skill_summary(
+    skill_path: &PathBuf,
+    source: &str,
+) -> Result<Option<crate::models::SkillSummary>, String> {
+    let contents = fs::read_to_string(skill_path)
+        .map_err(|error| format!("failed to read {}: {error}", skill_path.display()))?;
+    let name = extract_frontmatter_field(&contents, "name")
+        .or_else(|| skill_path.parent().and_then(|parent| parent.file_name()).map(|value| value.to_string_lossy().to_string()));
+    let description = extract_frontmatter_field(&contents, "description").unwrap_or_else(|| {
+        contents
+            .lines()
+            .find(|line| !line.trim().is_empty() && !line.trim().starts_with('#') && !line.trim().starts_with("---"))
+            .unwrap_or("No description available.")
+            .trim()
+            .to_string()
+    });
+
+    let Some(name) = name else {
+        return Ok(None);
+    };
+
+    Ok(Some(crate::models::SkillSummary {
+        id: format!("{source}:{name}"),
+        name,
+        description: description.trim_matches('"').to_string(),
+        path: skill_path.to_string_lossy().to_string(),
+        source: source.to_string(),
+    }))
+}
+
+fn extract_frontmatter_field(contents: &str, field: &str) -> Option<String> {
+    let mut lines = contents.lines();
+    if lines.next()?.trim() != "---" {
+        return None;
+    }
+
+    for line in lines {
+        let trimmed = line.trim();
+        if trimmed == "---" {
+            break;
+        }
+        let prefix = format!("{field}:");
+        if let Some(rest) = trimmed.strip_prefix(&prefix) {
+            return Some(rest.trim().trim_matches('"').to_string());
+        }
+    }
+
+    None
 }
 
 #[cfg(test)]

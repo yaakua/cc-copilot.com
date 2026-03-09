@@ -1,18 +1,15 @@
-import { useState } from "react";
-import { Settings, Plus } from "lucide-react";
+import { useMemo } from "react";
+import { Bot, Command, Plus } from "lucide-react";
+import { QuickProfileDialog } from "./features/provider/components/QuickProfileDialog";
+import { ProviderSetupDialog } from "./features/provider/components/ProviderSetupDialog";
 import { ComposerBar } from "./features/session/components/ComposerBar";
-import { ProfileSettingsPanel } from "./features/provider/components/ProfileSettingsPanel";
 import { ThreadTimeline } from "./features/thread/components/ThreadTimeline";
-import { ProviderRail } from "./features/provider/components/ProviderRail";
-import { RemotePanel } from "./features/remote/components/RemotePanel";
 import { PaneGrid } from "./features/workspace/components/PaneGrid";
 import { ProjectSidebar } from "./features/workspace/components/ProjectSidebar";
 import { useDashboard } from "./hooks/useDashboard";
 import { cn } from "./lib/utils";
 
 function App() {
-  const [showSettings, setShowSettings] = useState(false);
-
   const {
     dashboard,
     composerValue,
@@ -21,6 +18,8 @@ function App() {
     currentProject,
     activePane,
     activeSession,
+    providerSetupPrompt,
+    profileEditorIntent,
     openSessionIds,
     openSessionCounts,
     profiles,
@@ -36,15 +35,48 @@ function App() {
     handleClosePane,
     handleFocusPane,
     handleTogglePaneSelection,
+    setDraftPaneProvider,
     assignProfileToPane,
     saveProfile,
-    deleteProfile,
     testProfile,
+    dismissProviderSetupPrompt,
+    retryProviderSetupPrompt,
+    createSessionWithProfileFromPrompt,
+    configureThirdPartyProviderFromPrompt,
+    consumeProfileEditorIntent,
     launchProviderLogin,
-    handleToggleRemote,
+    startProfileCreation,
     handleSendMessage,
+    handleRetryLastMessage,
     cancelPaneRun,
   } = useDashboard();
+
+  const setupProviderState = useMemo(
+    () =>
+      providerSetupPrompt
+        ? dashboard.providers.find((provider) => provider.id === providerSetupPrompt.provider) ?? null
+        : null,
+    [dashboard.providers, providerSetupPrompt],
+  );
+  const existingThirdPartyProfiles = useMemo(
+    () =>
+      providerSetupPrompt
+        ? profiles.filter(
+          (profile) =>
+            profile.provider === providerSetupPrompt.provider && profile.authKind === "apiKey",
+        )
+        : [],
+    [profiles, providerSetupPrompt],
+  );
+  const activeProfile = activePane ? paneProfiles[activePane.id] ?? null : null;
+  const activeProvider = activePane?.provider ?? activeSession?.provider ?? null;
+  const activeProviderProfiles = useMemo(
+    () =>
+      activePane
+        ? profiles.filter((profile) => profile.provider === activePane.provider)
+        : [],
+    [activePane, profiles],
+  );
 
   return (
     <main className="flex h-screen w-full bg-background text-foreground overflow-hidden font-sans">
@@ -67,8 +99,21 @@ function App() {
         {/* Top Header */}
         <header className="flex items-center justify-between px-3 py-1.5 border-b bg-background/80 backdrop-blur-md z-10 sticky top-0 shadow-sm">
           <div className="flex items-center space-x-2">
+            {activeProvider && (
+              <span
+                className={cn(
+                  "inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-semibold",
+                  activeProvider === "codex"
+                    ? "border-sky-200 bg-sky-50 text-sky-700"
+                    : "border-amber-200 bg-amber-50 text-amber-700",
+                )}
+              >
+                {activeProvider === "codex" ? <Command size={12} /> : <Bot size={12} />}
+                {activeProvider === "codex" ? "Codex" : "Claude Code"}
+              </span>
+            )}
             <h1 className="text-[13px] font-semibold text-foreground m-0">
-              {activeSession?.title ?? "Claude Copilot"}
+              {activeSession?.title ?? activePane?.title ?? "Claude Copilot"}
             </h1>
             <span className="text-[11px] font-medium text-muted-foreground bg-muted px-2 py-0.5 rounded-full">
               {currentProject?.name ?? "No Project"}
@@ -87,13 +132,6 @@ function App() {
             >
               <Plus size={15} />
             </button>
-            <button
-              className={cn("p-1 rounded-full hover:bg-muted transition-colors text-muted-foreground", showSettings && "bg-muted text-foreground")}
-              onClick={() => setShowSettings(!showSettings)}
-              title="设置"
-            >
-              <Settings size={15} />
-            </button>
           </div>
         </header>
 
@@ -106,10 +144,7 @@ function App() {
 
         {/* Main Chat Flow Area */}
         <div className="flex-1 flex outline-none overflow-hidden relative justify-center transition-all">
-          <div className={cn(
-            "flex-1 h-full pb-2 transition-all duration-300",
-            showSettings ? "hidden lg:block lg:w-2/3 xl:w-3/4" : "w-full"
-          )}>
+          <div className="flex-1 h-full w-full pb-2 transition-all duration-300">
             {dashboard.workspace.panes.length > 1 ? (
               <div className="w-full h-full pb-28">
                 <PaneGrid
@@ -132,32 +167,35 @@ function App() {
               <div className="w-[80%] max-w-[1200px] mx-auto h-full pb-28">
                 <ThreadTimeline
                   activePane={activePane}
+                  activeProfile={activeProfile}
+                  availableProfiles={activeProviderProfiles}
+                  onChangeProvider={(provider) => {
+                    if (!activePane) {
+                      return;
+                    }
+                    setDraftPaneProvider(activePane.id, provider);
+                  }}
+                  onAssignProfile={(profileId) => {
+                    if (!activePane) {
+                      return;
+                    }
+                    assignProfileToPane(activePane.id, profileId);
+                  }}
+                  onCreateProfile={() => {
+                    if (!activePane) {
+                      return;
+                    }
+                    startProfileCreation(
+                      activePane.provider,
+                      activePane.provider === "codex" ? "official" : "system",
+                      activePane.id,
+                    );
+                  }}
+                  onRetryLastMessage={handleRetryLastMessage}
                 />
               </div>
             )}
           </div>
-
-          {/* Collapsible Settings Side Panel */}
-          {showSettings && (
-            <aside className="w-full lg:w-1/3 xl:w-1/4 h-full border-l bg-background overflow-y-auto flex flex-col absolute lg:relative right-0 z-10 shadow-xl lg:shadow-none">
-              <div className="p-5 flex flex-col gap-6">
-                <div className="flex items-center justify-between pb-4 border-b">
-                  <h3 className="font-semibold text-sm">环境与提供商设置</h3>
-                </div>
-                <RemotePanel onToggle={handleToggleRemote} remote={dashboard.remote} />
-                <ProviderRail providers={dashboard.providers} />
-                <ProfileSettingsPanel
-                  activePaneId={dashboard.workspace.activePaneId}
-                  onDeleteProfile={deleteProfile}
-                  onLaunchProviderLogin={launchProviderLogin}
-                  onSaveProfile={saveProfile}
-                  onTestProfile={testProfile}
-                  profiles={profiles}
-                  providers={dashboard.providers}
-                />
-              </div>
-            </aside>
-          )}
 
           {/* Floating Absolute Composer Area */}
           <div className={cn(
@@ -166,6 +204,7 @@ function App() {
           )}>
             <div className="pointer-events-auto">
               <ComposerBar
+                provider={activePane?.provider ?? null}
                 value={composerValue}
                 onChange={setComposerValue}
                 onSend={handleSendMessage}
@@ -174,6 +213,28 @@ function App() {
           </div>
         </div>
       </section>
+
+      {providerSetupPrompt && (
+        <ProviderSetupDialog
+          existingProfiles={existingThirdPartyProfiles}
+          onClose={dismissProviderSetupPrompt}
+          onConfigureThirdParty={configureThirdPartyProviderFromPrompt}
+          onLaunchOfficialLogin={launchProviderLogin}
+          onRetry={retryProviderSetupPrompt}
+          onUseProfile={createSessionWithProfileFromPrompt}
+          prompt={providerSetupPrompt}
+          providerState={setupProviderState}
+        />
+      )}
+
+      {profileEditorIntent && (
+        <QuickProfileDialog
+          onClose={consumeProfileEditorIntent}
+          onSave={saveProfile}
+          onTest={testProfile}
+          provider={profileEditorIntent.provider}
+        />
+      )}
     </main>
   );
 }

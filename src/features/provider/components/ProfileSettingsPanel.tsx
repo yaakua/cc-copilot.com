@@ -1,6 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
 import { Settings2, Key, Globe, Trash2, Plus, Play, Check } from "lucide-react";
-import type { ProviderKind, ProviderProfile, ProviderState } from "../../../types/domain";
+import type {
+  ProfileEditorIntent,
+  ProviderKind,
+  ProviderProfile,
+  ProviderState,
+} from "../../../types/domain";
 import { maskApiKeyState, nextProfileDefaults, providerAccent } from "../useProviderProfiles";
 import { cn } from "../../../lib/utils";
 
@@ -12,7 +17,7 @@ interface ProfileSettingsPanelProps {
     id?: string | null;
     provider: ProviderKind;
     label: string;
-    authKind: "apiKey" | "system";
+    authKind: "apiKey" | "official" | "system";
     baseUrl: string;
     apiKey: string;
     model?: string | null;
@@ -21,7 +26,7 @@ interface ProfileSettingsPanelProps {
     id?: string | null;
     provider: ProviderKind;
     label?: string | null;
-    authKind: "apiKey" | "system";
+    authKind: "apiKey" | "official" | "system";
     baseUrl: string;
     apiKey: string;
     model?: string | null;
@@ -30,6 +35,8 @@ interface ProfileSettingsPanelProps {
     latencyMs: number;
     message: string;
   }>;
+  editorIntent?: ProfileEditorIntent | null;
+  onConsumeEditorIntent?: () => void;
   onLaunchProviderLogin: (provider: ProviderKind) => void;
   onDeleteProfile: (profileId: string) => void;
 }
@@ -40,6 +47,8 @@ export function ProfileSettingsPanel({
   activePaneId,
   onSaveProfile,
   onTestProfile,
+  editorIntent,
+  onConsumeEditorIntent,
   onLaunchProviderLogin,
   onDeleteProfile,
 }: ProfileSettingsPanelProps) {
@@ -90,6 +99,21 @@ export function ProfileSettingsPanel({
       apiKey: "",
     });
   }, [providers, selectedProfile]);
+
+  useEffect(() => {
+    if (!editorIntent) {
+      return;
+    }
+
+    setSelectedProfileId(null);
+    setTestFeedback(null);
+    setDraft({
+      ...nextProfileDefaults(editorIntent.provider),
+      authKind: editorIntent.authKind,
+      apiKey: "",
+    });
+    onConsumeEditorIntent?.();
+  }, [editorIntent, onConsumeEditorIntent]);
 
   return (
     <section className="p-5 rounded-2xl border bg-card text-card-foreground shadow-sm flex flex-col gap-6">
@@ -194,14 +218,15 @@ export function ProfileSettingsPanel({
               onChange={(event) =>
                 setDraft((current) => ({
                   ...current,
-                  authKind: event.currentTarget.value as "apiKey" | "system",
+                  authKind: event.currentTarget.value as "apiKey" | "official" | "system",
                   baseUrl:
-                    event.currentTarget.value === "system" ? "" : current.baseUrl,
-                  apiKey: event.currentTarget.value === "system" ? "" : current.apiKey,
+                    event.currentTarget.value === "apiKey" ? current.baseUrl : "",
+                  apiKey: event.currentTarget.value === "apiKey" ? current.apiKey : "",
                 }))
               }
               value={draft.authKind}
             >
+              <option value="official">官方账号</option>
               <option value="system">系统登录</option>
               <option value="apiKey">API Key</option>
             </select>
@@ -225,13 +250,13 @@ export function ProfileSettingsPanel({
               <Globe className="absolute left-3 text-muted-foreground/50" size={16} />
               <input
                 className="pl-9 pr-3 py-2 w-full rounded-md border bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring disabled:opacity-50 disabled:cursor-not-allowed"
-                disabled={draft.authKind === "system"}
+                disabled={draft.authKind !== "apiKey"}
                 onChange={(event) =>
                   setDraft((current) => ({ ...current, baseUrl: event.currentTarget.value }))
                 }
                 placeholder={
-                  draft.authKind === "system"
-                    ? "系统登录不需要 Base URL"
+                  draft.authKind !== "apiKey"
+                    ? "官方/系统登录不需要 Base URL"
                     : draft.provider === "claude"
                       ? "留空直连官方 Claude，填写则按 gateway/foundry 方式启动"
                       : "https://api.example.com/v1"
@@ -247,13 +272,13 @@ export function ProfileSettingsPanel({
               <Key className="absolute left-3 text-muted-foreground/50" size={16} />
               <input
                 className="pl-9 pr-3 py-2 w-full rounded-md border bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring disabled:opacity-50 disabled:cursor-not-allowed"
-                disabled={draft.authKind === "system"}
+                disabled={draft.authKind !== "apiKey"}
                 onChange={(event) =>
                   setDraft((current) => ({ ...current, apiKey: event.currentTarget.value }))
                 }
                 placeholder={
-                  draft.authKind === "system"
-                    ? "系统登录不需要 API Key"
+                  draft.authKind !== "apiKey"
+                    ? "官方/系统登录不需要 API Key"
                     : selectedProfile
                       ? "留空则保留当前 Key"
                       : "sk-..."

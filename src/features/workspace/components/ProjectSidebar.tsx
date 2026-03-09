@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Folder, Plus, Settings } from "lucide-react";
+import { Folder, Loader2, Plus, Settings } from "lucide-react";
 import type { Project, ProviderKind } from "../../../types/domain";
 import { cn } from "../../../lib/utils";
 
@@ -38,6 +38,11 @@ export function ProjectSidebar({
     sessionId: string;
     x: number;
     y: number;
+  } | null>(null);
+  const [sessionDeleteTarget, setSessionDeleteTarget] = useState<{
+    projectId: string;
+    sessionId: string;
+    title: string;
   } | null>(null);
   const [projectDeleteTarget, setProjectDeleteTarget] = useState<Project | null>(null);
 
@@ -160,6 +165,9 @@ export function ProjectSidebar({
                           {session.title}
                         </span>
                         <div className="flex items-center gap-1 shrink-0">
+                          {session.status === "running" && (
+                            <Loader2 size={13} className="animate-spin text-muted-foreground" />
+                          )}
                           {isOpen && (
                             <span className="rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-semibold text-primary">
                               {openCount > 1 ? `已打开 ${openCount}` : "已打开"}
@@ -238,8 +246,12 @@ export function ProjectSidebar({
             onClick={() => {
               const project = projects.find((candidate) => candidate.id === sessionMenu.projectId);
               const session = project?.sessions.find((candidate) => candidate.id === sessionMenu.sessionId);
-              if (session && window.confirm(`确定删除会话“${session.title}”吗？`)) {
-                onDeleteSession(sessionMenu.projectId, sessionMenu.sessionId);
+              if (session) {
+                setSessionDeleteTarget({
+                  projectId: sessionMenu.projectId,
+                  sessionId: sessionMenu.sessionId,
+                  title: session.title,
+                });
               }
               setSessionMenu(null);
             }}
@@ -247,6 +259,44 @@ export function ProjectSidebar({
           >
             删除会话
           </button>
+        </div>
+      )}
+
+      {sessionDeleteTarget && (
+        <div
+          className="fixed inset-0 z-[120] flex items-center justify-center bg-black/20 px-4"
+          onClick={() => setSessionDeleteTarget(null)}
+        >
+          <div
+            className="w-full max-w-sm rounded-2xl border border-border bg-background p-5 shadow-2xl"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="space-y-2">
+              <h3 className="text-base font-semibold text-foreground">删除会话</h3>
+              <p className="text-sm leading-6 text-muted-foreground">
+                确定删除会话“{sessionDeleteTarget.title}”吗？此操作不会恢复。
+              </p>
+            </div>
+            <div className="mt-5 flex justify-end gap-2">
+              <button
+                className="rounded-lg px-3 py-2 text-sm text-muted-foreground hover:bg-muted"
+                onClick={() => setSessionDeleteTarget(null)}
+                type="button"
+              >
+                取消
+              </button>
+              <button
+                className="rounded-lg bg-destructive px-3 py-2 text-sm font-medium text-destructive-foreground hover:bg-destructive/90"
+                onClick={() => {
+                  onDeleteSession(sessionDeleteTarget.projectId, sessionDeleteTarget.sessionId);
+                  setSessionDeleteTarget(null);
+                }}
+                type="button"
+              >
+                删除
+              </button>
+            </div>
+          </div>
         </div>
       )}
 

@@ -4,6 +4,9 @@ export function maskApiKeyState(profile: ProviderProfile | null) {
   if (!profile) {
     return "未设置";
   }
+  if (profile.authKind === "official") {
+    return "官方账号";
+  }
   if (profile.authKind === "system") {
     return "使用系统登录";
   }
@@ -15,7 +18,7 @@ export function nextProfileDefaults(
 ): Pick<ProviderProfile, "provider" | "authKind" | "label" | "baseUrl" | "model"> {
   return {
     provider,
-    authKind: "system",
+    authKind: provider === "codex" ? "official" : "system",
     label: provider === "claude" ? "New Claude Profile" : "New Codex Profile",
     baseUrl: "",
     model: provider === "codex" ? "gpt-5-codex" : null,

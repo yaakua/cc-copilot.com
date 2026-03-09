@@ -4,12 +4,13 @@ use tauri::State;
 use crate::{
     models::{
         AssignPaneProfileInput, CancelPaneRunInput, CreateProjectInput, CreateSessionInput,
-        DashboardState, DeleteProviderProfileInput, DeleteSessionInput, LaunchProviderLoginInput,
+        DashboardState, DeleteProviderProfileInput, DeleteSessionInput, GetProviderAccountStatusInput, LaunchProviderLoginInput,
         OpenPaneInput, PaneRecord, PaneTarget, ProjectRecord, ProviderAuthLaunchResult,
-        ProviderConnectionTestResult, ProviderProfileRecord, RemoteStatus,
+        ProviderAccountStatus, ProviderConnectionTestResult, ProviderProfileRecord, RemoteStatus, SkillSummary,
         ReplacePaneSessionInput, SaveProviderProfileInput, SendComposerMessageInput,
         SendComposerMessageResult, SessionRecord, SetWorkspaceLayoutInput,
         TestProviderProfileInput, ToggleRemoteTunnelInput, WorkspaceSummary,
+        RetryComposerMessageInput,
     },
     state::AppState,
 };
@@ -17,6 +18,19 @@ use crate::{
 #[tauri::command]
 pub fn get_dashboard_state(state: State<'_, AppState>) -> Result<DashboardState, String> {
     state.dashboard_state()
+}
+
+#[tauri::command]
+pub fn get_provider_account_status(
+    state: State<'_, AppState>,
+    input: GetProviderAccountStatusInput,
+) -> Result<ProviderAccountStatus, String> {
+    state.get_provider_account_status(input)
+}
+
+#[tauri::command]
+pub fn get_available_skills(state: State<'_, AppState>) -> Result<Vec<SkillSummary>, String> {
+    state.get_available_skills()
 }
 
 #[tauri::command]
@@ -129,6 +143,15 @@ pub fn start_composer_stream(
     input: SendComposerMessageInput,
 ) -> Result<(), String> {
     state.start_composer_stream(app, input)
+}
+
+#[tauri::command]
+pub fn retry_composer_stream(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    input: RetryComposerMessageInput,
+) -> Result<(), String> {
+    state.retry_composer_stream(app, input)
 }
 
 #[tauri::command]

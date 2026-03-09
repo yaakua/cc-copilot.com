@@ -117,6 +117,7 @@ export function normalizeDashboardState(
       baseUrl: profile.baseUrl,
       model: profile.model ?? null,
       apiKeyPresent: profile.apiKeyPresent,
+      runtimeHome: profile.runtimeHome ?? null,
     })),
     workspace: {
       projectId: backend.activeProjectId ?? backend.projects[0]?.id ?? null,
