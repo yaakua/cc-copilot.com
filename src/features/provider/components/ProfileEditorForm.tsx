@@ -1,6 +1,7 @@
 import { useMemo } from "react";
-import { Check, Globe, Key, Server, Sparkles, Trash2 } from "lucide-react";
+import { Check, Globe, Key, Loader2, Server, Sparkles, Trash2 } from "lucide-react";
 import type { ProviderKind, ProviderProfile } from "../../../types/domain";
+import type { BackendProviderAccountStatus } from "../../../lib/backend";
 import { cn } from "../../../lib/utils";
 
 export interface ProfileEditorDraft {
@@ -24,7 +25,9 @@ interface ProfileEditorFormProps {
   title?: string;
   description?: string;
   badge?: string;
-  lockProvider?: boolean;
+  officialAccountStatus?: BackendProviderAccountStatus | null;
+  officialAccountConfirmed?: boolean;
+  onToggleOfficialAccountConfirmed?: (checked: boolean) => void;
   onCancel?: () => void;
   onDelete?: () => void;
   onSave: () => void;
@@ -44,20 +47,23 @@ export function ProfileEditorForm({
   title,
   description,
   badge,
-  lockProvider = false,
+  officialAccountStatus = null,
+  officialAccountConfirmed = false,
+  onToggleOfficialAccountConfirmed,
   onCancel,
   onDelete,
   onSave,
   onTest,
   onChange,
 }: ProfileEditorFormProps) {
-  const normalizedAuthKind =
-    draft.provider === "codex" && draft.authKind === "system" ? "official" : draft.authKind;
   const providerLabel = draft.provider === "codex" ? "Codex" : "Claude Code";
+  const providerTone =
+    draft.provider === "codex"
+      ? "border-blue-200 bg-blue-50 text-blue-700"
+      : "border-teal-200 bg-teal-50 text-teal-700";
   const helper = useMemo(() => {
     if (draft.provider === "codex") {
       return {
-        system: "系统登录会直接复用本机 Codex CLI 的官方登录态，不需要填写 Base URL 或 API Key。",
         official:
           "为 Codex 创建独立 `CODEX_HOME`，可同时保存多个官方账号并切换，适合多账号管理。",
         api: "第三方模式适合 OpenAI 兼容网关。填写 Base URL、API Key，模型默认建议 `gpt-5-codex`。",
@@ -90,49 +96,13 @@ export function ProfileEditorForm({
       )}
 
       <div className={cn("grid gap-2.5", title || description || badge ? "mt-4" : "")}>
-        <div className="grid gap-2.5 md:grid-cols-2">
-          <button
-            className={cn(
-              "rounded-xl border p-3 text-left transition-colors",
-              draft.provider === "claude"
-                ? "border-sky-300 bg-sky-50"
-                : "border-border bg-card hover:bg-muted/40",
-              lockProvider && draft.provider !== "claude" ? "opacity-60" : "",
-            )}
-            disabled={lockProvider}
-            onClick={() => onChange({ provider: "claude", authKind: "system", baseUrl: "", apiKey: "", model: null })}
-            type="button"
-          >
-            <div className="text-[13px] font-semibold text-foreground">Claude Code</div>
-            <p className="mt-1 text-[12px] leading-5 text-muted-foreground">
-              适合系统登录或 Anthropic 兼容网关。
-            </p>
-          </button>
-          <button
-            className={cn(
-              "rounded-xl border p-3 text-left transition-colors",
-              draft.provider === "codex"
-                ? "border-sky-300 bg-sky-50"
-                : "border-border bg-card hover:bg-muted/40",
-              lockProvider && draft.provider !== "codex" ? "opacity-60" : "",
-            )}
-            disabled={lockProvider}
-            onClick={() =>
-              onChange({
-                provider: "codex",
-                authKind: "official",
-                model: draft.model?.trim() ? draft.model : "gpt-5-codex",
-                baseUrl: normalizedAuthKind === "apiKey" ? draft.baseUrl : "",
-                apiKey: normalizedAuthKind === "apiKey" ? draft.apiKey : "",
-              })
-            }
-            type="button"
-          >
-            <div className="text-[13px] font-semibold text-foreground">Codex</div>
-            <p className="mt-1 text-[12px] leading-5 text-muted-foreground">
-              支持系统登录、独立官方账号和 OpenAI 兼容网关。
-            </p>
-          </button>
+        <div className="flex items-center gap-2">
+          <span className={cn("inline-flex rounded-full border px-3 py-1 text-[11px] font-semibold", providerTone)}>
+            {providerLabel}
+          </span>
+          <span className="text-[12px] text-muted-foreground">
+            {mode === "create" ? "新建时已固定 Provider 类型" : "已有账号编辑时不能切换 Provider"}
+          </span>
         </div>
 
         <div className="grid gap-2.5 md:grid-cols-2">
@@ -140,7 +110,7 @@ export function ProfileEditorForm({
             <button
               className={cn(
                 "rounded-xl border p-3 text-left transition-colors",
-                normalizedAuthKind === "official"
+                draft.authKind === "official"
                   ? "border-sky-300 bg-sky-50"
                   : "border-border bg-card hover:bg-muted/40",
               )}
@@ -166,7 +136,7 @@ export function ProfileEditorForm({
             <button
               className={cn(
                 "rounded-xl border p-3 text-left transition-colors",
-                normalizedAuthKind === "system"
+                draft.authKind === "system"
                   ? "border-sky-300 bg-sky-50"
                   : "border-border bg-card hover:bg-muted/40",
               )}
@@ -182,12 +152,12 @@ export function ProfileEditorForm({
           )}
 
           <button
-            className={cn(
-              "rounded-xl border p-3 text-left transition-colors",
-              normalizedAuthKind === "apiKey"
-                ? "border-sky-300 bg-sky-50"
-                : "border-border bg-card hover:bg-muted/40",
-            )}
+              className={cn(
+                "rounded-xl border p-3 text-left transition-colors",
+                draft.authKind === "apiKey"
+                  ? "border-sky-300 bg-sky-50"
+                  : "border-border bg-card hover:bg-muted/40",
+              )}
             onClick={() => onChange({ authKind: "apiKey" })}
             type="button"
           >
@@ -215,7 +185,7 @@ export function ProfileEditorForm({
           <span className="font-medium text-muted-foreground">模型</span>
           <input
             className="rounded-lg border bg-background px-3 py-2 text-[13px] focus:outline-none focus:ring-2 focus:ring-sky-300 disabled:cursor-not-allowed disabled:opacity-60"
-            disabled={normalizedAuthKind !== "apiKey" && draft.provider !== "codex"}
+            disabled={draft.authKind !== "apiKey" && draft.provider !== "codex"}
             onChange={(event) => onChange({ model: event.currentTarget.value })}
             placeholder={draft.provider === "codex" ? "gpt-5-codex" : "可留空"}
             value={draft.model ?? ""}
@@ -231,10 +201,10 @@ export function ProfileEditorForm({
             />
             <input
               className="w-full rounded-lg border bg-background py-2 pl-9 pr-3 text-[13px] focus:outline-none focus:ring-2 focus:ring-sky-300 disabled:cursor-not-allowed disabled:opacity-60"
-              disabled={normalizedAuthKind !== "apiKey"}
+              disabled={draft.authKind !== "apiKey"}
               onChange={(event) => onChange({ baseUrl: event.currentTarget.value })}
               placeholder={
-                normalizedAuthKind === "apiKey" ? helper.placeholder : "官方账号不需要 Base URL"
+                draft.authKind === "apiKey" ? helper.placeholder : "当前模式不需要 Base URL"
               }
               value={draft.baseUrl}
             />
@@ -250,14 +220,14 @@ export function ProfileEditorForm({
             />
             <input
               className="w-full rounded-lg border bg-background py-2 pl-9 pr-3 text-[13px] focus:outline-none focus:ring-2 focus:ring-sky-300 disabled:cursor-not-allowed disabled:opacity-60"
-              disabled={normalizedAuthKind !== "apiKey"}
+              disabled={draft.authKind !== "apiKey"}
               onChange={(event) => onChange({ apiKey: event.currentTarget.value })}
               placeholder={
-                normalizedAuthKind === "apiKey"
+                draft.authKind === "apiKey"
                   ? selectedProfile
                     ? "留空则保留当前 Key"
                     : "sk-..."
-                  : "官方账号不需要 API Key"
+                  : "当前模式不需要 API Key"
               }
               type="password"
               value={draft.apiKey}
@@ -266,11 +236,35 @@ export function ProfileEditorForm({
         </label>
       </div>
 
-      {normalizedAuthKind === "official" && draft.provider === "codex" && (
+      {draft.authKind === "official" && draft.provider === "codex" && (
         <div className="mt-3 rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 text-[12px] leading-5 text-sky-700">
-          保存后会立即打开独立的 Codex 登录窗口。登录完成后，这个帐号会作为单独 profile 添加。
+          先点击“验证当前登录”。如果已检测到当前 Codex 登录账号并确认复用，保存时会直接写入该登录态；否则保存后会打开独立的 Codex 登录窗口。
         </div>
       )}
+
+      {draft.authKind === "official" &&
+        draft.provider === "codex" &&
+        officialAccountStatus?.isLoggedIn && (
+          <div className="mt-3 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-3 text-[12px] leading-5 text-emerald-800">
+            <div className="font-semibold">已检测到当前 Codex 登录账号</div>
+            <div className="mt-1">
+              {officialAccountStatus.accountEmail ?? "未解析到邮箱"}
+              {officialAccountStatus.accountPlan ? ` · ${officialAccountStatus.accountPlan}` : ""}
+            </div>
+            {officialAccountStatus.accountId && (
+              <div className="mt-1 text-emerald-700/90">账号 ID: {officialAccountStatus.accountId}</div>
+            )}
+            <label className="mt-3 flex items-center gap-2 text-[12px] font-medium text-emerald-900">
+              <input
+                checked={officialAccountConfirmed}
+                className="h-4 w-4 rounded border-emerald-300"
+                onChange={(event) => onToggleOfficialAccountConfirmed?.(event.currentTarget.checked)}
+                type="checkbox"
+              />
+              确认直接使用这个已登录账号保存，不再打开新的登录窗口
+            </label>
+          </div>
+        )}
 
       {feedback && (
         <div
@@ -285,6 +279,13 @@ export function ProfileEditorForm({
         </div>
       )}
 
+      {isTesting && (
+        <div className="mt-3 flex items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[13px] text-amber-800">
+          <Loader2 className="animate-spin" size={15} />
+          <span>正在测试连接，请稍候…</span>
+        </div>
+      )}
+
       <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-border pt-4">
         <div className="flex items-center gap-2">
           <button
@@ -293,11 +294,11 @@ export function ProfileEditorForm({
             onClick={onTest}
             type="button"
           >
-            <Check size={14} />
+            {isTesting ? <Loader2 className="animate-spin" size={14} /> : <Check size={14} />}
             {testLabel ??
               (isTesting
                 ? "测试中..."
-                : normalizedAuthKind === "apiKey"
+                : draft.authKind === "apiKey"
                   ? "先测试连接"
                   : "验证当前登录")}
           </button>
@@ -334,7 +335,7 @@ export function ProfileEditorForm({
               (isSaving
                 ? "保存中..."
                 : mode === "create" &&
-                  normalizedAuthKind === "official" &&
+                  draft.authKind === "official" &&
                   draft.provider === "codex"
                   ? "创建并登录"
                   : "保存 Profile")}

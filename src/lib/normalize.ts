@@ -46,6 +46,7 @@ export function normalizeDashboardState(
       provider: normalizeProvider(session.provider),
       profileId: session.profileId ?? null,
       providerSessionId: session.providerSessionId ?? null,
+      createdAt: new Date(session.createdAt).toISOString(),
       lastActiveAt: new Date(session.updatedAt).toISOString(),
       status: normalizeSessionStatus(session.status),
       imported: false,
@@ -73,14 +74,14 @@ export function normalizeDashboardState(
           sessionMessages && sessionMessages.length > 0
             ? sessionMessages
             : [
-                {
-                  id: `meta-${pane.id}`,
-                  kind: "session_meta",
-                  role: "system",
-                  body: session?.lastMessagePreview ?? "Session attached.",
-                  createdAt: new Date().toISOString(),
-                },
-              ],
+              {
+                id: `meta-${pane.id}`,
+                kind: "session_meta",
+                role: "system",
+                body: session?.lastMessagePreview ?? "Session attached.",
+                createdAt: new Date().toISOString(),
+              },
+            ],
       };
     });
 

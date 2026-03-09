@@ -41,6 +41,7 @@ function App() {
     saveProfile,
     deleteProfile,
     testProfile,
+    inspectProviderAccount,
     dismissProviderSetupPrompt,
     retryProviderSetupPrompt,
     createSessionWithProfileFromPrompt,
@@ -79,7 +80,6 @@ function App() {
     <main className="flex h-screen w-full bg-background text-foreground overflow-hidden font-sans">
       <aside className="w-[300px] flex-shrink-0 bg-sidebar border-r flex flex-col z-20">
         <ProjectSidebar
-          currentProjectId={dashboard.workspace.projectId}
           projects={dashboard.projects}
           activeSessionId={activeSession?.id ?? null}
           openSessionIds={openSessionIds}
@@ -240,6 +240,7 @@ function App() {
       {profileEditorIntent && !profileManagerOpen && (
         <QuickProfileDialog
           onClose={consumeProfileEditorIntent}
+          onInspectProviderAccount={inspectProviderAccount}
           onSave={saveProfile}
           onTest={testProfile}
           provider={profileEditorIntent.provider}
@@ -255,6 +256,7 @@ function App() {
           }}
           onConsumeEditorIntent={consumeProfileEditorIntent}
           onDeleteProfile={deleteProfile}
+          onInspectProviderAccount={inspectProviderAccount}
           onSaveProfile={saveProfile}
           onTestProfile={testProfile}
           profiles={profiles}

@@ -12,6 +12,7 @@ import {
   focusPane,
   getDashboardState,
   getProviderAccountStatus,
+  inspectProviderAccountStatus,
   getRemoteStatus,
   launchProviderLogin,
   openPane,
@@ -913,6 +914,8 @@ export function useDashboard() {
     baseUrl: string;
     apiKey: string;
     model?: string | null;
+    reuseCurrentLogin?: boolean | null;
+    confirmedAccountEmail?: string | null;
   }) {
     try {
       const savedProfile = await saveProviderProfile({
@@ -923,6 +926,7 @@ export function useDashboard() {
         baseUrl: profile.baseUrl,
         apiKey: profile.apiKey,
         model: profile.model ?? null,
+        reuseCurrentLogin: profile.reuseCurrentLogin ?? false,
       });
       setRequestError(null);
       await refreshFromBackend();
@@ -937,8 +941,14 @@ export function useDashboard() {
         if (targetPaneId) {
           await handleAssignProfileToPane(targetPaneId, savedProfile.id);
         }
-        if (profile.authKind === "official") {
+        if (profile.authKind === "official" && !profile.reuseCurrentLogin) {
           await handleLaunchProviderLogin(profile.provider, savedProfile.id);
+        } else if (profile.authKind === "official" && profile.reuseCurrentLogin) {
+          setRequestError(
+            profile.confirmedAccountEmail
+              ? `已保存并复用当前登录账号：${profile.confirmedAccountEmail}`
+              : "已保存并复用当前登录账号。",
+          );
         }
       }
 
@@ -992,6 +1002,16 @@ export function useDashboard() {
       baseUrl: profile.baseUrl,
       apiKey: profile.apiKey,
       model: profile.model ?? null,
+    });
+  }
+
+  async function handleInspectProviderAccount(profile: {
+    provider: "claude" | "codex";
+    profileId?: string | null;
+  }) {
+    return inspectProviderAccountStatus({
+      provider: profile.provider === "codex" ? "openAi" : "anthropic",
+      profileId: profile.profileId ?? null,
     });
   }
 
@@ -1337,6 +1357,7 @@ export function useDashboard() {
       const optimisticSession: SessionSummary = {
         id: createdSession.id,
         title: createdSession.title,
+        createdAt: new Date(createdSession.createdAt).toISOString(),
         provider: pane.provider,
         profileId: createdSession.profileId ?? pane.profileId,
         providerSessionId: createdSession.providerSessionId ?? null,
@@ -1419,6 +1440,7 @@ export function useDashboard() {
     saveProfile: handleSaveProfile,
     deleteProfile: handleDeleteProfile,
     testProfile: handleTestProfile,
+    inspectProviderAccount: handleInspectProviderAccount,
     dismissProviderSetupPrompt: handleDismissProviderSetupPrompt,
     retryProviderSetupPrompt: handleRetryProviderSetupPrompt,
     createSessionWithProfileFromPrompt: handleCreateSessionWithProfileFromPrompt,

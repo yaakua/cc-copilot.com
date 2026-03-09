@@ -1,11 +1,29 @@
 import { useEffect, useState } from "react";
-import { Folder, Loader2, Plus, Settings } from "lucide-react";
+import { Folder, Loader2, Plus, Settings, Bot, Terminal } from "lucide-react";
+
+function formatTimeAgo(dateString: string) {
+  try {
+    const date = new Date(dateString);
+    const diffMs = Date.now() - date.getTime();
+    if (isNaN(diffMs)) return "";
+
+    const diffMins = Math.floor(diffMs / 60000);
+    const diffHours = Math.floor(diffMins / 60);
+    const diffDays = Math.floor(diffHours / 24);
+
+    if (diffDays > 0) return `${diffDays} 天`;
+    if (diffHours > 0) return `${diffHours} 小时`;
+    if (diffMins > 0) return `${diffMins} 分`;
+    return "刚刚";
+  } catch {
+    return "";
+  }
+}
 import type { Project, ProviderKind } from "../../../types/domain";
 import { cn } from "../../../lib/utils";
 
 interface ProjectSidebarProps {
   projects: Project[];
-  currentProjectId: string | null;
   activeSessionId: string | null;
   openSessionIds: Set<string>;
   openSessionCounts: Record<string, number>;
@@ -22,7 +40,6 @@ interface ProjectSidebarProps {
 
 export function ProjectSidebar({
   projects,
-  currentProjectId,
   activeSessionId,
   openSessionIds,
   openSessionCounts,
@@ -74,8 +91,6 @@ export function ProjectSidebar({
 
       <div className="flex-1 overflow-y-auto px-3 space-y-6">
         {projects.map((project) => {
-          const isCurrent = project.id === currentProjectId;
-
           return (
             <section className="space-y-2" key={project.id}>
               <div className="group flex items-center justify-between px-2 py-1 text-sm font-semibold text-foreground relative">
@@ -134,7 +149,7 @@ export function ProjectSidebar({
                 </div>
               </div>
 
-              <div className="space-y-1">
+              <div className="space-y-0.5">
                 {project.sessions.map((session) => {
                   const isActive = session.id === activeSessionId;
                   const isOpen = openSessionIds.has(session.id);
@@ -142,12 +157,12 @@ export function ProjectSidebar({
                   return (
                     <button
                       className={cn(
-                        "group/session w-full text-left p-3 rounded-xl border transition-all space-y-1.5 focus:outline-none focus:ring-2 focus:ring-primary/20",
+                        "group/session flex items-center justify-between w-full px-2 py-1.5 rounded-lg transition-all focus:outline-none focus:ring-1 focus:ring-primary/30",
                         isActive
-                          ? "bg-background shadow-sm border-primary/30"
+                          ? "bg-muted/80 text-foreground font-medium"
                           : isOpen
-                            ? "bg-background/70 border-border hover:border-border/80"
-                            : "border-transparent hover:bg-muted/50"
+                            ? "bg-muted/40 text-muted-foreground hover:bg-muted/60 hover:text-foreground"
+                            : "text-muted-foreground hover:bg-muted/50 hover:text-foreground"
                       )}
                       key={session.id}
                       onClick={() => onOpenSession(project.id, session.id, "replace")}
@@ -160,38 +175,42 @@ export function ProjectSidebar({
                           y: event.clientY,
                         });
                       }}
+                      title={session.title}
                       type="button"
                     >
-                      <div className="flex items-start justify-between gap-2">
-                        <span className={cn("text-sm font-medium truncate", isActive ? "text-foreground" : "text-muted-foreground flex-1")}>
+                      <div className="flex items-center gap-2 flex-1 min-w-0 pr-3">
+                        {session.provider === "claude" ? (
+                          <Bot size={13} className="shrink-0 opacity-70" />
+                        ) : (
+                          <Terminal size={13} className="shrink-0 opacity-70" />
+                        )}
+
+                        <span className="truncate text-[13px] leading-tight flex-1 text-left">
                           {session.title}
                         </span>
-                        <div className="flex items-center gap-1 shrink-0">
-                          {session.status === "running" && (
-                            <Loader2 size={13} className="animate-spin text-muted-foreground" />
-                          )}
-                          {isOpen && (
-                            <span className="rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-semibold text-primary">
-                              {openCount > 1 ? `已打开 ${openCount}` : "已打开"}
-                            </span>
-                          )}
-                        </div>
-                      </div>
-                      <div className="flex items-center justify-between text-[11px] text-muted-foreground">
-                        <div className="flex items-center gap-1.5">
-                          <span className="capitalize">{session.provider === "claude" ? "Claude" : "Codex"}</span>
-                          <span>•</span>
-                          <span className="capitalize">{session.status}</span>
-                        </div>
+
+                        {session.status === "running" && (
+                          <Loader2 size={12} className="shrink-0 animate-spin text-primary" />
+                        )}
+
                         {session.unreadCount > 0 && (
-                          <span className="font-medium text-primary bg-primary/10 px-1.5 py-0.5 rounded">
-                            {session.unreadCount} 条新消息
+                          <span className="shrink-0 rounded bg-primary/20 px-1 py-0.5 text-[9px] font-bold text-primary">
+                            {session.unreadCount}
                           </span>
                         )}
                       </div>
-                      {isCurrent && !isActive && isOpen && (
-                        <div className="text-[11px] text-muted-foreground">单击切到当前窗格，右键可分屏打开或删除</div>
-                      )}
+
+                      <div className="flex items-center gap-2 shrink-0 text-[11px] opacity-80 whitespace-nowrap">
+                        {isOpen && (
+                          <span className="flex items-center gap-1 font-semibold text-emerald-600 dark:text-emerald-400" title={`已打开窗格数: ${openCount}`}>
+                            <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+                            {openCount > 1 ? openCount : ""}
+                          </span>
+                        )}
+                        <span className="tabular-nums opacity-60 group-hover/session:opacity-100 transition-opacity">
+                          {formatTimeAgo(session.createdAt)}
+                        </span>
+                      </div>
                     </button>
                   );
                 })}

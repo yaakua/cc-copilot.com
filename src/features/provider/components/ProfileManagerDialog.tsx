@@ -1,4 +1,5 @@
 import { X } from "lucide-react";
+import type { BackendProviderAccountStatus } from "../../../lib/backend";
 import type { ProfileEditorIntent, ProviderProfile, ProviderState } from "../../../types/domain";
 import { ProfileSettingsPanel } from "./ProfileSettingsPanel";
 
@@ -15,6 +16,8 @@ interface ProfileManagerDialogProps {
     baseUrl: string;
     apiKey: string;
     model?: string | null;
+    reuseCurrentLogin?: boolean | null;
+    confirmedAccountEmail?: string | null;
   }) => Promise<unknown> | void;
   onTestProfile: (profile: {
     id?: string | null;
@@ -29,6 +32,10 @@ interface ProfileManagerDialogProps {
     latencyMs: number;
     message: string;
   }>;
+  onInspectProviderAccount: (profile: {
+    provider: "claude" | "codex";
+    profileId?: string | null;
+  }) => Promise<BackendProviderAccountStatus>;
   onConsumeEditorIntent?: () => void;
   onDeleteProfile: (profileId: string) => void;
 }
@@ -40,6 +47,7 @@ export function ProfileManagerDialog({
   onClose,
   onSaveProfile,
   onTestProfile,
+  onInspectProviderAccount,
   onConsumeEditorIntent,
   onDeleteProfile,
 }: ProfileManagerDialogProps) {
@@ -72,6 +80,7 @@ export function ProfileManagerDialog({
           editorIntent={editorIntent}
           onConsumeEditorIntent={onConsumeEditorIntent}
           onDeleteProfile={onDeleteProfile}
+          onInspectProviderAccount={onInspectProviderAccount}
           onSaveProfile={onSaveProfile}
           onTestProfile={onTestProfile}
           profiles={profiles}

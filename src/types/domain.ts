@@ -25,6 +25,7 @@ export interface SessionSummary {
   provider: ProviderKind;
   profileId: string | null;
   providerSessionId: string | null;
+  createdAt: string;
   lastActiveAt: string;
   status: SessionStatus;
   imported: boolean;

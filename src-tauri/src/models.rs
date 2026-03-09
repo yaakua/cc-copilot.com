@@ -337,6 +337,7 @@ pub struct SaveProviderProfileInput {
     pub base_url: String,
     pub api_key: String,
     pub model: Option<String>,
+    pub reuse_current_login: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -376,6 +377,13 @@ pub struct DeleteProviderProfileInput {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct LaunchProviderLoginInput {
+    pub provider: ProviderKind,
+    pub profile_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct InspectProviderAccountStatusInput {
     pub provider: ProviderKind,
     pub profile_id: Option<String>,
 }

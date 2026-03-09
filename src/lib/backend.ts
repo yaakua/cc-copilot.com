@@ -12,6 +12,7 @@ export const COMMANDS = {
   assignPaneProvider: "assign_pane_provider",
   testProviderProfile: "test_provider_profile",
   launchProviderLogin: "launch_provider_login",
+  inspectProviderAccountStatus: "inspect_provider_account_status",
   openPane: "open_pane",
   replacePaneSession: "replace_pane_session",
   closePane: "close_pane",
@@ -66,6 +67,7 @@ export interface BackendDashboardState {
     profileId?: string | null;
     providerSessionId?: string | null;
     status: BackendSessionStatus;
+    createdAt: number;
     updatedAt: number;
     lastMessagePreview: string;
   }>;
@@ -107,6 +109,7 @@ export interface BackendSessionRecord {
   profileId?: string | null;
   providerSessionId?: string | null;
   status: BackendSessionStatus;
+  createdAt: number;
   updatedAt: number;
   lastMessagePreview: string;
 }
@@ -162,6 +165,13 @@ export async function getProviderAccountStatus(input: { paneId: string }) {
   return invoke<BackendProviderAccountStatus>(COMMANDS.getProviderAccountStatus, { input });
 }
 
+export async function inspectProviderAccountStatus(input: {
+  provider: "anthropic" | "openAi";
+  profileId?: string | null;
+}) {
+  return invoke<BackendProviderAccountStatus>(COMMANDS.inspectProviderAccountStatus, { input });
+}
+
 export async function getAvailableSkills() {
   return invoke<BackendSkillSummary[]>(COMMANDS.getAvailableSkills);
 }
@@ -199,6 +209,7 @@ export async function saveProviderProfile(input: {
   baseUrl: string;
   apiKey: string;
   model?: string | null;
+  reuseCurrentLogin?: boolean | null;
 }) {
   return invoke(COMMANDS.saveProviderProfile, { input });
 }

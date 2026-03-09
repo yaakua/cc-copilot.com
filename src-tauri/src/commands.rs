@@ -4,8 +4,9 @@ use tauri::State;
 use crate::{
     models::{
         AssignPaneProfileInput, AssignPaneProviderInput, CancelPaneRunInput, CreateProjectInput, CreateSessionInput,
-        DashboardState, DeleteProviderProfileInput, DeleteSessionInput, GetProviderAccountStatusInput, LaunchProviderLoginInput,
-        OpenPaneInput, PaneRecord, PaneTarget, ProjectRecord, ProviderAuthLaunchResult,
+        DashboardState, DeleteProviderProfileInput, DeleteSessionInput, GetProviderAccountStatusInput,
+        InspectProviderAccountStatusInput, LaunchProviderLoginInput, OpenPaneInput, PaneRecord, PaneTarget, ProjectRecord,
+        ProviderAuthLaunchResult,
         ProviderAccountStatus, ProviderConnectionTestResult, ProviderProfileRecord, RemoteStatus, SkillSummary,
         ReplacePaneSessionInput, SaveProviderProfileInput, SendComposerMessageInput,
         SendComposerMessageResult, SessionRecord, SetWorkspaceLayoutInput,
@@ -26,6 +27,14 @@ pub fn get_provider_account_status(
     input: GetProviderAccountStatusInput,
 ) -> Result<ProviderAccountStatus, String> {
     state.get_provider_account_status(input)
+}
+
+#[tauri::command]
+pub fn inspect_provider_account_status(
+    state: State<'_, AppState>,
+    input: InspectProviderAccountStatusInput,
+) -> Result<ProviderAccountStatus, String> {
+    state.inspect_provider_account_status(input)
 }
 
 #[tauri::command]
@@ -98,11 +107,14 @@ pub fn assign_pane_provider(
 }
 
 #[tauri::command]
-pub fn test_provider_profile(
+pub async fn test_provider_profile(
     state: State<'_, AppState>,
     input: TestProviderProfileInput,
 ) -> Result<ProviderConnectionTestResult, String> {
-    state.test_provider_profile(input)
+    let app_state = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || app_state.test_provider_profile(input))
+        .await
+        .map_err(|error| format!("failed to join provider test task: {error}"))?
 }
 
 #[tauri::command]

@@ -18,6 +18,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::get_dashboard_state,
             commands::get_provider_account_status,
+            commands::inspect_provider_account_status,
             commands::get_available_skills,
             commands::create_project,
             commands::delete_project,

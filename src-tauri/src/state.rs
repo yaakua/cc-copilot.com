@@ -5,7 +5,7 @@ use std::{
     collections::{HashMap, HashSet},
     env,
     fs,
-    path::PathBuf,
+    path::{Path, PathBuf},
     sync::{Arc, Mutex, MutexGuard},
     thread,
 };
@@ -14,11 +14,12 @@ use crate::models::{
     AssignPaneProfileInput, AssignPaneProviderInput, CancelPaneRunInput, ComposerStreamEvent, ComposerStreamEventKind,
     ComposerStreamStage,
     CreateProjectInput, CreateSessionInput, DashboardState, DeleteProviderProfileInput,
-    DeleteSessionInput, GetProviderAccountStatusInput, LaunchProviderLoginInput, OpenPaneInput, PaneRecord, PaneTarget,
-    ProfileAuthKind, ProjectRecord, ProviderAccountStatus, ProviderAuthLaunchResult, ProviderConnectionTestResult,
-    ProviderKind, ProviderProfileRecord, RemoteStatus, ReplacePaneSessionInput, RetryComposerMessageInput,
-    SaveProviderProfileInput, SendComposerMessageInput, SendComposerMessageResult, SessionRecord,
-    SetWorkspaceLayoutInput, TestProviderProfileInput, ToggleRemoteTunnelInput, WorkspaceSummary,
+    DeleteSessionInput, GetProviderAccountStatusInput, InspectProviderAccountStatusInput, LaunchProviderLoginInput,
+    OpenPaneInput, PaneRecord, PaneTarget, ProfileAuthKind, ProjectRecord, ProviderAccountStatus,
+    ProviderAuthLaunchResult, ProviderConnectionTestResult, ProviderKind, ProviderProfileRecord, RemoteStatus,
+    ReplacePaneSessionInput, RetryComposerMessageInput, SaveProviderProfileInput, SendComposerMessageInput,
+    SendComposerMessageResult, SessionRecord, SetWorkspaceLayoutInput, TestProviderProfileInput,
+    ToggleRemoteTunnelInput, WorkspaceSummary,
 };
 use crate::providers::{
     execute_message, launch_provider_login, probe_provider_health, stream_message,
@@ -107,6 +108,31 @@ impl AppState {
         resolve_provider_account_status(session.provider, profile.as_ref())
     }
 
+    pub fn inspect_provider_account_status(
+        &self,
+        input: InspectProviderAccountStatusInput,
+    ) -> Result<ProviderAccountStatus, String> {
+        let profile = if let Some(profile_id) = input.profile_id {
+            let store = self.lock()?;
+            let profile = store
+                .provider_profiles
+                .iter()
+                .find(|profile| profile.id == profile_id)
+                .cloned()
+                .ok_or_else(|| "profile not found".to_string())?;
+            drop(store);
+
+            if profile.provider != input.provider {
+                return Err("profile provider does not match requested provider".into());
+            }
+            Some(profile)
+        } else {
+            None
+        };
+
+        resolve_provider_account_status(input.provider, profile.as_ref())
+    }
+
     pub fn get_available_skills(&self) -> Result<Vec<crate::models::SkillSummary>, String> {
         list_available_skills()
     }
@@ -133,11 +159,25 @@ impl AppState {
         let is_new = input.id.is_none();
         let has_api_key = !input.api_key.trim().is_empty();
         let auth_kind = input.auth_kind.clone().unwrap_or(ProfileAuthKind::ApiKey);
+        let reuse_current_login = input.reuse_current_login.unwrap_or(false);
         if is_new && auth_kind == ProfileAuthKind::ApiKey && !has_api_key {
             return Err("api key is required when creating a profile".into());
         }
 
-        let profile = self.mutate(|store| store.save_provider_profile(input.clone()))?;
+        let profile = self.mutate(|store| {
+            let profile = store.save_provider_profile(input.clone())?;
+            if reuse_current_login
+                && input.provider == ProviderKind::OpenAi
+                && auth_kind == ProfileAuthKind::Official
+            {
+                let runtime_home = profile
+                    .runtime_home
+                    .as_deref()
+                    .ok_or_else(|| "official Codex profile is missing runtime home".to_string())?;
+                copy_codex_auth_from_default_runtime(runtime_home)?;
+            }
+            Ok(profile)
+        })?;
         if matches!(auth_kind, ProfileAuthKind::System | ProfileAuthKind::Official) {
             let _ = self.secrets.delete_profile_api_key(&profile.id);
         } else if has_api_key {
@@ -838,6 +878,30 @@ fn default_codex_home_string() -> Option<String> {
         .map(PathBuf::from)
         .or_else(|| env::var("HOME").ok().map(|home| PathBuf::from(home).join(".codex")))?;
     Some(path.to_string_lossy().to_string())
+}
+
+fn copy_codex_auth_from_default_runtime(target_runtime_home: &str) -> Result<(), String> {
+    let source_runtime_home =
+        default_codex_home_string().ok_or_else(|| "No default Codex runtime home was resolved.".to_string())?;
+    if Path::new(&source_runtime_home) == Path::new(target_runtime_home) {
+        return Ok(());
+    }
+
+    let source_auth = PathBuf::from(&source_runtime_home).join("auth.json");
+    if !source_auth.exists() {
+        return Err("Codex auth.json was not found in the current default runtime.".into());
+    }
+
+    let target_auth = PathBuf::from(target_runtime_home).join("auth.json");
+    if let Some(parent) = target_auth.parent() {
+        fs::create_dir_all(parent)
+            .map_err(|error| format!("failed to prepare Codex runtime directory: {error}"))?;
+    }
+
+    fs::copy(&source_auth, &target_auth)
+        .map_err(|error| format!("failed to copy Codex auth.json into the profile runtime: {error}"))?;
+
+    Ok(())
 }
 
 fn decode_jwt_payload(token: &str) -> Option<Value> {
