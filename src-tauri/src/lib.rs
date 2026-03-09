@@ -27,6 +27,7 @@ pub fn run() {
             commands::get_provider_account_status,
             commands::inspect_provider_account_status,
             commands::get_available_skills,
+            commands::get_log_file_path,
             commands::create_project,
             commands::delete_project,
             commands::create_session,

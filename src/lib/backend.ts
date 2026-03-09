@@ -20,6 +20,7 @@ export const COMMANDS = {
   getDashboardState: "get_dashboard_state",
   getProviderAccountStatus: "get_provider_account_status",
   getAvailableSkills: "get_available_skills",
+  getLogFilePath: "get_log_file_path",
   getRemoteStatus: "get_remote_status",
   sendComposerMessage: "send_composer_message",
   startComposerStream: "start_composer_stream",
@@ -174,6 +175,10 @@ export async function inspectProviderAccountStatus(input: {
 
 export async function getAvailableSkills() {
   return invoke<BackendSkillSummary[]>(COMMANDS.getAvailableSkills);
+}
+
+export async function getLogFilePath() {
+  return invoke<string>(COMMANDS.getLogFilePath);
 }
 
 export async function getRemoteStatus() {

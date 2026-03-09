@@ -43,6 +43,11 @@ pub fn get_available_skills(state: State<'_, AppState>) -> Result<Vec<SkillSumma
 }
 
 #[tauri::command]
+pub fn get_log_file_path() -> Result<String, String> {
+    crate::logging::init_logging().map(|path| path.to_string_lossy().into_owned())
+}
+
+#[tauri::command]
 pub fn create_project(
     state: State<'_, AppState>,
     input: CreateProjectInput,

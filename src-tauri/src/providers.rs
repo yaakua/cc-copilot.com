@@ -609,7 +609,9 @@ fn run_claude_connection_test(config: &ProviderRuntimeConfig<'_>) -> Result<Stri
             return Err(error);
         }
         if let Some(delta) = parsed.delta {
-            assistant_text.push_str(&delta);
+            if parsed.role == MessageRole::Assistant {
+                assistant_text.push_str(&delta);
+            }
         }
     }
 

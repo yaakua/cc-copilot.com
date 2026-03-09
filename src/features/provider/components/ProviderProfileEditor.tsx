@@ -1,5 +1,7 @@
 import { useEffect, useState } from "react";
+import { openPath } from "@tauri-apps/plugin-opener";
 import type { BackendProviderAccountStatus } from "../../../lib/backend";
+import { getLogFilePath } from "../../../lib/backend";
 import type { ProviderKind, ProviderProfile } from "../../../types/domain";
 import { ProfileEditorForm, type ProfileEditorDraft } from "./ProfileEditorForm";
 
@@ -66,6 +68,7 @@ export function ProviderProfileEditor({
   const [isSaving, setIsSaving] = useState(false);
   const [isTesting, setIsTesting] = useState(false);
   const [feedback, setFeedback] = useState<{ ok: boolean; message: string } | null>(null);
+  const [isOpeningLog, setIsOpeningLog] = useState(false);
   const [officialAccountStatus, setOfficialAccountStatus] =
     useState<BackendProviderAccountStatus | null>(null);
   const [officialAccountConfirmed, setOfficialAccountConfirmed] = useState(false);
@@ -138,6 +141,21 @@ export function ProviderProfileEditor({
     }
   }
 
+  async function handleOpenLog() {
+    setIsOpeningLog(true);
+    try {
+      const logPath = await getLogFilePath();
+      await openPath(logPath);
+    } catch (error) {
+      setFeedback({
+        ok: false,
+        message: error instanceof Error ? error.message : "打开日志文件失败。",
+      });
+    } finally {
+      setIsOpeningLog(false);
+    }
+  }
+
   return (
     <ProfileEditorForm
       badge={badge}
@@ -149,6 +167,7 @@ export function ProviderProfileEditor({
       mode={mode}
       officialAccountConfirmed={officialAccountConfirmed}
       officialAccountStatus={officialAccountStatus}
+      isOpeningLog={isOpeningLog}
       onCancel={onCancel}
       onChange={(next) => {
         onChangeDraft({ ...draft, ...next });
@@ -157,6 +176,7 @@ export function ProviderProfileEditor({
         setOfficialAccountConfirmed(false);
       }}
       onDelete={onDelete}
+      onOpenLog={handleOpenLog}
       onSave={handleSave}
       onTest={handleTest}
       onToggleOfficialAccountConfirmed={setOfficialAccountConfirmed}

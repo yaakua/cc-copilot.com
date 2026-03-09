@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Plus } from "lucide-react";
+import { CheckCircle2, Layers3, Plus, ShieldCheck } from "lucide-react";
 import type { BackendProviderAccountStatus } from "../../../lib/backend";
 import type {
   ProfileEditorIntent,
@@ -58,9 +58,7 @@ export function ProfileSettingsPanel({
   onDeleteProfile,
 }: ProfileSettingsPanelProps) {
   const [isCreating, setIsCreating] = useState(false);
-  const [selectedProfileId, setSelectedProfileId] = useState<string | null>(
-    profiles[0]?.id ?? null,
-  );
+  const [selectedProfileId, setSelectedProfileId] = useState<string | null>(null);
   const [draft, setDraft] = useState({
     ...nextProfileDefaults("claude"),
     apiKey: "",
@@ -87,7 +85,7 @@ export function ProfileSettingsPanel({
     if (selectedProfileId && profiles.some((profile) => profile.id === selectedProfileId)) {
       return;
     }
-    setSelectedProfileId(profiles[0]?.id ?? null);
+    setSelectedProfileId(null);
   }, [isCreating, profiles, selectedProfileId]);
 
   useEffect(() => {
@@ -145,6 +143,16 @@ export function ProfileSettingsPanel({
 
   function requestDelete(profile: ProviderProfile) {
     setDeleteTarget(profile);
+  }
+
+  async function handleSaveProfile(profile: Parameters<typeof onSaveProfile>[0]) {
+    await Promise.resolve(onSaveProfile(profile));
+    setIsCreating(false);
+    setSelectedProfileId(null);
+    setDraft({
+      ...nextProfileDefaults(profile.provider),
+      apiKey: "",
+    });
   }
 
   function confirmDelete() {
@@ -289,18 +297,61 @@ export function ProfileSettingsPanel({
               isCreating || !selectedProfile ? undefined : () => requestDelete(selectedProfile)
             }
             onInspectProviderAccount={onInspectProviderAccount}
-            onSaveProfile={onSaveProfile}
+            onSaveProfile={handleSaveProfile}
             onTestProfile={onTestProfile}
             resetKey={`${isCreating ? "create" : "edit"}-${selectedProfile?.id ?? draft.provider}`}
             selectedProfile={selectedProfile}
             title={title}
           />
         ) : (
-          <div className="flex h-full min-h-[460px] flex-col items-center justify-center rounded-2xl border border-dashed border-border bg-card/50 px-8 text-center">
-            <div className="text-lg font-semibold text-foreground">选择一个账号开始编辑</div>
-            <p className="mt-2 max-w-md text-sm leading-6 text-muted-foreground">
-              左侧展示所有已保存账号。点击任意项后，右侧即可编辑；点击“新建”可添加新的系统账号、官方账号或第三方 Provider。
-            </p>
+          <div className="flex h-full min-h-[460px] flex-col justify-center rounded-2xl border border-dashed border-border bg-card/40 px-8 py-10">
+            <div className="mx-auto w-full max-w-2xl text-center">
+              <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-sky-50 text-sky-700 shadow-sm">
+                <Layers3 size={26} />
+              </div>
+              <div className="mt-5 text-xl font-semibold text-foreground">账号设置说明</div>
+              <p className="mt-3 text-sm leading-6 text-muted-foreground">
+                这里用于统一维护 Claude Code 与 Codex 的账号配置。右侧在未新建或未编辑时默认展示说明页，避免保留草稿态；保存完成后也会回到这个状态。
+              </p>
+            </div>
+
+            <div className="mx-auto mt-8 grid w-full max-w-3xl gap-3 md:grid-cols-3">
+              <div className="rounded-2xl border border-border bg-background px-4 py-4 text-left shadow-sm">
+                <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
+                  <Plus className="text-sky-700" size={16} />
+                  新建与编辑
+                </div>
+                <p className="mt-2 text-xs leading-5 text-muted-foreground">
+                  左侧点击“新建”开始配置；点击已保存账号可进入编辑。Provider 类型创建后固定，避免混淆不同运行方式。
+                </p>
+              </div>
+
+              <div className="rounded-2xl border border-border bg-background px-4 py-4 text-left shadow-sm">
+                <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
+                  <ShieldCheck className="text-emerald-700" size={16} />
+                  使用约定
+                </div>
+                <p className="mt-2 text-xs leading-5 text-muted-foreground">
+                  第三方模式填写 Base URL、API Key 和可选模型；官方或系统模式则复用本机登录态，不需要再填密钥。
+                </p>
+              </div>
+
+              <div className="rounded-2xl border border-border bg-background px-4 py-4 text-left shadow-sm">
+                <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
+                  <CheckCircle2 className="text-amber-600" size={16} />
+                  保存后行为
+                </div>
+                <p className="mt-2 text-xs leading-5 text-muted-foreground">
+                  保存成功后会退出编辑态并回到说明页。需要继续修改时，可从左侧重新选择目标账号进入编辑。
+                </p>
+              </div>
+            </div>
+
+            <div className="mx-auto mt-6 flex flex-wrap items-center justify-center gap-2 text-xs text-muted-foreground">
+              <span className="rounded-full border border-border bg-background px-3 py-1.5">支持多第三方并行保存</span>
+              <span className="rounded-full border border-border bg-background px-3 py-1.5">不同会话可绑定不同 Profile</span>
+              <span className="rounded-full border border-border bg-background px-3 py-1.5">可随时查看日志排查连接问题</span>
+            </div>
           </div>
         )}
       </div>

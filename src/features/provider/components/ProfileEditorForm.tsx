@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import { Check, Globe, Key, Loader2, Server, Sparkles, Trash2 } from "lucide-react";
+import { Check, FileText, Globe, Key, Loader2, Server, Sparkles, Trash2 } from "lucide-react";
 import type { ProviderKind, ProviderProfile } from "../../../types/domain";
 import type { BackendProviderAccountStatus } from "../../../lib/backend";
 import { cn } from "../../../lib/utils";
@@ -19,6 +19,7 @@ interface ProfileEditorFormProps {
   selectedProfile?: ProviderProfile | null;
   isSaving?: boolean;
   isTesting?: boolean;
+  isOpeningLog?: boolean;
   feedback?: { ok: boolean; message: string } | null;
   saveLabel?: string;
   testLabel?: string;
@@ -30,6 +31,7 @@ interface ProfileEditorFormProps {
   onToggleOfficialAccountConfirmed?: (checked: boolean) => void;
   onCancel?: () => void;
   onDelete?: () => void;
+  onOpenLog?: () => void;
   onSave: () => void;
   onTest: () => void;
   onChange: (next: Partial<ProfileEditorDraft>) => void;
@@ -41,6 +43,7 @@ export function ProfileEditorForm({
   selectedProfile,
   isSaving = false,
   isTesting = false,
+  isOpeningLog = false,
   feedback = null,
   saveLabel,
   testLabel,
@@ -52,6 +55,7 @@ export function ProfileEditorForm({
   onToggleOfficialAccountConfirmed,
   onCancel,
   onDelete,
+  onOpenLog,
   onSave,
   onTest,
   onChange,
@@ -288,6 +292,18 @@ export function ProfileEditorForm({
 
       <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-border pt-4">
         <div className="flex items-center gap-2">
+          {onOpenLog && (
+            <button
+              className="inline-flex items-center gap-1.5 rounded-lg border px-4 py-2 text-[13px] font-medium text-foreground hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60"
+              disabled={isOpeningLog || isSaving}
+              onClick={onOpenLog}
+              type="button"
+            >
+              {isOpeningLog ? <Loader2 className="animate-spin" size={14} /> : <FileText size={14} />}
+              {isOpeningLog ? "打开中..." : "打开日志"}
+            </button>
+          )}
+
           <button
             className="inline-flex items-center gap-1.5 rounded-lg border px-4 py-2 text-[13px] font-medium text-foreground hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60"
             disabled={isTesting || isSaving}
