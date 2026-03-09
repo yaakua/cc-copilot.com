@@ -1,13 +1,14 @@
 import { useEffect, useMemo, useState } from "react";
-import { Settings2, Key, Globe, Trash2, Plus, Play, Check } from "lucide-react";
+import { Plus, Settings2 } from "lucide-react";
 import type {
   ProfileEditorIntent,
   ProviderKind,
   ProviderProfile,
   ProviderState,
 } from "../../../types/domain";
-import { maskApiKeyState, nextProfileDefaults, providerAccent } from "../useProviderProfiles";
+import { nextProfileDefaults, providerAccent } from "../useProviderProfiles";
 import { cn } from "../../../lib/utils";
+import { ProfileEditorForm } from "./ProfileEditorForm";
 
 interface ProfileSettingsPanelProps {
   profiles: ProviderProfile[];
@@ -52,6 +53,7 @@ export function ProfileSettingsPanel({
   onLaunchProviderLogin,
   onDeleteProfile,
 }: ProfileSettingsPanelProps) {
+  const [isCreating, setIsCreating] = useState(false);
   const [selectedProfileId, setSelectedProfileId] = useState<string | null>(
     profiles[0]?.id ?? null,
   );
@@ -65,23 +67,38 @@ export function ProfileSettingsPanel({
     message: string;
   } | null>(null);
 
-  useEffect(() => {
-    if (selectedProfileId && profiles.some((profile) => profile.id === selectedProfileId)) {
-      return;
-    }
-    setSelectedProfileId(profiles[0]?.id ?? null);
-  }, [profiles, selectedProfileId]);
-
   const selectedProfile = useMemo(
     () => profiles.find((profile) => profile.id === selectedProfileId) ?? null,
     [profiles, selectedProfileId],
   );
 
-  useEffect(() => {
-    setTestFeedback(null);
-  }, [selectedProfileId]);
+  const groupedProfiles = useMemo(
+    () => ({
+      claude: profiles.filter((profile) => profile.provider === "claude"),
+      codex: profiles.filter((profile) => profile.provider === "codex"),
+    }),
+    [profiles],
+  );
 
   useEffect(() => {
+    if (isCreating) {
+      return;
+    }
+    if (selectedProfileId && profiles.some((profile) => profile.id === selectedProfileId)) {
+      return;
+    }
+    setSelectedProfileId(profiles[0]?.id ?? null);
+  }, [isCreating, profiles, selectedProfileId]);
+
+  useEffect(() => {
+    setTestFeedback(null);
+  }, [isCreating, selectedProfileId]);
+
+  useEffect(() => {
+    if (isCreating) {
+      return;
+    }
+
     if (selectedProfile) {
       setDraft({
         provider: selectedProfile.provider,
@@ -98,13 +115,14 @@ export function ProfileSettingsPanel({
       ...nextProfileDefaults(providers[0]?.id ?? "claude"),
       apiKey: "",
     });
-  }, [providers, selectedProfile]);
+  }, [isCreating, providers, selectedProfile]);
 
   useEffect(() => {
     if (!editorIntent) {
       return;
     }
 
+    setIsCreating(true);
     setSelectedProfileId(null);
     setTestFeedback(null);
     setDraft({
@@ -115,268 +133,242 @@ export function ProfileSettingsPanel({
     onConsumeEditorIntent?.();
   }, [editorIntent, onConsumeEditorIntent]);
 
+  function startCreate(provider?: ProviderKind) {
+    const nextProvider = provider ?? draft.provider ?? providers[0]?.id ?? "claude";
+    setIsCreating(true);
+    setSelectedProfileId(null);
+    setDraft({
+      ...nextProfileDefaults(nextProvider),
+      apiKey: "",
+    });
+    setTestFeedback(null);
+  }
+
+  function selectProfile(profileId: string) {
+    setIsCreating(false);
+    setSelectedProfileId(profileId);
+  }
+
+  async function handleTest() {
+    setIsTesting(true);
+    try {
+      const result = await onTestProfile({
+        id: isCreating ? null : selectedProfile?.id ?? null,
+        provider: draft.provider,
+        label: draft.label.trim() || null,
+        authKind: draft.authKind,
+        baseUrl: draft.baseUrl.trim(),
+        apiKey: draft.apiKey.trim(),
+        model: draft.model?.trim() ? draft.model.trim() : null,
+      });
+      setTestFeedback({ ok: result.ok, message: result.message });
+    } catch (error) {
+      setTestFeedback({
+        ok: false,
+        message: error instanceof Error ? error.message : "连接测试失败。",
+      });
+    } finally {
+      setIsTesting(false);
+    }
+  }
+
+  function handleSave() {
+    onSaveProfile({
+      id: isCreating ? null : selectedProfile?.id ?? null,
+      provider: draft.provider,
+      label:
+        draft.label.trim() || (draft.provider === "claude" ? "Claude Profile" : "Codex Profile"),
+      authKind: draft.authKind,
+      baseUrl: draft.baseUrl.trim(),
+      apiKey: draft.apiKey.trim(),
+      model: draft.model?.trim() ? draft.model.trim() : null,
+    });
+  }
+
+  const title = isCreating ? "新建账号" : selectedProfile ? `编辑 ${selectedProfile.label}` : "账号详情";
+  const description = isCreating
+    ? "新建账号会复用统一的 profile 表单。保存后即可在会话和草稿窗口中切换使用。"
+    : selectedProfile
+      ? "选中左侧账号后，可在这里修改认证方式、模型和连接信息。"
+      : "先从左侧选择一个账号，或新建一个账号。";
+
   return (
-    <section className="p-5 rounded-2xl border bg-card text-card-foreground shadow-sm flex flex-col gap-6">
-      <div className="flex flex-col gap-4">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <Settings2 size={18} className="text-muted-foreground" />
-            <h3 className="font-semibold leading-none tracking-tight">账号配置</h3>
-          </div>
-          <span className={cn(
-            "px-2.5 py-1 text-[10px] uppercase tracking-wider font-bold rounded-full",
-            activePaneId ? "bg-green-100 text-green-700" : "bg-muted text-muted-foreground"
-          )}>
-            {activePaneId ? "已启用" : "待绑定"}
-          </span>
+    <section className="rounded-2xl border bg-card p-5 text-card-foreground shadow-sm">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <Settings2 size={18} className="text-muted-foreground" />
+          <h3 className="font-semibold leading-none tracking-tight">账号配置</h3>
         </div>
-
-        <div className="flex items-center gap-2 mt-1">
-          <button
-            className="flex-1 py-1.5 px-3 rounded text-sm font-medium border bg-background hover:bg-muted transition-colors focus:ring-2 focus:ring-ring"
-            onClick={() => onLaunchProviderLogin("claude")}
-            type="button"
-          >
-            Connect Claude
-          </button>
-          <button
-            className="flex-1 py-1.5 px-3 rounded text-sm font-medium border bg-background hover:bg-muted transition-colors focus:ring-2 focus:ring-ring"
-            onClick={() => onLaunchProviderLogin("codex")}
-            type="button"
-          >
-            Connect Codex
-          </button>
-        </div>
+        <span
+          className={cn(
+            "rounded-full px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider",
+            activePaneId ? "bg-green-100 text-green-700" : "bg-muted text-muted-foreground",
+          )}
+        >
+          {activePaneId ? "已启用" : "待绑定"}
+        </span>
       </div>
 
-      {/* Profiles List */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-1 xl:grid-cols-2 gap-2">
-        {profiles.map((profile) => (
-          <button
-            className={cn(
-              "flex items-center gap-3 p-3 rounded-xl border text-left transition-all focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-1",
-              profile.id === selectedProfileId
-                ? "border-primary bg-primary/5 shadow-sm"
-                : "bg-background hover:bg-muted/50"
-            )}
-            key={profile.id}
-            onClick={() => setSelectedProfileId(profile.id)}
-            type="button"
-          >
-            <span
-              className="w-2.5 h-2.5 rounded-full flex-shrink-0"
-              style={{ backgroundColor: providerAccent(profile) }}
-            />
-            <div className="flex flex-col truncate">
-              <strong className="text-sm font-medium truncate">{profile.label}</strong>
-              <span className="text-[11px] text-muted-foreground truncate">
-                {profile.provider} · {maskApiKeyState(profile)}
-              </span>
+      <div className="mt-6 grid gap-5 lg:grid-cols-[320px_minmax(0,1fr)]">
+        <aside className="rounded-2xl border border-border bg-background/70 p-4">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <div className="text-sm font-semibold text-foreground">账号列表</div>
+              <div className="text-xs text-muted-foreground">按下拉菜单同样的分组方式展示默认账号和用户创建的 profiles</div>
             </div>
-          </button>
-        ))}
-      </div>
-
-      <div className="h-px bg-border" />
-
-      {/* Profile Editor */}
-      <div className="flex flex-col gap-4">
-        <div className="grid grid-cols-2 gap-3">
-          <label className="flex flex-col gap-1.5 text-sm">
-            <span className="font-medium text-muted-foreground">Provider</span>
-            <select
-              className="px-3 py-2 rounded-md border bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring"
-              onChange={(event) =>
-                setDraft((current) => ({
-                  ...current,
-                  provider: event.currentTarget.value as ProviderKind,
-                }))
-              }
-              value={draft.provider}
-            >
-              <option value="claude">Claude</option>
-              <option value="codex">Codex</option>
-            </select>
-          </label>
-
-          <label className="flex flex-col gap-1.5 text-sm">
-            <span className="font-medium text-muted-foreground">Label</span>
-            <input
-              className="px-3 py-2 rounded-md border bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring"
-              onChange={(event) =>
-                setDraft((current) => ({ ...current, label: event.currentTarget.value }))
-              }
-              placeholder="Workspace label"
-              value={draft.label}
-            />
-          </label>
-
-          <label className="flex flex-col gap-1.5 text-sm">
-            <span className="font-medium text-muted-foreground">Auth</span>
-            <select
-              className="px-3 py-2 rounded-md border bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring"
-              onChange={(event) =>
-                setDraft((current) => ({
-                  ...current,
-                  authKind: event.currentTarget.value as "apiKey" | "official" | "system",
-                  baseUrl:
-                    event.currentTarget.value === "apiKey" ? current.baseUrl : "",
-                  apiKey: event.currentTarget.value === "apiKey" ? current.apiKey : "",
-                }))
-              }
-              value={draft.authKind}
-            >
-              <option value="official">官方账号</option>
-              <option value="system">系统登录</option>
-              <option value="apiKey">API Key</option>
-            </select>
-          </label>
-
-          <label className="flex flex-col gap-1.5 text-sm">
-            <span className="font-medium text-muted-foreground">Model</span>
-            <input
-              className="px-3 py-2 rounded-md border bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring"
-              onChange={(event) =>
-                setDraft((current) => ({ ...current, model: event.currentTarget.value }))
-              }
-              placeholder={draft.provider === "codex" ? "gpt-5-codex" : "可留空"}
-              value={draft.model ?? ""}
-            />
-          </label>
-
-          <label className="col-span-2 flex flex-col gap-1.5 text-sm">
-            <span className="font-medium text-muted-foreground">Base URL</span>
-            <div className="relative flex items-center">
-              <Globe className="absolute left-3 text-muted-foreground/50" size={16} />
-              <input
-                className="pl-9 pr-3 py-2 w-full rounded-md border bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring disabled:opacity-50 disabled:cursor-not-allowed"
-                disabled={draft.authKind !== "apiKey"}
-                onChange={(event) =>
-                  setDraft((current) => ({ ...current, baseUrl: event.currentTarget.value }))
-                }
-                placeholder={
-                  draft.authKind !== "apiKey"
-                    ? "官方/系统登录不需要 Base URL"
-                    : draft.provider === "claude"
-                      ? "留空直连官方 Claude，填写则按 gateway/foundry 方式启动"
-                      : "https://api.example.com/v1"
-                }
-                value={draft.baseUrl}
-              />
-            </div>
-          </label>
-
-          <label className="col-span-2 flex flex-col gap-1.5 text-sm">
-            <span className="font-medium text-muted-foreground">API Key</span>
-            <div className="relative flex items-center">
-              <Key className="absolute left-3 text-muted-foreground/50" size={16} />
-              <input
-                className="pl-9 pr-3 py-2 w-full rounded-md border bg-background text-sm focus:outline-none focus:ring-2 focus:ring-ring disabled:opacity-50 disabled:cursor-not-allowed"
-                disabled={draft.authKind !== "apiKey"}
-                onChange={(event) =>
-                  setDraft((current) => ({ ...current, apiKey: event.currentTarget.value }))
-                }
-                placeholder={
-                  draft.authKind !== "apiKey"
-                    ? "官方/系统登录不需要 API Key"
-                    : selectedProfile
-                      ? "留空则保留当前 Key"
-                      : "sk-..."
-                }
-                type="password"
-                value={draft.apiKey}
-              />
-            </div>
-          </label>
-        </div>
-
-        {/* Actions */}
-        <div className="flex flex-wrap items-center justify-end gap-2 mt-2">
-          <button
-            className="flex items-center justify-center gap-1.5 px-3 py-1.5 border rounded-md text-sm font-medium bg-background hover:bg-muted transition-colors focus:ring-2"
-            onClick={() => {
-              setSelectedProfileId(null);
-              setDraft({
-                ...nextProfileDefaults(draft.provider),
-                apiKey: "",
-              });
-              setTestFeedback(null);
-            }}
-            type="button"
-          >
-            <Plus size={16} /> 新建
-          </button>
-
-          {selectedProfile && (
             <button
-              className="flex items-center justify-center gap-1.5 px-3 py-1.5 border border-destructive/20 text-destructive rounded-md text-sm font-medium bg-destructive/5 hover:bg-destructive/10 transition-colors focus:ring-2"
-              onClick={() => onDeleteProfile(selectedProfile.id)}
+              className="inline-flex items-center gap-2 rounded-xl border bg-background px-3 py-2 text-sm font-medium text-foreground hover:bg-muted"
+              onClick={() => startCreate()}
               type="button"
             >
-              <Trash2 size={16} /> 删除
+              <Plus size={16} />
+              新建
             </button>
-          )}
-
-          <button
-            className="flex items-center justify-center gap-1.5 px-3 py-1.5 border rounded-md text-sm font-medium bg-secondary text-secondary-foreground hover:bg-secondary/80 transition-colors focus:ring-2"
-            disabled={isTesting}
-            onClick={async () => {
-              setIsTesting(true);
-              try {
-                const result = await onTestProfile({
-                  id: selectedProfile?.id ?? null,
-                  provider: draft.provider,
-                  label: draft.label.trim() || null,
-                  authKind: draft.authKind,
-                  baseUrl: draft.baseUrl.trim(),
-                  apiKey: draft.apiKey.trim(),
-                  model: draft.model?.trim() ? draft.model.trim() : null,
-                });
-                setTestFeedback({ ok: result.ok, message: result.message });
-              } catch (error) {
-                setTestFeedback({
-                  ok: false,
-                  message: error instanceof Error ? error.message : "连接测试失败。",
-                });
-              } finally {
-                setIsTesting(false);
-              }
-            }}
-            type="button"
-          >
-            <Play size={16} /> {isTesting ? "测试中..." : "测试连接"}
-          </button>
-
-          <button
-            className="flex items-center justify-center gap-1.5 px-4 py-1.5 border border-primary rounded-md text-sm font-medium bg-primary text-primary-foreground hover:bg-primary/90 transition-colors shadow-sm focus:ring-2"
-            onClick={() =>
-              onSaveProfile({
-                id: selectedProfile?.id ?? null,
-                provider: draft.provider,
-                label:
-                  draft.label.trim() ||
-                  (draft.provider === "claude" ? "Claude Profile" : "Codex Profile"),
-                authKind: draft.authKind,
-                baseUrl: draft.baseUrl.trim(),
-                apiKey: draft.apiKey.trim(),
-                model: draft.model?.trim() ? draft.model.trim() : null,
-              })
-            }
-            type="button"
-          >
-            <Check size={16} /> 保存配置
-          </button>
-        </div>
-
-        {/* Feedback Message */}
-        {testFeedback && (
-          <div className={cn(
-            "mt-2 p-3 text-sm rounded-lg border",
-            testFeedback.ok ? "bg-green-50 text-green-700 border-green-200" : "bg-destructive/10 text-destructive border-destructive/20"
-          )}>
-            {testFeedback.message}
           </div>
-        )}
+
+          <div className="mt-4 space-y-4">
+            {(["claude", "codex"] as const).map((provider) => (
+              <div className="space-y-2" key={provider}>
+                <div className="flex items-center justify-between px-1">
+                  <div className="text-[11px] font-semibold uppercase tracking-wider text-sky-700/80">
+                    {provider === "claude" ? "Claude Code" : "Codex"}
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <button
+                    className={cn(
+                      "flex w-full items-center justify-between rounded-xl px-3 py-2.5 text-left transition-colors",
+                      !isCreating && selectedProfileId === null && draft.provider === provider
+                        ? "bg-sky-50"
+                        : "hover:bg-sky-50",
+                    )}
+                    onClick={() => {
+                      setIsCreating(false);
+                      setSelectedProfileId(null);
+                      setDraft({
+                        ...nextProfileDefaults(provider),
+                        apiKey: "",
+                      });
+                      setTestFeedback(null);
+                    }}
+                    type="button"
+                  >
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <div className="text-sm font-semibold text-foreground">
+                          {provider === "claude" ? "系统登录 / 官方账号" : "默认官方账号"}
+                        </div>
+                        <span className="rounded-full bg-sky-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-sky-700">
+                          默认
+                        </span>
+                      </div>
+                      <div className="text-xs text-muted-foreground">
+                        {provider === "claude"
+                          ? "复用当前机器上的 Claude CLI 登录态"
+                          : "复用当前机器上的 Codex 官方账号"}
+                      </div>
+                    </div>
+                  </button>
+
+                  {groupedProfiles[provider].map((profile) => {
+                    const isActive = !isCreating && profile.id === selectedProfileId;
+                    return (
+                      <button
+                        className={cn(
+                          "flex w-full items-center justify-between rounded-xl px-3 py-2.5 text-left transition-colors",
+                          isActive ? "bg-sky-50" : "hover:bg-sky-50",
+                        )}
+                        key={profile.id}
+                        onClick={() => selectProfile(profile.id)}
+                        type="button"
+                      >
+                      <div>
+                        <div className="flex items-center gap-3">
+                          <span
+                            className="h-2.5 w-2.5 flex-shrink-0 rounded-full"
+                            style={{ backgroundColor: providerAccent(profile) }}
+                          />
+                          <div>
+                            <div className="text-sm font-semibold text-foreground">{profile.label}</div>
+                            <div className="text-xs text-muted-foreground">
+                              {profile.authKind === "apiKey" ? "第三方 Provider" : "官方账号 Profile"}
+                              {profile.model ? ` · ${profile.model}` : ""}
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                      {isActive && <span className="text-sky-700">✓</span>}
+                      </button>
+                    );
+                  })}
+
+                  <button
+                    className="flex w-full items-center rounded-xl px-3 py-2.5 text-left text-sm font-semibold text-sky-900 transition-colors hover:bg-sky-50"
+                    onClick={() => startCreate(provider)}
+                    type="button"
+                  >
+                    新建 Profile
+                  </button>
+
+                  <button
+                    className="flex w-full items-center rounded-xl px-3 py-2.5 text-left text-sm text-muted-foreground transition-colors hover:bg-sky-50 hover:text-foreground"
+                    onClick={() => onLaunchProviderLogin(provider)}
+                    type="button"
+                  >
+                    Connect {provider === "claude" ? "Claude" : "Codex"}
+                  </button>
+
+                  {groupedProfiles[provider].length === 0 && (
+                    <div className="px-3 py-1 text-xs text-muted-foreground">
+                      暂无用户创建的 profile
+                    </div>
+                  )}
+
+                  {provider === "claude" && <div className="my-2 h-px bg-sky-100" />}
+                </div>
+              </div>
+            ))}
+          </div>
+        </aside>
+
+        <div className="rounded-2xl border border-border bg-background p-5">
+          {selectedProfile || isCreating ? (
+            <ProfileEditorForm
+              description={description}
+              draft={draft}
+              feedback={testFeedback}
+              isTesting={isTesting}
+              mode={isCreating ? "create" : "edit"}
+              onChange={(next) => {
+                setDraft((current) => ({ ...current, ...next }));
+                setTestFeedback(null);
+              }}
+              onDelete={
+                isCreating || !selectedProfile ? undefined : () => onDeleteProfile(selectedProfile.id)
+              }
+              onSave={handleSave}
+              onTest={handleTest}
+              saveLabel={
+                isCreating && draft.authKind === "official" && draft.provider === "codex"
+                  ? "创建并登录"
+                  : "保存配置"
+              }
+              selectedProfile={selectedProfile}
+              testLabel={
+                isTesting ? "测试中..." : draft.authKind === "apiKey" ? "测试连接" : "验证当前登录"
+              }
+              title={title}
+            />
+          ) : (
+            <div className="flex min-h-[520px] flex-col items-center justify-center rounded-2xl border border-dashed border-border bg-card/50 px-8 text-center">
+              <div className="text-lg font-semibold text-foreground">选择一个账号开始编辑</div>
+              <p className="mt-2 max-w-md text-sm leading-6 text-muted-foreground">
+                左侧使用和切换下拉一致的排列方式展示默认账号与用户创建的 profiles。点击任意项后，右侧即可编辑或创建。
+              </p>
+            </div>
+          )}
+        </div>
       </div>
     </section>
   );

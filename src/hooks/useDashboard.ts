@@ -70,7 +70,12 @@ export function useDashboard() {
           return;
         }
 
-        setDashboard(normalizeDashboardState(dashboardState, remoteState));
+        setDashboard((current) =>
+          mergeDashboardStateWithDraftPanes(
+            current,
+            normalizeDashboardState(dashboardState, remoteState),
+          ),
+        );
         setRequestError(null);
       } catch (error) {
         if (mounted) {
@@ -371,7 +376,9 @@ export function useDashboard() {
   async function refreshFromBackend() {
     try {
       const [next, remote] = await Promise.all([getDashboardState(), getRemoteStatus()]);
-      setDashboard(normalizeDashboardState(next, remote));
+      setDashboard((current) =>
+        mergeDashboardStateWithDraftPanes(current, normalizeDashboardState(next, remote)),
+      );
     } catch {
       // Keep optimistic local state.
     }
@@ -497,47 +504,21 @@ export function useDashboard() {
   ) {
     pendingProviderSetupRef.current = null;
     setProviderSetupPrompt(null);
-    const now = new Date().toISOString();
-    const nextIndex =
-      (dashboard.projects.find((project) => project.id === projectId)?.sessions.length ?? 0) + 1;
-    const sessionId = `session-${Math.random().toString(36).slice(2, 8)}`;
-
-    const optimisticSession: SessionSummary = {
-      id: sessionId,
-      title: `New session ${nextIndex}`,
-      provider: options.provider,
-      profileId: options.profileId,
-      providerSessionId: null,
-      lastActiveAt: now,
-      status: "idle",
-      imported: false,
-      unreadCount: 0,
-    };
+    const nextDraftPane = createDraftPane(options.provider, options.profileId);
 
     setDashboard((current) => {
       const activePaneId = current.workspace.activePaneId;
       const hasActivePane = Boolean(activePaneId);
-      const projects = current.projects.map((project) =>
-        project.id === projectId
-          ? {
-            ...project,
-            lastActiveAt: now,
-            sessions: [optimisticSession, ...project.sessions],
-          }
-          : project,
-      );
 
       if (!hasActivePane) {
-        const nextPane = createPaneFromSession(optimisticSession);
         return {
           ...current,
-          projects,
           workspace: {
             ...current.workspace,
             projectId,
-            panes: [nextPane],
-            activePaneId: nextPane.id,
-            selectedPaneIds: [nextPane.id],
+            panes: [nextDraftPane],
+            activePaneId: nextDraftPane.id,
+            selectedPaneIds: [nextDraftPane.id],
             layout: deriveLayout(1),
           },
         };
@@ -545,47 +526,21 @@ export function useDashboard() {
 
       return {
         ...current,
-        projects,
         workspace: {
           ...current.workspace,
           projectId,
           panes: current.workspace.panes.map((pane) =>
-            pane.id === activePaneId ? createPaneFromSession(optimisticSession, pane.id) : pane,
+            pane.id === activePaneId
+              ? {
+                ...nextDraftPane,
+                id: pane.id,
+              }
+              : pane,
           ),
           selectedPaneIds: activePaneId ? [activePaneId] : [],
         },
       };
     });
-
-    try {
-      const createdSession = await createSession({
-        projectId,
-        title: `New session ${nextIndex}`,
-        provider: options.provider === "codex" ? "openAi" : "anthropic",
-        profileId: options.profileId,
-      });
-      const activePaneId = dashboard.workspace.activePaneId;
-      if (activePaneId) {
-        await replacePaneSession({
-          paneId: activePaneId,
-          sessionId: createdSession.id,
-          title: createdSession.title,
-          profileId: createdSession.profileId ?? options.profileId,
-          focus: true,
-        });
-      } else {
-        await openPane({
-          sessionId: createdSession.id,
-          title: createdSession.title,
-          kind: "chat",
-          profileId: createdSession.profileId ?? options.profileId,
-          focus: true,
-        });
-      }
-      await refreshFromBackend();
-    } catch {
-      // Keep optimistic preview.
-    }
   }
 
   async function handleCreateSessionWithOptions(
@@ -1521,6 +1476,45 @@ function createWorkspaceAttachedMessage(title: string): Pane["messages"][number]
     role: "system",
     body: `Workspace attached to ${title}.`,
     createdAt: new Date().toISOString(),
+  };
+}
+
+function mergeDashboardStateWithDraftPanes(
+  current: DashboardState,
+  next: DashboardState,
+): DashboardState {
+  const draftPanes = current.workspace.panes.filter(
+    (pane) => pane.isDraft && !next.workspace.panes.some((candidate) => candidate.id === pane.id),
+  );
+  if (draftPanes.length === 0) {
+    return next;
+  }
+
+  const panes = [...next.workspace.panes, ...draftPanes];
+  const paneIds = new Set(panes.map((pane) => pane.id));
+  const activePaneId = paneIds.has(current.workspace.activePaneId ?? "")
+    ? current.workspace.activePaneId
+    : paneIds.has(next.workspace.activePaneId ?? "")
+      ? next.workspace.activePaneId
+      : panes[0]?.id ?? null;
+  const selectedPaneIds = Array.from(
+    new Set([
+      ...next.workspace.selectedPaneIds.filter((paneId) => paneIds.has(paneId)),
+      ...current.workspace.selectedPaneIds.filter((paneId) => paneIds.has(paneId)),
+    ]),
+  );
+
+  return {
+    ...next,
+    workspace: {
+      ...next.workspace,
+      projectId: next.workspace.projectId ?? current.workspace.projectId,
+      panes,
+      activePaneId,
+      selectedPaneIds:
+        selectedPaneIds.length > 0 ? selectedPaneIds : activePaneId ? [activePaneId] : [],
+      layout: deriveLayout(panes.length),
+    },
   };
 }
 

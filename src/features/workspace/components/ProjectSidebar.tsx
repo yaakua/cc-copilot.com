@@ -17,6 +17,7 @@ interface ProjectSidebarProps {
   onOpenSession: (projectId: string, sessionId: string, mode?: "replace" | "split") => void;
   onDeleteProject: (projectId: string) => void;
   onDeleteSession: (projectId: string, sessionId: string) => void;
+  onOpenGlobalSettings: () => void;
 }
 
 export function ProjectSidebar({
@@ -30,6 +31,7 @@ export function ProjectSidebar({
   onOpenSession,
   onDeleteProject,
   onDeleteSession,
+  onOpenGlobalSettings,
 }: ProjectSidebarProps) {
   // Track which project is showing the new session dropdown
   const [sessionPrompt, setSessionPrompt] = useState<string | null>(null);
@@ -200,7 +202,11 @@ export function ProjectSidebar({
       </div>
 
       <div className="p-3 mt-auto">
-        <button className="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-muted-foreground hover:bg-muted/60 hover:text-foreground text-sm transition-colors" type="button">
+        <button
+          className="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-muted-foreground hover:bg-muted/60 hover:text-foreground text-sm transition-colors"
+          onClick={onOpenGlobalSettings}
+          type="button"
+        >
           <Settings size={18} />
           全局设置
         </button>

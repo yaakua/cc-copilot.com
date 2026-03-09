@@ -1,5 +1,6 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { Bot, Command, Plus } from "lucide-react";
+import { ProfileManagerDialog } from "./features/provider/components/ProfileManagerDialog";
 import { QuickProfileDialog } from "./features/provider/components/QuickProfileDialog";
 import { ProviderSetupDialog } from "./features/provider/components/ProviderSetupDialog";
 import { ComposerBar } from "./features/session/components/ComposerBar";
@@ -38,6 +39,7 @@ function App() {
     setDraftPaneProvider,
     assignProfileToPane,
     saveProfile,
+    deleteProfile,
     testProfile,
     dismissProviderSetupPrompt,
     retryProviderSetupPrompt,
@@ -50,6 +52,7 @@ function App() {
     handleRetryLastMessage,
     cancelPaneRun,
   } = useDashboard();
+  const [profileManagerOpen, setProfileManagerOpen] = useState(false);
 
   const setupProviderState = useMemo(
     () =>
@@ -70,13 +73,7 @@ function App() {
   );
   const activeProfile = activePane ? paneProfiles[activePane.id] ?? null : null;
   const activeProvider = activePane?.provider ?? activeSession?.provider ?? null;
-  const activeProviderProfiles = useMemo(
-    () =>
-      activePane
-        ? profiles.filter((profile) => profile.provider === activePane.provider)
-        : [],
-    [activePane, profiles],
-  );
+  const activeProviderProfiles = useMemo(() => profiles, [profiles]);
 
   return (
     <main className="flex h-screen w-full bg-background text-foreground overflow-hidden font-sans">
@@ -92,6 +89,7 @@ function App() {
           onOpenSession={handleOpenSession}
           onDeleteProject={handleDeleteProject}
           onDeleteSession={handleDeleteSession}
+          onOpenGlobalSettings={() => setProfileManagerOpen(true)}
         />
       </aside>
 
@@ -157,10 +155,22 @@ function App() {
                   profiles={profiles}
                   onCancelRun={cancelPaneRun}
                   onClosePane={handleClosePane}
+                  onChangeProvider={setDraftPaneProvider}
                   onFocusPane={handleFocusPane}
                   onTogglePaneSelection={handleTogglePaneSelection}
                   selectedPaneIds={dashboard.workspace.selectedPaneIds}
                   onAssignProfile={assignProfileToPane}
+                  onCreateProfile={(paneId) => {
+                    const pane = dashboard.workspace.panes.find((candidate) => candidate.id === paneId);
+                    if (!pane) {
+                      return;
+                    }
+                    startProfileCreation(
+                      pane.provider,
+                      pane.provider === "codex" ? "official" : "system",
+                      pane.id,
+                    );
+                  }}
                 />
               </div>
             ) : (
@@ -227,12 +237,29 @@ function App() {
         />
       )}
 
-      {profileEditorIntent && (
+      {profileEditorIntent && !profileManagerOpen && (
         <QuickProfileDialog
           onClose={consumeProfileEditorIntent}
           onSave={saveProfile}
           onTest={testProfile}
           provider={profileEditorIntent.provider}
+        />
+      )}
+
+      {profileManagerOpen && (
+        <ProfileManagerDialog
+          editorIntent={profileEditorIntent}
+          onClose={() => {
+            consumeProfileEditorIntent();
+            setProfileManagerOpen(false);
+          }}
+          onConsumeEditorIntent={consumeProfileEditorIntent}
+          onDeleteProfile={deleteProfile}
+          onLaunchProviderLogin={launchProviderLogin}
+          onSaveProfile={saveProfile}
+          onTestProfile={testProfile}
+          profiles={profiles}
+          providers={dashboard.providers}
         />
       )}
     </main>

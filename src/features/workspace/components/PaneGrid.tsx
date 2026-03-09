@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo } from "react";
 import { X, Maximize2 } from "lucide-react";
 import type { Pane, ProviderProfile } from "../../../types/domain";
 import { cn } from "../../../lib/utils";
+import { SessionSetupBar } from "../../session/components/SessionSetupBar";
 
 interface PaneGridProps {
   panes: Pane[];
@@ -16,11 +17,15 @@ interface PaneGridProps {
   onFocusPane: (paneId: string) => void;
   onTogglePaneSelection: (paneId: string) => void;
   selectedPaneIds: string[];
+  onChangeProvider: (paneId: string, provider: "claude" | "codex") => void;
   onAssignProfile: (paneId: string, profileId: string) => void;
+  onCreateProfile: (paneId: string) => void;
 }
 
 export function PaneGrid({
   panes,
+  paneProfiles,
+  profiles,
   activePaneId,
   canClosePane,
   onCancelRun,
@@ -28,6 +33,9 @@ export function PaneGrid({
   onFocusPane,
   onTogglePaneSelection,
   selectedPaneIds,
+  onChangeProvider,
+  onAssignProfile,
+  onCreateProfile,
 }: PaneGridProps) {
   const [paneMeta, setPaneMeta] = useState<Record<string, { slot: number }>>({});
   const [confirmCloseId, setConfirmCloseId] = useState<string | null>(null);
@@ -89,9 +97,11 @@ export function PaneGrid({
     const isSelected = selectedPaneIds.includes(pane.id);
     const meta = paneMeta[pane.id];
     const previewMessages = pane.messages.slice(-3);
+    const hasUserMessages = pane.messages.some((message) => message.role === "user");
     const displayNum = meta ? meta.slot + 1 : 0;
     const hasRightCol = rightCol.length > 0;
-
+    const paneProfile = paneProfiles[pane.id] ?? null;
+    const availableProfiles = profiles;
     return (
       <div
         className={cn(
@@ -204,6 +214,19 @@ export function PaneGrid({
         </div>
 
         <div className="flex-1 p-3 pt-0 bg-background flex flex-col gap-2 overflow-y-auto">
+          {!hasUserMessages && (
+            <SessionSetupBar
+              activeProfile={paneProfile}
+              availableProfiles={availableProfiles}
+              canSwitchProvider={Boolean(pane.isDraft)}
+              onAssignProfile={(profileId) => onAssignProfile(pane.id, profileId)}
+              onChangeProvider={(provider) => onChangeProvider(pane.id, provider)}
+              onCreateProfile={() => onCreateProfile(pane.id)}
+              provider={pane.provider}
+              stopPropagation
+            />
+          )}
+
           {previewMessages.map((message) => (
             <div
               className={cn(
