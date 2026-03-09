@@ -4,12 +4,13 @@ use std::{env, path::PathBuf};
 use serde::{Deserialize, Serialize};
 
 use crate::models::{
-    AssignPaneProfileInput, AssignPaneProviderInput, ComposerDraft, ComposerMessage, ConnectionState, CreateProjectInput,
-    CreateSessionInput, DashboardState, DeleteProviderProfileInput, MessageRole, OpenPaneInput,
-    PaneRecord, PaneStatus, PaneTarget, ProfileAuthKind, ProjectRecord, ProviderKind,
-    ProviderProfileRecord, RemoteStatus, RetryComposerMessageInput, SaveProviderProfileInput,
-    SendComposerMessageInput, SendComposerMessageResult, SessionRecord, SessionStatus,
-    SetWorkspaceLayoutInput, ToggleRemoteTunnelInput, WorkspaceSummary,
+    AssignPaneProfileInput, AssignPaneProviderInput, ComposerDraft, ComposerMessage,
+    ConnectionState, CreateProjectInput, CreateSessionInput, DashboardState,
+    DeleteProviderProfileInput, MessageRole, OpenPaneInput, PaneRecord, PaneStatus, PaneTarget,
+    ProfileAuthKind, ProjectRecord, ProviderKind, ProviderProfileRecord, RemoteStatus,
+    RetryComposerMessageInput, SaveProviderProfileInput, SendComposerMessageInput,
+    SendComposerMessageResult, SessionRecord, SessionStatus, SetWorkspaceLayoutInput,
+    ToggleRemoteTunnelInput, WorkspaceSummary,
 };
 
 #[derive(Debug, Clone)]
@@ -144,7 +145,8 @@ impl Store {
             .retain(|session_id| session_id != &session.id);
         self.projects[project_index].updated_at = now_ms();
 
-        self.messages.retain(|message| message.session_id != session.id);
+        self.messages
+            .retain(|message| message.session_id != session.id);
         self.drafts.retain(|draft| draft.session_id != session.id);
 
         let closed_session_id = session.id.clone();
@@ -219,7 +221,9 @@ impl Store {
             updated_at: now,
         };
 
-        self.projects[project_index].session_ids.insert(0, session_id);
+        self.projects[project_index]
+            .session_ids
+            .insert(0, session_id);
         self.projects[project_index].updated_at = now;
         self.active_project_id = Some(project_id);
         self.active_session_id = Some(session.id.clone());
@@ -429,9 +433,9 @@ impl Store {
                 && candidate.auth_kind == ProfileAuthKind::Official
         });
         let runtime_home = match (&input.provider, &auth_kind) {
-            (ProviderKind::OpenAi, ProfileAuthKind::Official) => {
-                Some(codex_official_runtime_home(input.id.as_deref().unwrap_or("pending")))
-            }
+            (ProviderKind::OpenAi, ProfileAuthKind::Official) => Some(codex_official_runtime_home(
+                input.id.as_deref().unwrap_or("pending"),
+            )),
             _ => None,
         };
         if let Some(profile_id) = input.id {
@@ -481,8 +485,10 @@ impl Store {
             auth_kind: auth_kind.clone(),
             base_url: input.base_url.trim().to_string(),
             model: clean_optional(input.model),
-            api_key_present: !matches!(auth_kind, ProfileAuthKind::System | ProfileAuthKind::Official)
-                && !input.api_key.trim().is_empty(),
+            api_key_present: !matches!(
+                auth_kind,
+                ProfileAuthKind::System | ProfileAuthKind::Official
+            ) && !input.api_key.trim().is_empty(),
             runtime_home: match (&provider, &auth_kind) {
                 (ProviderKind::OpenAi, ProfileAuthKind::Official) => {
                     Some(codex_official_runtime_home(&profile_id))
@@ -526,6 +532,7 @@ impl Store {
         &mut self,
         input: AssignPaneProfileInput,
     ) -> Result<PaneRecord, String> {
+        let next_profile_id = input.profile_id.clone();
         if let Some(profile_id) = input.profile_id.as_deref() {
             let exists = self
                 .provider_profiles
@@ -542,7 +549,8 @@ impl Store {
             .position(|pane| pane.id == input.pane_id)
             .ok_or_else(|| "pane not found".to_string())?;
         let now = now_ms();
-        self.panes[pane_index].profile_id = input.profile_id.clone();
+        let profile_changed = self.panes[pane_index].profile_id != next_profile_id;
+        self.panes[pane_index].profile_id = next_profile_id.clone();
         self.panes[pane_index].updated_at = now;
 
         let session_id = self.panes[pane_index].session_id.clone();
@@ -551,7 +559,10 @@ impl Store {
             .iter()
             .position(|session| session.id == session_id)
         {
-            self.sessions[session_index].profile_id = input.profile_id;
+            self.sessions[session_index].profile_id = next_profile_id;
+            if profile_changed {
+                self.sessions[session_index].provider_session_id = None;
+            }
             self.sessions[session_index].updated_at = now;
         }
 
@@ -585,9 +596,10 @@ impl Store {
             .position(|session| session.id == session_id)
             .ok_or_else(|| "session not found".to_string())?;
 
-        let has_user_messages = self.messages.iter().any(|message| {
-            message.session_id == session_id && message.role == MessageRole::User
-        });
+        let has_user_messages = self
+            .messages
+            .iter()
+            .any(|message| message.session_id == session_id && message.role == MessageRole::User);
         if has_user_messages {
             return Err("cannot switch provider after the first user message".into());
         }
@@ -813,7 +825,8 @@ impl Store {
 
         self.sessions[session_index].status = completion.session_status;
         if completion.provider_session_id.is_some() {
-            self.sessions[session_index].provider_session_id = completion.provider_session_id.clone();
+            self.sessions[session_index].provider_session_id =
+                completion.provider_session_id.clone();
         }
         self.sessions[session_index].last_message_preview =
             truncate(&assistant_message.content, 72);
@@ -953,7 +966,10 @@ fn sync_pane_titles_for_session(
     previous_title: &str,
     next_title: &str,
 ) {
-    for pane in panes.iter_mut().filter(|pane| pane.session_id == session_id) {
+    for pane in panes
+        .iter_mut()
+        .filter(|pane| pane.session_id == session_id)
+    {
         if pane.title == previous_title {
             pane.title = next_title.to_string();
             continue;

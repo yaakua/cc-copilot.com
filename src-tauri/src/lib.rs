@@ -1,4 +1,5 @@
 mod commands;
+mod logging;
 mod models;
 mod providers;
 mod secret_store;
@@ -8,9 +9,15 @@ mod storage;
 mod store;
 
 use state::AppState;
+use tracing::{error, info};
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    match logging::init_logging() {
+        Ok(path) => info!(log_path=%path.display(), "logging initialized"),
+        Err(message) => eprintln!("failed to initialize logging: {message}"),
+    }
+
     tauri::Builder::default()
         .manage(AppState::new())
         .plugin(tauri_plugin_dialog::init())
@@ -43,5 +50,8 @@ pub fn run() {
             commands::toggle_remote_tunnel
         ])
         .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .unwrap_or_else(|error| {
+            error!(?error, "error while running tauri application");
+            panic!("error while running tauri application: {error}");
+        });
 }

@@ -73,7 +73,7 @@ export function ProfileEditorForm({
     return {
       system: "系统登录会直接复用本机 Claude Code 的官方登录态，不需要填写 Base URL 或 API Key。",
       official: "",
-      api: "第三方模式适合 Anthropic 兼容网关或代理。一般需要 Base URL、API Key，模型字段可选。",
+      api: "第三方模式一般需要 Base URL、API Key，模型字段可选。",
       placeholder: "https://anthropic-gateway.example.com",
     };
   }, [draft.provider]);
@@ -163,7 +163,7 @@ export function ProfileEditorForm({
           >
             <div className="flex items-center gap-1.5 text-[13px] font-semibold text-foreground">
               <Globe size={14} />
-              第三方 Provider
+              第三方
             </div>
             <p className="mt-1 text-[12px] leading-5 text-muted-foreground">{helper.api}</p>
           </button>

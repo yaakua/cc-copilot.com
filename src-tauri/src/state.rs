@@ -3,23 +3,22 @@ use base64::Engine;
 use serde_json::Value;
 use std::{
     collections::{HashMap, HashSet},
-    env,
-    fs,
+    env, fs,
     path::{Path, PathBuf},
     sync::{Arc, Mutex, MutexGuard},
     thread,
 };
 
 use crate::models::{
-    AssignPaneProfileInput, AssignPaneProviderInput, CancelPaneRunInput, ComposerStreamEvent, ComposerStreamEventKind,
-    ComposerStreamStage,
-    CreateProjectInput, CreateSessionInput, DashboardState, DeleteProviderProfileInput,
-    DeleteSessionInput, GetProviderAccountStatusInput, InspectProviderAccountStatusInput, LaunchProviderLoginInput,
-    OpenPaneInput, PaneRecord, PaneTarget, ProfileAuthKind, ProjectRecord, ProviderAccountStatus,
-    ProviderAuthLaunchResult, ProviderConnectionTestResult, ProviderKind, ProviderProfileRecord, RemoteStatus,
-    ReplacePaneSessionInput, RetryComposerMessageInput, SaveProviderProfileInput, SendComposerMessageInput,
-    SendComposerMessageResult, SessionRecord, SetWorkspaceLayoutInput, TestProviderProfileInput,
-    ToggleRemoteTunnelInput, WorkspaceSummary,
+    AssignPaneProfileInput, AssignPaneProviderInput, CancelPaneRunInput, ComposerStreamEvent,
+    ComposerStreamEventKind, ComposerStreamStage, CreateProjectInput, CreateSessionInput,
+    DashboardState, DeleteProviderProfileInput, DeleteSessionInput, GetProviderAccountStatusInput,
+    InspectProviderAccountStatusInput, LaunchProviderLoginInput, OpenPaneInput, PaneRecord,
+    PaneTarget, ProfileAuthKind, ProjectRecord, ProviderAccountStatus, ProviderAuthLaunchResult,
+    ProviderConnectionTestResult, ProviderKind, ProviderProfileRecord, RemoteStatus,
+    ReplacePaneSessionInput, RetryComposerMessageInput, SaveProviderProfileInput,
+    SendComposerMessageInput, SendComposerMessageResult, SessionRecord, SetWorkspaceLayoutInput,
+    TestProviderProfileInput, ToggleRemoteTunnelInput, WorkspaceSummary,
 };
 use crate::providers::{
     execute_message, launch_provider_login, probe_provider_health, stream_message,
@@ -100,7 +99,10 @@ impl AppState {
             .profile_id
             .as_ref()
             .and_then(|profile_id| {
-                store.provider_profiles.iter().find(|profile| &profile.id == profile_id)
+                store
+                    .provider_profiles
+                    .iter()
+                    .find(|profile| &profile.id == profile_id)
             })
             .cloned();
         drop(store);
@@ -178,7 +180,10 @@ impl AppState {
             }
             Ok(profile)
         })?;
-        if matches!(auth_kind, ProfileAuthKind::System | ProfileAuthKind::Official) {
+        if matches!(
+            auth_kind,
+            ProfileAuthKind::System | ProfileAuthKind::Official
+        ) {
             let _ = self.secrets.delete_profile_api_key(&profile.id);
         } else if has_api_key {
             self.secrets
@@ -214,7 +219,9 @@ impl AppState {
         &self,
         input: LaunchProviderLoginInput,
     ) -> Result<ProviderAuthLaunchResult, String> {
-        let profile = if let Some(profile_id) = clean_optional_string(&input.profile_id.unwrap_or_default()) {
+        let profile = if let Some(profile_id) =
+            clean_optional_string(&input.profile_id.unwrap_or_default())
+        {
             let store = self.lock()?;
             let profile = store
                 .provider_profiles
@@ -285,7 +292,10 @@ impl AppState {
             profile_id: trimmed_profile_id.as_deref(),
             profile_label: profile_label.as_deref(),
             base_url: base_url.as_deref(),
-            api_key: if matches!(auth_kind, ProfileAuthKind::System | ProfileAuthKind::Official) {
+            api_key: if matches!(
+                auth_kind,
+                ProfileAuthKind::System | ProfileAuthKind::Official
+            ) {
                 None
             } else {
                 api_key.as_deref()
@@ -299,7 +309,10 @@ impl AppState {
         self.mutate(|store| store.open_pane(input))
     }
 
-    pub fn replace_pane_session(&self, input: ReplacePaneSessionInput) -> Result<PaneRecord, String> {
+    pub fn replace_pane_session(
+        &self,
+        input: ReplacePaneSessionInput,
+    ) -> Result<PaneRecord, String> {
         self.mutate(|store| store.replace_pane_session(input))
     }
 
@@ -419,7 +432,8 @@ impl AppState {
                             session_id: completion.session_id,
                             message_id: stream_message_id,
                             stage: ComposerStreamStage::Finished,
-                            kind: if completion.assistant_role == crate::models::MessageRole::System {
+                            kind: if completion.assistant_role == crate::models::MessageRole::System
+                            {
                                 ComposerStreamEventKind::Error
                             } else {
                                 ComposerStreamEventKind::Message
@@ -527,7 +541,8 @@ impl AppState {
                             session_id: completion.session_id,
                             message_id: stream_message_id,
                             stage: ComposerStreamStage::Finished,
-                            kind: if completion.assistant_role == crate::models::MessageRole::System {
+                            kind: if completion.assistant_role == crate::models::MessageRole::System
+                            {
                                 ComposerStreamEventKind::Error
                             } else {
                                 ComposerStreamEventKind::Message
@@ -751,7 +766,9 @@ fn resolve_provider_account_status(
             account_email: None,
             account_plan: None,
             account_id: None,
-            runtime_home: profile.and_then(|value| clean_optional_string(value.runtime_home.as_deref().unwrap_or_default())),
+            runtime_home: profile.and_then(|value| {
+                clean_optional_string(value.runtime_home.as_deref().unwrap_or_default())
+            }),
             note: Some("Claude Code 当前只显示会话绑定信息，暂未解析官方账号详情。".into()),
         }),
         ProviderKind::Mock => Ok(ProviderAccountStatus {
@@ -873,16 +890,17 @@ fn resolve_codex_account_status(
 }
 
 fn default_codex_home_string() -> Option<String> {
-    let path = env::var("CODEX_HOME")
-        .ok()
-        .map(PathBuf::from)
-        .or_else(|| env::var("HOME").ok().map(|home| PathBuf::from(home).join(".codex")))?;
+    let path = env::var("CODEX_HOME").ok().map(PathBuf::from).or_else(|| {
+        env::var("HOME")
+            .ok()
+            .map(|home| PathBuf::from(home).join(".codex"))
+    })?;
     Some(path.to_string_lossy().to_string())
 }
 
 fn copy_codex_auth_from_default_runtime(target_runtime_home: &str) -> Result<(), String> {
-    let source_runtime_home =
-        default_codex_home_string().ok_or_else(|| "No default Codex runtime home was resolved.".to_string())?;
+    let source_runtime_home = default_codex_home_string()
+        .ok_or_else(|| "No default Codex runtime home was resolved.".to_string())?;
     if Path::new(&source_runtime_home) == Path::new(target_runtime_home) {
         return Ok(());
     }
@@ -898,8 +916,9 @@ fn copy_codex_auth_from_default_runtime(target_runtime_home: &str) -> Result<(),
             .map_err(|error| format!("failed to prepare Codex runtime directory: {error}"))?;
     }
 
-    fs::copy(&source_auth, &target_auth)
-        .map_err(|error| format!("failed to copy Codex auth.json into the profile runtime: {error}"))?;
+    fs::copy(&source_auth, &target_auth).map_err(|error| {
+        format!("failed to copy Codex auth.json into the profile runtime: {error}")
+    })?;
 
     Ok(())
 }
@@ -968,12 +987,20 @@ fn parse_skill_summary(
 ) -> Result<Option<crate::models::SkillSummary>, String> {
     let contents = fs::read_to_string(skill_path)
         .map_err(|error| format!("failed to read {}: {error}", skill_path.display()))?;
-    let name = extract_frontmatter_field(&contents, "name")
-        .or_else(|| skill_path.parent().and_then(|parent| parent.file_name()).map(|value| value.to_string_lossy().to_string()));
+    let name = extract_frontmatter_field(&contents, "name").or_else(|| {
+        skill_path
+            .parent()
+            .and_then(|parent| parent.file_name())
+            .map(|value| value.to_string_lossy().to_string())
+    });
     let description = extract_frontmatter_field(&contents, "description").unwrap_or_else(|| {
         contents
             .lines()
-            .find(|line| !line.trim().is_empty() && !line.trim().starts_with('#') && !line.trim().starts_with("---"))
+            .find(|line| {
+                !line.trim().is_empty()
+                    && !line.trim().starts_with('#')
+                    && !line.trim().starts_with("---")
+            })
             .unwrap_or("No description available.")
             .trim()
             .to_string()
@@ -1020,9 +1047,10 @@ mod tests {
 
     use super::AppState;
     use crate::models::{
-        CreateProjectInput, CreateSessionInput, MessageRole, OpenPaneInput, PaneKind, PaneTarget,
-        ReplacePaneSessionInput, SendComposerMessageInput, SetWorkspaceLayoutInput,
-        ToggleRemoteTunnelInput, DeleteSessionInput,
+        AssignPaneProfileInput, CreateProjectInput, CreateSessionInput, DeleteSessionInput,
+        MessageRole, OpenPaneInput, PaneKind, PaneTarget, ProfileAuthKind, ProviderKind,
+        ReplacePaneSessionInput, SaveProviderProfileInput, SendComposerMessageInput,
+        SetWorkspaceLayoutInput, ToggleRemoteTunnelInput,
     };
 
     #[test]
@@ -1074,7 +1102,10 @@ mod tests {
             .panes
             .iter()
             .any(|candidate| candidate.id == pane.id && candidate.is_focused));
-        assert_eq!(dashboard.active_session_id.as_deref(), Some(session_id.as_str()));
+        assert_eq!(
+            dashboard.active_session_id.as_deref(),
+            Some(session_id.as_str())
+        );
     }
 
     #[test]
@@ -1137,7 +1168,10 @@ mod tests {
             .expect("pane should exist");
         assert_eq!(pane.session_id, replacement_session_id);
         assert!(pane.is_focused);
-        assert_eq!(dashboard.active_session_id.as_deref(), Some(pane.session_id.as_str()));
+        assert_eq!(
+            dashboard.active_session_id.as_deref(),
+            Some(pane.session_id.as_str())
+        );
     }
 
     #[test]
@@ -1169,12 +1203,19 @@ mod tests {
             .expect("session should delete");
 
         let dashboard = state.dashboard_state().expect("dashboard should load");
-        assert!(!dashboard.sessions.iter().any(|session| session.id == session_id));
+        assert!(!dashboard
+            .sessions
+            .iter()
+            .any(|session| session.id == session_id));
         assert!(!dashboard
             .panes
             .iter()
-            .any(|pane| pane.session_id == session_id && pane.status == crate::models::PaneStatus::Open));
-        assert!(!dashboard.messages.iter().any(|message| message.session_id == session_id));
+            .any(|pane| pane.session_id == session_id
+                && pane.status == crate::models::PaneStatus::Open));
+        assert!(!dashboard
+            .messages
+            .iter()
+            .any(|message| message.session_id == session_id));
     }
 
     #[test]
@@ -1238,6 +1279,70 @@ mod tests {
         assert_eq!(workspace.layout_mode, "grid");
         assert!(!remote.frp.enabled);
         assert_eq!(remote.frp.active_tunnels, 0);
+    }
+
+    #[test]
+    fn switching_profiles_clears_provider_session_id() {
+        let dir = tempdir().expect("temp dir should exist");
+        let state = create_workspace_with_two_sessions(dir.path());
+
+        let profile_a = state
+            .save_provider_profile(SaveProviderProfileInput {
+                id: None,
+                provider: ProviderKind::Anthropic,
+                label: "Claude A".into(),
+                auth_kind: Some(ProfileAuthKind::ApiKey),
+                base_url: "https://a.example.com".into(),
+                api_key: "key-a".into(),
+                model: Some("model-a".into()),
+                reuse_current_login: None,
+            })
+            .expect("profile A should save");
+        let profile_b = state
+            .save_provider_profile(SaveProviderProfileInput {
+                id: None,
+                provider: ProviderKind::Anthropic,
+                label: "Claude B".into(),
+                auth_kind: Some(ProfileAuthKind::ApiKey),
+                base_url: "https://b.example.com".into(),
+                api_key: "key-b".into(),
+                model: Some("model-b".into()),
+                reuse_current_login: None,
+            })
+            .expect("profile B should save");
+
+        let pane_id = {
+            let dashboard = state.dashboard_state().expect("dashboard should load");
+            dashboard.panes[0].id.clone()
+        };
+
+        state
+            .assign_pane_profile(AssignPaneProfileInput {
+                pane_id: pane_id.clone(),
+                profile_id: Some(profile_a.id),
+            })
+            .expect("first profile should assign");
+
+        state
+            .mutate(|store| {
+                store.sessions[0].provider_session_id = Some("provider-session-1".into());
+                Ok(())
+            })
+            .expect("session id should update");
+
+        state
+            .assign_pane_profile(AssignPaneProfileInput {
+                pane_id,
+                profile_id: Some(profile_b.id.clone()),
+            })
+            .expect("second profile should assign");
+
+        let dashboard = state.dashboard_state().expect("dashboard should load");
+        assert_eq!(
+            dashboard.sessions[0].profile_id.as_deref(),
+            Some(profile_b.id.as_str())
+        );
+        assert_eq!(dashboard.sessions[0].provider_session_id, None);
     }
 
     fn create_workspace_with_two_sessions(root: &Path) -> AppState {

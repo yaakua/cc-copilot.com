@@ -1,6 +1,4 @@
-use crate::models::{
-    ConnectionState, FrpStatus, RemoteStatus, WorkspaceSummary,
-};
+use crate::models::{ConnectionState, FrpStatus, RemoteStatus, WorkspaceSummary};
 use crate::store::{now_ms, Store};
 
 pub fn seeded_store() -> Store {

@@ -16,6 +16,7 @@ use crate::{
     store::{mock_assistant_reply, MessageCompletion, MessageDispatch},
 };
 use serde_json::Value;
+use tracing::{debug, error, info, warn};
 
 #[derive(Clone, Copy)]
 pub struct ProviderRuntimeConfig<'a> {
@@ -46,6 +47,7 @@ pub fn execute_message(dispatch: &MessageDispatch) -> MessageCompletion {
 }
 
 pub fn test_provider_connection(config: ProviderRuntimeConfig<'_>) -> ProviderConnectionTestResult {
+    info!(provider=%provider_name(config.provider), profile_id=?config.profile_id, profile_label=?config.profile_label, has_base_url=config.base_url.is_some(), has_api_key=config.api_key.is_some(), model=?config.model, "starting provider connection test");
     if cfg!(test) || env::var("CC_COPILOT_NEXT_DISABLE_PROVIDERS").as_deref() == Ok("1") {
         return ProviderConnectionTestResult {
             provider: config.provider.clone(),
@@ -67,25 +69,31 @@ pub fn test_provider_connection(config: ProviderRuntimeConfig<'_>) -> ProviderCo
     let latency_ms = started_at.elapsed().as_millis().min(u32::MAX as u128) as u32;
 
     match attempt {
-        Ok(detail) => ProviderConnectionTestResult {
-            provider: config.provider.clone(),
-            ok: true,
-            latency_ms,
-            message: format!(
-                "{}\n{}",
-                success_note_for_runtime(&config, latency_ms, true),
-                detail
-            ),
-        },
-        Err(error) => ProviderConnectionTestResult {
-            provider: config.provider.clone(),
-            ok: false,
-            latency_ms,
-            message: format!(
-                "{}\nReason: {error}",
-                success_note_for_runtime(&config, latency_ms, false)
-            ),
-        },
+        Ok(detail) => {
+            info!(provider=%provider_name(config.provider), latency_ms, detail=%detail, "provider connection test succeeded");
+            ProviderConnectionTestResult {
+                provider: config.provider.clone(),
+                ok: true,
+                latency_ms,
+                message: format!(
+                    "{}\n{}",
+                    success_note_for_runtime(&config, latency_ms, true),
+                    detail
+                ),
+            }
+        }
+        Err(error) => {
+            error!(provider=%provider_name(config.provider), latency_ms, error=%error, "provider connection test failed");
+            ProviderConnectionTestResult {
+                provider: config.provider.clone(),
+                ok: false,
+                latency_ms,
+                message: format!(
+                    "{}\nReason: {error}",
+                    success_note_for_runtime(&config, latency_ms, false)
+                ),
+            }
+        }
     }
 }
 
@@ -98,18 +106,21 @@ pub fn launch_provider_login(
         ProviderKind::OpenAi => {
             if let Some(profile) = profile {
                 if profile.auth_kind == ProfileAuthKind::Official {
-                    let runtime_home = profile
-                        .runtime_home
-                        .as_deref()
-                        .ok_or_else(|| "official Codex profile is missing runtime home".to_string())?;
-                    fs::create_dir_all(runtime_home)
-                        .map_err(|error| format!("failed to prepare Codex profile home: {error}"))?;
+                    let runtime_home = profile.runtime_home.as_deref().ok_or_else(|| {
+                        "official Codex profile is missing runtime home".to_string()
+                    })?;
+                    fs::create_dir_all(runtime_home).map_err(|error| {
+                        format!("failed to prepare Codex profile home: {error}")
+                    })?;
                     let command = format!(
                         "export CODEX_HOME=\"{}\"; codex login",
                         escape_shell(runtime_home)
                     );
                     open_login_terminal("Codex CLI", &workspace, &command)?;
-                    format!("Opened a terminal window for `codex login` via profile {}.", profile.label)
+                    format!(
+                        "Opened a terminal window for `codex login` via profile {}.",
+                        profile.label
+                    )
                 } else {
                     open_login_terminal("Codex CLI", &workspace, "codex login")?;
                     "Opened a terminal window for `codex login`.".to_string()
@@ -273,7 +284,9 @@ where
             provider_session_id = parsed.provider_session_id;
         }
         if let Some(delta) = parsed.delta {
-            if delta.role == MessageRole::Assistant && delta.kind == ComposerStreamEventKind::Message {
+            if delta.role == MessageRole::Assistant
+                && delta.kind == ComposerStreamEventKind::Message
+            {
                 assistant_text.push_str(&delta.chunk);
             }
             on_delta(delta);
@@ -311,6 +324,7 @@ where
     G: FnMut(u32),
 {
     let mut command = Command::new("claude");
+    info!(profile_id=?dispatch.profile_id, profile_label=?dispatch.profile_label, has_base_url=dispatch.base_url.is_some(), has_api_key=dispatch.api_key.is_some(), model=?dispatch.model, project_path=%dispatch.project_path, "starting claude stream");
     command.current_dir(&dispatch.project_path).arg("-p");
     if let Some(provider_session_id) = dispatch.provider_session_id.as_deref() {
         command.args(["--resume", provider_session_id]);
@@ -468,13 +482,23 @@ fn apply_claude_runtime_env(command: &mut Command, config: ProviderRuntimeConfig
         return;
     };
 
+    command.env("ANTHROPIC_API_KEY", api_key);
+    command.env_remove("ANTHROPIC_FOUNDRY_API_KEY");
+    command.env_remove("ANTHROPIC_FOUNDRY_BASE_URL");
+    command.env_remove("ANTHROPIC_FOUNDRY_RESOURCE");
+    command.env_remove("CLAUDE_CODE_USE_FOUNDRY");
+    command.env_remove("CLAUDE_CODE_SKIP_FOUNDRY_AUTH");
+
     if let Some(base_url) = config.base_url {
-        command.env("CLAUDE_CODE_USE_FOUNDRY", "1");
-        command.env("CLAUDE_CODE_SKIP_FOUNDRY_AUTH", "1");
-        command.env("ANTHROPIC_FOUNDRY_BASE_URL", base_url);
-        command.env("ANTHROPIC_FOUNDRY_API_KEY", api_key);
+        command.env("ANTHROPIC_BASE_URL", base_url);
     } else {
-        command.env("ANTHROPIC_API_KEY", api_key);
+        command.env_remove("ANTHROPIC_BASE_URL");
+    }
+
+    if let Some(model) = config.model {
+        command.env("ANTHROPIC_MODEL", model);
+    } else {
+        command.env_remove("ANTHROPIC_MODEL");
     }
 }
 
@@ -532,6 +556,7 @@ fn run_codex_connection_test(config: &ProviderRuntimeConfig<'_>) -> Result<Strin
         .map_err(|error| format!("failed to launch codex: {error}"))?;
     let stdout = String::from_utf8_lossy(&output.stdout);
     let stderr = String::from_utf8_lossy(&output.stderr);
+    debug!(stdout=%stdout, stderr=%stderr, status=?output.status.code(), "claude connection test raw output");
 
     if !output.status.success() {
         return Err(render_process_error("codex", stdout.trim(), stderr.trim()));
@@ -549,10 +574,12 @@ fn run_codex_connection_test(config: &ProviderRuntimeConfig<'_>) -> Result<Strin
 }
 
 fn run_claude_connection_test(config: &ProviderRuntimeConfig<'_>) -> Result<String, String> {
+    info!(profile_id=?config.profile_id, profile_label=?config.profile_label, base_url=?config.base_url, model=?config.model, "running claude connection test");
     let mut command = Command::new("claude");
     let project_path = current_project_path();
     command.current_dir(&project_path).args([
         "-p",
+        "--verbose",
         "--output-format",
         "stream-json",
         "--dangerously-skip-permissions",
@@ -568,6 +595,7 @@ fn run_claude_connection_test(config: &ProviderRuntimeConfig<'_>) -> Result<Stri
         .map_err(|error| format!("failed to launch claude: {error}"))?;
     let stdout = String::from_utf8_lossy(&output.stdout);
     let stderr = String::from_utf8_lossy(&output.stderr);
+    debug!(stdout=%stdout, stderr=%stderr, status=?output.status.code(), "claude connection test raw output");
 
     if !output.status.success() {
         return Err(render_process_error("claude", stdout.trim(), stderr.trim()));
@@ -577,6 +605,7 @@ fn run_claude_connection_test(config: &ProviderRuntimeConfig<'_>) -> Result<Stri
     for line in stdout.lines() {
         let parsed = parse_claude_json_line(line, &assistant_text);
         if let Some(error) = parsed.error {
+            error!(line=%line, error=%error, "claude connection test parsed error");
             return Err(error);
         }
         if let Some(delta) = parsed.delta {
@@ -584,11 +613,16 @@ fn run_claude_connection_test(config: &ProviderRuntimeConfig<'_>) -> Result<Stri
         }
     }
 
-    if assistant_text.trim() == "OK" {
+    let final_text = assistant_text.trim().to_string();
+    info!(assistant_text=%final_text, "claude connection test parsed assistant text");
+    if final_text == "OK" {
         return Ok("Received expected OK confirmation from Claude Code.".into());
     }
 
-    Err("claude test did not return the expected confirmation.".into())
+    warn!(assistant_text=%final_text, "claude test did not return expected confirmation");
+    Err(format!(
+        "claude test did not return the expected confirmation. Parsed assistant text: {final_text}"
+    ))
 }
 
 fn parse_codex_json_line(line: &str, session_id: &str) -> ProviderParsedLine {
@@ -632,10 +666,7 @@ fn parse_codex_json_line(line: &str, session_id: &str) -> ProviderParsedLine {
                         .map(summarize_command)
                         .unwrap_or_else(|| "调用工具".to_string());
                     let exit_code = item.get("exit_code").and_then(Value::as_i64);
-                    let item_id = item
-                        .get("id")
-                        .and_then(Value::as_str)
-                        .unwrap_or("tool");
+                    let item_id = item.get("id").and_then(Value::as_str).unwrap_or("tool");
                     let suffix = match exit_code {
                         Some(code) => format!(" 已完成 (exit {code})"),
                         None => " 已完成".to_string(),
@@ -661,10 +692,7 @@ fn parse_codex_json_line(line: &str, session_id: &str) -> ProviderParsedLine {
                     .and_then(Value::as_str)
                     .map(summarize_command)
                     .unwrap_or_else(|| "调用工具".to_string());
-                let item_id = item
-                    .get("id")
-                    .and_then(Value::as_str)
-                    .unwrap_or("tool");
+                let item_id = item.get("id").and_then(Value::as_str).unwrap_or("tool");
                 parsed.delta = Some(ProviderStreamChunk {
                     message_id: format!("tool-{session_id}-{item_id}"),
                     role: MessageRole::System,
@@ -874,25 +902,18 @@ fn parse_claude_process_item(item: &Value) -> Option<ProviderStreamChunk> {
         "thinking" | "redacted_thinking" => Some(ProviderStreamChunk {
             message_id: format!(
                 "thinking-{}",
-                item.get("id")
-                    .and_then(Value::as_str)
-                    .unwrap_or("claude")
+                item.get("id").and_then(Value::as_str).unwrap_or("claude")
             ),
             role: MessageRole::System,
             kind: ComposerStreamEventKind::Status,
             chunk: "正在思考".to_string(),
         }),
         "tool_use" => {
-            let name = item
-                .get("name")
-                .and_then(Value::as_str)
-                .unwrap_or("工具");
+            let name = item.get("name").and_then(Value::as_str).unwrap_or("工具");
             Some(ProviderStreamChunk {
                 message_id: format!(
                     "tool-{}",
-                    item.get("id")
-                        .and_then(Value::as_str)
-                        .unwrap_or(name)
+                    item.get("id").and_then(Value::as_str).unwrap_or(name)
                 ),
                 role: MessageRole::System,
                 kind: ComposerStreamEventKind::ToolCall,
@@ -1044,6 +1065,47 @@ fn timestamp_ms() -> u128 {
         .duration_since(UNIX_EPOCH)
         .map(|duration| duration.as_millis())
         .unwrap_or(0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{apply_claude_runtime_env, ProviderKind, ProviderRuntimeConfig};
+    use std::process::Command;
+
+    #[test]
+    fn apply_claude_runtime_env_uses_anthropic_compat_variables() {
+        let mut command = Command::new("env");
+        command.env("ANTHROPIC_FOUNDRY_API_KEY", "legacy-key");
+        command.env("ANTHROPIC_FOUNDRY_BASE_URL", "https://legacy.example.com");
+        command.env("ANTHROPIC_FOUNDRY_RESOURCE", "legacy-resource");
+        command.env("CLAUDE_CODE_USE_FOUNDRY", "1");
+        command.env("CLAUDE_CODE_SKIP_FOUNDRY_AUTH", "1");
+
+        apply_claude_runtime_env(
+            &mut command,
+            ProviderRuntimeConfig {
+                provider: &ProviderKind::Anthropic,
+                profile_id: None,
+                profile_label: None,
+                base_url: Some("https://ark.cn-beijing.volces.com/api/coding"),
+                api_key: Some("test-key"),
+                model: Some("ark-code-latest"),
+                runtime_home: None,
+            },
+        );
+
+        let output = command.output().expect("env should run");
+        let text = String::from_utf8_lossy(&output.stdout);
+
+        assert!(text.contains("ANTHROPIC_API_KEY=test-key\n"));
+        assert!(text.contains("ANTHROPIC_BASE_URL=https://ark.cn-beijing.volces.com/api/coding\n"));
+        assert!(text.contains("ANTHROPIC_MODEL=ark-code-latest\n"));
+        assert!(!text.contains("ANTHROPIC_FOUNDRY_API_KEY="));
+        assert!(!text.contains("ANTHROPIC_FOUNDRY_BASE_URL="));
+        assert!(!text.contains("ANTHROPIC_FOUNDRY_RESOURCE="));
+        assert!(!text.contains("CLAUDE_CODE_USE_FOUNDRY="));
+        assert!(!text.contains("CLAUDE_CODE_SKIP_FOUNDRY_AUTH="));
+    }
 }
 
 struct ClaudeParsedLine {
