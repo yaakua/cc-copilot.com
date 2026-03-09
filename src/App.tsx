@@ -255,7 +255,6 @@ function App() {
           }}
           onConsumeEditorIntent={consumeProfileEditorIntent}
           onDeleteProfile={deleteProfile}
-          onLaunchProviderLogin={launchProviderLogin}
           onSaveProfile={saveProfile}
           onTestProfile={testProfile}
           profiles={profiles}

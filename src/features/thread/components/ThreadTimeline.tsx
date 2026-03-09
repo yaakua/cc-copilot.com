@@ -42,7 +42,7 @@ export function ThreadTimeline({
         <SessionSetupBar
           activeProfile={activeProfile}
           availableProfiles={availableProfiles}
-          canSwitchProvider={Boolean(activePane.isDraft)}
+          canSwitchProvider={!hasUserMessages}
           onAssignProfile={onAssignProfile}
           onChangeProvider={onChangeProvider}
           onCreateProfile={onCreateProfile}

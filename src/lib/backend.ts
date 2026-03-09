@@ -9,6 +9,7 @@ export const COMMANDS = {
   saveProviderProfile: "save_provider_profile",
   deleteProviderProfile: "delete_provider_profile",
   assignPaneProfile: "assign_pane_profile",
+  assignPaneProvider: "assign_pane_provider",
   testProviderProfile: "test_provider_profile",
   launchProviderLogin: "launch_provider_login",
   openPane: "open_pane",
@@ -211,6 +212,14 @@ export async function assignPaneProfile(input: {
   profileId?: string | null;
 }) {
   return invoke(COMMANDS.assignPaneProfile, { input });
+}
+
+export async function assignPaneProvider(input: {
+  paneId: string;
+  provider: "anthropic" | "openAi";
+  profileId?: string | null;
+}) {
+  return invoke(COMMANDS.assignPaneProvider, { input });
 }
 
 export async function testProviderProfile(input: {

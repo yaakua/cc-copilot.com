@@ -70,7 +70,7 @@ export function SessionSetupBar({
   return (
     <div className="flex items-center justify-between gap-3 rounded-xl border border-sky-200/80 bg-sky-50/60 px-3 py-2">
       <span className="min-w-0 text-[11px] font-semibold text-sky-900">
-        {canSwitchProvider ? "首条消息前可切换 Provider / 账号" : "首条消息前可切换账号"}
+        {canSwitchProvider ? "首条消息前可切换 Provider / 账号" : "首条消息后仅可切换账号"}
       </span>
       <div className="relative max-w-full shrink-0" ref={menuRef}>
         <button
@@ -155,7 +155,7 @@ export function SessionSetupBar({
 
                 {!canSwitchProvider && provider !== sectionProvider && (
                   <div className="px-3 py-2 text-xs text-muted-foreground">
-                    当前会话已锁定为
+                    当前会话首条消息已发送，已固定为
                     {provider === "claude" ? " Claude Code" : " Codex"}，不能切到另一种 provider。
                   </div>
                 )}

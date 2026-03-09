@@ -30,7 +30,6 @@ interface ProfileManagerDialogProps {
     message: string;
   }>;
   onConsumeEditorIntent?: () => void;
-  onLaunchProviderLogin: (provider: "claude" | "codex") => void;
   onDeleteProfile: (profileId: string) => void;
 }
 
@@ -42,7 +41,6 @@ export function ProfileManagerDialog({
   onSaveProfile,
   onTestProfile,
   onConsumeEditorIntent,
-  onLaunchProviderLogin,
   onDeleteProfile,
 }: ProfileManagerDialogProps) {
   return (
@@ -71,11 +69,9 @@ export function ProfileManagerDialog({
         </div>
 
         <ProfileSettingsPanel
-          activePaneId={null}
           editorIntent={editorIntent}
           onConsumeEditorIntent={onConsumeEditorIntent}
           onDeleteProfile={onDeleteProfile}
-          onLaunchProviderLogin={onLaunchProviderLogin}
           onSaveProfile={onSaveProfile}
           onTestProfile={onTestProfile}
           profiles={profiles}

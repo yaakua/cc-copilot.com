@@ -75,25 +75,25 @@ export function ProfileEditorForm({
   return (
     <div className="flex h-full flex-col">
       {(title || description || badge) && (
-        <div className="space-y-2">
+        <div className="space-y-1.5">
           {badge && (
-            <div className="inline-flex items-center gap-2 rounded-full bg-sky-50 px-3 py-1 text-xs font-semibold text-sky-700">
+            <div className="inline-flex items-center gap-2 rounded-full bg-sky-50 px-3 py-1 text-[11px] font-semibold text-sky-700">
               <Sparkles size={14} />
               {badge}
             </div>
           )}
-          {title && <h4 className="text-2xl font-semibold text-foreground">{title}</h4>}
+          {title && <h4 className="text-xl font-semibold text-foreground">{title}</h4>}
           {description && (
-            <p className="text-sm leading-6 text-muted-foreground">{description}</p>
+            <p className="text-[13px] leading-5 text-muted-foreground">{description}</p>
           )}
         </div>
       )}
 
-      <div className={cn("grid gap-3", title || description || badge ? "mt-6" : "")}>
-        <div className="grid gap-3 md:grid-cols-2">
+      <div className={cn("grid gap-2.5", title || description || badge ? "mt-4" : "")}>
+        <div className="grid gap-2.5 md:grid-cols-2">
           <button
             className={cn(
-              "rounded-2xl border p-4 text-left transition-colors",
+              "rounded-xl border p-3 text-left transition-colors",
               draft.provider === "claude"
                 ? "border-sky-300 bg-sky-50"
                 : "border-border bg-card hover:bg-muted/40",
@@ -103,14 +103,14 @@ export function ProfileEditorForm({
             onClick={() => onChange({ provider: "claude", authKind: "system", baseUrl: "", apiKey: "", model: null })}
             type="button"
           >
-            <div className="text-sm font-semibold text-foreground">Claude Code</div>
-            <p className="mt-2 text-sm leading-6 text-muted-foreground">
+            <div className="text-[13px] font-semibold text-foreground">Claude Code</div>
+            <p className="mt-1 text-[12px] leading-5 text-muted-foreground">
               适合系统登录或 Anthropic 兼容网关。
             </p>
           </button>
           <button
             className={cn(
-              "rounded-2xl border p-4 text-left transition-colors",
+              "rounded-xl border p-3 text-left transition-colors",
               draft.provider === "codex"
                 ? "border-sky-300 bg-sky-50"
                 : "border-border bg-card hover:bg-muted/40",
@@ -128,18 +128,18 @@ export function ProfileEditorForm({
             }
             type="button"
           >
-            <div className="text-sm font-semibold text-foreground">Codex</div>
-            <p className="mt-2 text-sm leading-6 text-muted-foreground">
+            <div className="text-[13px] font-semibold text-foreground">Codex</div>
+            <p className="mt-1 text-[12px] leading-5 text-muted-foreground">
               支持系统登录、独立官方账号和 OpenAI 兼容网关。
             </p>
           </button>
         </div>
 
-        <div className="grid gap-3 md:grid-cols-2">
+        <div className="grid gap-2.5 md:grid-cols-2">
           {draft.provider === "codex" && (
             <button
               className={cn(
-                "rounded-2xl border p-4 text-left transition-colors",
+                "rounded-xl border p-3 text-left transition-colors",
                 normalizedAuthKind === "official"
                   ? "border-sky-300 bg-sky-50"
                   : "border-border bg-card hover:bg-muted/40",
@@ -154,18 +154,18 @@ export function ProfileEditorForm({
               }
               type="button"
             >
-              <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
-                <Server size={16} />
+              <div className="flex items-center gap-1.5 text-[13px] font-semibold text-foreground">
+                <Server size={14} />
                 官方账号（独立）
               </div>
-              <p className="mt-2 text-sm leading-6 text-muted-foreground">{helper.official}</p>
+              <p className="mt-1 text-[12px] leading-5 text-muted-foreground">{helper.official}</p>
             </button>
           )}
 
           {draft.provider === "claude" && (
             <button
               className={cn(
-                "rounded-2xl border p-4 text-left transition-colors",
+                "rounded-xl border p-3 text-left transition-colors",
                 normalizedAuthKind === "system"
                   ? "border-sky-300 bg-sky-50"
                   : "border-border bg-card hover:bg-muted/40",
@@ -173,17 +173,17 @@ export function ProfileEditorForm({
               onClick={() => onChange({ authKind: "system", baseUrl: "", apiKey: "" })}
               type="button"
             >
-              <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
-                <Server size={16} />
+              <div className="flex items-center gap-1.5 text-[13px] font-semibold text-foreground">
+                <Server size={14} />
                 系统登录 / 官方账号
               </div>
-              <p className="mt-2 text-sm leading-6 text-muted-foreground">{helper.system}</p>
+              <p className="mt-1 text-[12px] leading-5 text-muted-foreground">{helper.system}</p>
             </button>
           )}
 
           <button
             className={cn(
-              "rounded-2xl border p-4 text-left transition-colors",
+              "rounded-xl border p-3 text-left transition-colors",
               normalizedAuthKind === "apiKey"
                 ? "border-sky-300 bg-sky-50"
                 : "border-border bg-card hover:bg-muted/40",
@@ -191,30 +191,30 @@ export function ProfileEditorForm({
             onClick={() => onChange({ authKind: "apiKey" })}
             type="button"
           >
-            <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
-              <Globe size={16} />
+            <div className="flex items-center gap-1.5 text-[13px] font-semibold text-foreground">
+              <Globe size={14} />
               第三方 Provider
             </div>
-            <p className="mt-2 text-sm leading-6 text-muted-foreground">{helper.api}</p>
+            <p className="mt-1 text-[12px] leading-5 text-muted-foreground">{helper.api}</p>
           </button>
         </div>
       </div>
 
-      <div className="mt-6 grid gap-4 md:grid-cols-2">
-        <label className="flex flex-col gap-2 text-sm">
+      <div className="mt-4 grid gap-3 md:grid-cols-2">
+        <label className="flex flex-col gap-1.5 text-[13px]">
           <span className="font-medium text-muted-foreground">Profile 名称</span>
           <input
-            className="rounded-xl border bg-background px-3 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-sky-300"
+            className="rounded-lg border bg-background px-3 py-2 text-[13px] focus:outline-none focus:ring-2 focus:ring-sky-300"
             onChange={(event) => onChange({ label: event.currentTarget.value })}
             placeholder={`${providerLabel} Profile`}
             value={draft.label}
           />
         </label>
 
-        <label className="flex flex-col gap-2 text-sm">
+        <label className="flex flex-col gap-1.5 text-[13px]">
           <span className="font-medium text-muted-foreground">模型</span>
           <input
-            className="rounded-xl border bg-background px-3 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-sky-300 disabled:cursor-not-allowed disabled:opacity-60"
+            className="rounded-lg border bg-background px-3 py-2 text-[13px] focus:outline-none focus:ring-2 focus:ring-sky-300 disabled:cursor-not-allowed disabled:opacity-60"
             disabled={normalizedAuthKind !== "apiKey" && draft.provider !== "codex"}
             onChange={(event) => onChange({ model: event.currentTarget.value })}
             placeholder={draft.provider === "codex" ? "gpt-5-codex" : "可留空"}
@@ -222,15 +222,15 @@ export function ProfileEditorForm({
           />
         </label>
 
-        <label className="md:col-span-2 flex flex-col gap-2 text-sm">
+        <label className="md:col-span-2 flex flex-col gap-1.5 text-[13px]">
           <span className="font-medium text-muted-foreground">Base URL</span>
           <div className="relative">
             <Globe
               className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground/60"
-              size={16}
+              size={14}
             />
             <input
-              className="w-full rounded-xl border bg-background py-3 pl-10 pr-3 text-sm focus:outline-none focus:ring-2 focus:ring-sky-300 disabled:cursor-not-allowed disabled:opacity-60"
+              className="w-full rounded-lg border bg-background py-2 pl-9 pr-3 text-[13px] focus:outline-none focus:ring-2 focus:ring-sky-300 disabled:cursor-not-allowed disabled:opacity-60"
               disabled={normalizedAuthKind !== "apiKey"}
               onChange={(event) => onChange({ baseUrl: event.currentTarget.value })}
               placeholder={
@@ -241,15 +241,15 @@ export function ProfileEditorForm({
           </div>
         </label>
 
-        <label className="md:col-span-2 flex flex-col gap-2 text-sm">
+        <label className="md:col-span-2 flex flex-col gap-1.5 text-[13px]">
           <span className="font-medium text-muted-foreground">API Key</span>
           <div className="relative">
             <Key
               className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground/60"
-              size={16}
+              size={14}
             />
             <input
-              className="w-full rounded-xl border bg-background py-3 pl-10 pr-3 text-sm focus:outline-none focus:ring-2 focus:ring-sky-300 disabled:cursor-not-allowed disabled:opacity-60"
+              className="w-full rounded-lg border bg-background py-2 pl-9 pr-3 text-[13px] focus:outline-none focus:ring-2 focus:ring-sky-300 disabled:cursor-not-allowed disabled:opacity-60"
               disabled={normalizedAuthKind !== "apiKey"}
               onChange={(event) => onChange({ apiKey: event.currentTarget.value })}
               placeholder={
@@ -266,18 +266,16 @@ export function ProfileEditorForm({
         </label>
       </div>
 
-      <div className="mt-5 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm leading-6 text-slate-600">
-        {normalizedAuthKind === "apiKey"
-          ? helper.api
-          : normalizedAuthKind === "official" && draft.provider === "codex"
-            ? "保存后会立即打开独立的 Codex 登录窗口。登录完成后，这个官方账号会作为单独 profile 出现在切换菜单中。"
-            : helper.system}
-      </div>
+      {normalizedAuthKind === "official" && draft.provider === "codex" && (
+        <div className="mt-3 rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 text-[12px] leading-5 text-sky-700">
+          保存后会立即打开独立的 Codex 登录窗口。登录完成后，这个帐号会作为单独 profile 添加。
+        </div>
+      )}
 
       {feedback && (
         <div
           className={cn(
-            "mt-4 rounded-2xl border px-4 py-3 text-sm",
+            "mt-3 rounded-lg border px-3 py-2 text-[13px]",
             feedback.ok
               ? "border-emerald-200 bg-emerald-50 text-emerald-700"
               : "border-red-200 bg-red-50 text-red-700",
@@ -287,15 +285,15 @@ export function ProfileEditorForm({
         </div>
       )}
 
-      <div className="mt-6 flex flex-wrap items-center justify-between gap-3 border-t border-border pt-5">
+      <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-border pt-4">
         <div className="flex items-center gap-2">
           <button
-            className="inline-flex items-center gap-2 rounded-xl border px-4 py-3 text-sm font-medium text-foreground hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60"
+            className="inline-flex items-center gap-1.5 rounded-lg border px-4 py-2 text-[13px] font-medium text-foreground hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60"
             disabled={isTesting || isSaving}
             onClick={onTest}
             type="button"
           >
-            <Check size={16} />
+            <Check size={14} />
             {testLabel ??
               (isTesting
                 ? "测试中..."
@@ -306,11 +304,11 @@ export function ProfileEditorForm({
 
           {mode === "edit" && onDelete && selectedProfile && (
             <button
-              className="inline-flex items-center gap-2 rounded-xl border border-destructive/20 bg-destructive/5 px-4 py-3 text-sm font-medium text-destructive hover:bg-destructive/10"
+              className="inline-flex items-center gap-1.5 rounded-lg border border-destructive/20 bg-destructive/5 px-4 py-2 text-[13px] font-medium text-destructive hover:bg-destructive/10"
               onClick={onDelete}
               type="button"
             >
-              <Trash2 size={16} />
+              <Trash2 size={14} />
               删除
             </button>
           )}
@@ -319,7 +317,7 @@ export function ProfileEditorForm({
         <div className="flex items-center gap-2">
           {onCancel && (
             <button
-              className="rounded-xl px-4 py-3 text-sm font-medium text-muted-foreground hover:bg-muted"
+              className="rounded-lg px-4 py-2 text-[13px] font-medium text-muted-foreground hover:bg-muted"
               onClick={onCancel}
               type="button"
             >
@@ -327,7 +325,7 @@ export function ProfileEditorForm({
             </button>
           )}
           <button
-            className="rounded-xl bg-foreground px-5 py-3 text-sm font-medium text-background hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60"
+            className="rounded-lg bg-foreground px-5 py-2 text-[13px] font-medium text-background hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60"
             disabled={isSaving}
             onClick={onSave}
             type="button"
@@ -336,8 +334,8 @@ export function ProfileEditorForm({
               (isSaving
                 ? "保存中..."
                 : mode === "create" &&
-                    normalizedAuthKind === "official" &&
-                    draft.provider === "codex"
+                  normalizedAuthKind === "official" &&
+                  draft.provider === "codex"
                   ? "创建并登录"
                   : "保存 Profile")}
           </button>

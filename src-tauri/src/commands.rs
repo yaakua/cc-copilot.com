@@ -3,7 +3,7 @@ use tauri::State;
 
 use crate::{
     models::{
-        AssignPaneProfileInput, CancelPaneRunInput, CreateProjectInput, CreateSessionInput,
+        AssignPaneProfileInput, AssignPaneProviderInput, CancelPaneRunInput, CreateProjectInput, CreateSessionInput,
         DashboardState, DeleteProviderProfileInput, DeleteSessionInput, GetProviderAccountStatusInput, LaunchProviderLoginInput,
         OpenPaneInput, PaneRecord, PaneTarget, ProjectRecord, ProviderAuthLaunchResult,
         ProviderAccountStatus, ProviderConnectionTestResult, ProviderProfileRecord, RemoteStatus, SkillSummary,
@@ -87,6 +87,14 @@ pub fn assign_pane_profile(
     input: AssignPaneProfileInput,
 ) -> Result<PaneRecord, String> {
     state.assign_pane_profile(input)
+}
+
+#[tauri::command]
+pub fn assign_pane_provider(
+    state: State<'_, AppState>,
+    input: AssignPaneProviderInput,
+) -> Result<PaneRecord, String> {
+    state.assign_pane_provider(input)
 }
 
 #[tauri::command]

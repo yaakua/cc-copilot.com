@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 import {
   assignPaneProfile,
+  assignPaneProvider,
   closePane,
   createProject,
   createSession,
@@ -849,26 +850,59 @@ export function useDashboard() {
     }
   }
 
-  function handleSetDraftPaneProvider(
+  async function handleSetPaneProvider(
     paneId: string,
     provider: "claude" | "codex",
   ) {
     const defaultProfileId = defaultProfileForProvider(profiles, provider)?.id ?? null;
+    const targetPane =
+      dashboard.workspace.panes.find((candidate) => candidate.id === paneId) ?? null;
+
     setDashboard((current) => ({
       ...current,
+      projects: current.projects.map((project) => ({
+        ...project,
+        sessions: project.sessions.map((session) =>
+          session.id === targetPane?.sessionId
+            ? {
+              ...session,
+              provider,
+              profileId: defaultProfileId,
+              providerSessionId: null,
+            }
+            : session,
+        ),
+      })),
       workspace: {
         ...current.workspace,
         panes: current.workspace.panes.map((pane) =>
-          pane.id === paneId && pane.isDraft
+          pane.id === paneId
             ? {
               ...pane,
               provider,
               profileId: defaultProfileId,
+              providerSessionId: null,
             }
             : pane,
         ),
       },
     }));
+
+    if (targetPane?.isDraft) {
+      return;
+    }
+
+    try {
+      await assignPaneProvider({
+        paneId,
+        provider: provider === "codex" ? "openAi" : "anthropic",
+        profileId: defaultProfileId,
+      });
+      await refreshFromBackend();
+    } catch (error) {
+      setRequestError(error instanceof Error ? error.message : "Provider switch failed.");
+      await refreshFromBackend();
+    }
   }
 
   async function handleSaveProfile(profile: {
@@ -1380,7 +1414,7 @@ export function useDashboard() {
     handleClosePane,
     handleFocusPane,
     handleTogglePaneSelection,
-    setDraftPaneProvider: handleSetDraftPaneProvider,
+    setDraftPaneProvider: handleSetPaneProvider,
     assignProfileToPane: handleAssignProfileToPane,
     saveProfile: handleSaveProfile,
     deleteProfile: handleDeleteProfile,
@@ -1724,7 +1758,7 @@ function buildStatusCommandBody(
   const switchHint =
     userMessageCount === 0
       ? "当前还没发出第一条业务消息，仍可切换账号或 profile。"
-      : "当前会话账号已经锁定；如需切换，请新建会话。";
+      : "当前会话首条业务消息已发送，provider 已固定；如需切换 provider，请新建会话。";
 
   const lines = [
     `## ${providerLabel} 状态`,

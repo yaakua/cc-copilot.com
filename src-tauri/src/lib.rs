@@ -26,6 +26,7 @@ pub fn run() {
             commands::save_provider_profile,
             commands::delete_provider_profile,
             commands::assign_pane_profile,
+            commands::assign_pane_provider,
             commands::test_provider_profile,
             commands::launch_provider_login,
             commands::open_pane,

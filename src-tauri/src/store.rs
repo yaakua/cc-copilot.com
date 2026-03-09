@@ -4,7 +4,7 @@ use std::{env, path::PathBuf};
 use serde::{Deserialize, Serialize};
 
 use crate::models::{
-    AssignPaneProfileInput, ComposerDraft, ComposerMessage, ConnectionState, CreateProjectInput,
+    AssignPaneProfileInput, AssignPaneProviderInput, ComposerDraft, ComposerMessage, ConnectionState, CreateProjectInput,
     CreateSessionInput, DashboardState, DeleteProviderProfileInput, MessageRole, OpenPaneInput,
     PaneRecord, PaneStatus, PaneTarget, ProfileAuthKind, ProjectRecord, ProviderKind,
     ProviderProfileRecord, RemoteStatus, RetryComposerMessageInput, SaveProviderProfileInput,
@@ -554,6 +554,52 @@ impl Store {
             self.sessions[session_index].profile_id = input.profile_id;
             self.sessions[session_index].updated_at = now;
         }
+
+        Ok(self.panes[pane_index].clone())
+    }
+
+    pub fn assign_pane_provider(
+        &mut self,
+        input: AssignPaneProviderInput,
+    ) -> Result<PaneRecord, String> {
+        if let Some(profile_id) = input.profile_id.as_deref() {
+            let profile = self
+                .provider_profiles
+                .iter()
+                .find(|profile| profile.id == profile_id)
+                .ok_or_else(|| "profile not found".to_string())?;
+            if profile.provider != input.provider {
+                return Err("profile provider does not match requested provider".into());
+            }
+        }
+
+        let pane_index = self
+            .panes
+            .iter()
+            .position(|pane| pane.id == input.pane_id)
+            .ok_or_else(|| "pane not found".to_string())?;
+        let session_id = self.panes[pane_index].session_id.clone();
+        let session_index = self
+            .sessions
+            .iter()
+            .position(|session| session.id == session_id)
+            .ok_or_else(|| "session not found".to_string())?;
+
+        let has_user_messages = self.messages.iter().any(|message| {
+            message.session_id == session_id && message.role == MessageRole::User
+        });
+        if has_user_messages {
+            return Err("cannot switch provider after the first user message".into());
+        }
+
+        let now = now_ms();
+        self.panes[pane_index].profile_id = input.profile_id.clone();
+        self.panes[pane_index].updated_at = now;
+
+        self.sessions[session_index].provider = input.provider;
+        self.sessions[session_index].profile_id = input.profile_id;
+        self.sessions[session_index].provider_session_id = None;
+        self.sessions[session_index].updated_at = now;
 
         Ok(self.panes[pane_index].clone())
     }

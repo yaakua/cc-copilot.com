@@ -393,6 +393,14 @@ pub struct AssignPaneProfileInput {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
+pub struct AssignPaneProviderInput {
+    pub pane_id: String,
+    pub provider: ProviderKind,
+    pub profile_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
 pub struct ComposerStreamEvent {
     pub pane_id: String,
     pub session_id: String,

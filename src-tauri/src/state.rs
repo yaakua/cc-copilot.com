@@ -11,7 +11,7 @@ use std::{
 };
 
 use crate::models::{
-    AssignPaneProfileInput, CancelPaneRunInput, ComposerStreamEvent, ComposerStreamEventKind,
+    AssignPaneProfileInput, AssignPaneProviderInput, CancelPaneRunInput, ComposerStreamEvent, ComposerStreamEventKind,
     ComposerStreamStage,
     CreateProjectInput, CreateSessionInput, DashboardState, DeleteProviderProfileInput,
     DeleteSessionInput, GetProviderAccountStatusInput, LaunchProviderLoginInput, OpenPaneInput, PaneRecord, PaneTarget,
@@ -161,6 +161,13 @@ impl AppState {
 
     pub fn assign_pane_profile(&self, input: AssignPaneProfileInput) -> Result<PaneRecord, String> {
         self.mutate(|store| store.assign_pane_profile(input))
+    }
+
+    pub fn assign_pane_provider(
+        &self,
+        input: AssignPaneProviderInput,
+    ) -> Result<PaneRecord, String> {
+        self.mutate(|store| store.assign_pane_provider(input))
     }
 
     pub fn launch_provider_login(

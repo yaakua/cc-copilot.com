@@ -218,7 +218,7 @@ export function PaneGrid({
             <SessionSetupBar
               activeProfile={paneProfile}
               availableProfiles={availableProfiles}
-              canSwitchProvider={Boolean(pane.isDraft)}
+              canSwitchProvider={!hasUserMessages}
               onAssignProfile={(profileId) => onAssignProfile(pane.id, profileId)}
               onChangeProvider={(provider) => onChangeProvider(pane.id, provider)}
               onCreateProfile={() => onCreateProfile(pane.id)}
