@@ -88,6 +88,7 @@ export interface BackendDashboardState {
     baseUrl: string;
     model?: string | null;
     apiKeyPresent: boolean;
+    apiKeyPreview?: string | null;
     runtimeHome?: string | null;
   }>;
   providers: Array<{

@@ -141,6 +141,8 @@ pub struct ProviderProfileRecord {
     #[serde(default)]
     pub api_key_present: bool,
     #[serde(default)]
+    pub api_key_preview: Option<String>,
+    #[serde(default)]
     pub runtime_home: Option<String>,
     pub created_at: TimestampMs,
     pub updated_at: TimestampMs,

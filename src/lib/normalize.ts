@@ -118,6 +118,7 @@ export function normalizeDashboardState(
       baseUrl: profile.baseUrl,
       model: profile.model ?? null,
       apiKeyPresent: profile.apiKeyPresent,
+      apiKeyPreview: profile.apiKeyPreview ?? null,
       runtimeHome: profile.runtimeHome ?? null,
     })),
     workspace: {

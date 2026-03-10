@@ -464,6 +464,7 @@ impl Store {
             } else {
                 profile.api_key_present || !input.api_key.trim().is_empty()
             };
+            profile.api_key_preview = None;
             profile.updated_at = now;
             return Ok(profile.clone());
         }
@@ -489,6 +490,7 @@ impl Store {
                 auth_kind,
                 ProfileAuthKind::System | ProfileAuthKind::Official
             ) && !input.api_key.trim().is_empty(),
+            api_key_preview: None,
             runtime_home: match (&provider, &auth_kind) {
                 (ProviderKind::OpenAi, ProfileAuthKind::Official) => {
                     Some(codex_official_runtime_home(&profile_id))

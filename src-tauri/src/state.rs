@@ -71,7 +71,21 @@ impl AppState {
 
     pub fn dashboard_state(&self) -> Result<DashboardState, String> {
         let store = self.lock()?;
-        Ok(store.dashboard_state())
+        let mut dashboard = store.dashboard_state();
+        for profile in &mut dashboard.provider_profiles {
+            if profile.auth_kind == ProfileAuthKind::ApiKey {
+                profile.api_key_preview = self
+                    .secrets
+                    .get_profile_api_key(&profile.id)?
+                    .as_deref()
+                    .map(mask_api_key_preview);
+                profile.api_key_present = profile.api_key_preview.is_some();
+            } else {
+                profile.api_key_preview = None;
+                profile.api_key_present = false;
+            }
+        }
+        Ok(dashboard)
     }
 
     pub fn create_project(&self, input: CreateProjectInput) -> Result<ProjectRecord, String> {
@@ -359,8 +373,14 @@ impl AppState {
         app: AppHandle,
         input: SendComposerMessageInput,
     ) -> Result<(), String> {
-        let dispatch =
-            self.resolve_dispatch(self.mutate(|store| store.begin_composer_message(input))?)?;
+        let pending_dispatch = self.mutate(|store| store.begin_composer_message(input))?;
+        let dispatch = match self.resolve_dispatch(pending_dispatch.clone()) {
+            Ok(dispatch) => dispatch,
+            Err(error) => {
+                self.fail_pending_dispatch(&pending_dispatch.session_id, &error)?;
+                return Err(error);
+            }
+        };
         let app_state = self.clone();
 
         thread::spawn(move || {
@@ -468,8 +488,14 @@ impl AppState {
         app: AppHandle,
         input: RetryComposerMessageInput,
     ) -> Result<(), String> {
-        let dispatch =
-            self.resolve_dispatch(self.mutate(|store| store.retry_composer_message(input))?)?;
+        let pending_dispatch = self.mutate(|store| store.retry_composer_message(input))?;
+        let dispatch = match self.resolve_dispatch(pending_dispatch.clone()) {
+            Ok(dispatch) => dispatch,
+            Err(error) => {
+                self.fail_pending_dispatch(&pending_dispatch.session_id, &error)?;
+                return Err(error);
+            }
+        };
         let app_state = self.clone();
 
         thread::spawn(move || {
@@ -704,6 +730,22 @@ impl AppState {
         }
         Ok(dispatch)
     }
+
+    fn fail_pending_dispatch(&self, session_id: &str, error: &str) -> Result<(), String> {
+        self.mutate(|store| {
+            store.complete_composer_message(crate::store::MessageCompletion {
+                session_id: session_id.to_string(),
+                provider_session_id: None,
+                assistant_role: crate::models::MessageRole::System,
+                assistant_content: error.to_string(),
+                session_status: crate::models::SessionStatus::Error,
+                provider_status: crate::models::ConnectionState::Disconnected,
+                provider_latency_ms: 0,
+                provider_note: error.to_string(),
+            })?;
+            Ok(())
+        })
+    }
 }
 
 fn canceled_completion(session_id: &str) -> crate::store::MessageCompletion {
@@ -749,6 +791,27 @@ fn clean_optional_string(value: &str) -> Option<String> {
     } else {
         Some(trimmed.to_string())
     }
+}
+
+fn mask_api_key_preview(value: &str) -> String {
+    let chars: Vec<char> = value.chars().collect();
+    if chars.is_empty() {
+        return String::new();
+    }
+    if chars.len() <= 8 {
+        return format!("{}***{}", chars[0], chars[chars.len() - 1]);
+    }
+    let prefix = chars.iter().take(4).collect::<String>();
+    let suffix = chars
+        .iter()
+        .rev()
+        .take(4)
+        .copied()
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+        .collect::<String>();
+    format!("{prefix}...{suffix}")
 }
 
 fn resolve_provider_account_status(

@@ -3,8 +3,9 @@ use std::{
     io::{BufRead, BufReader, Read},
     path::PathBuf,
     process::{Command, Stdio},
+    sync::mpsc,
     thread,
-    time::{Instant, SystemTime, UNIX_EPOCH},
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
 use crate::{
@@ -582,6 +583,7 @@ fn run_claude_connection_test(config: &ProviderRuntimeConfig<'_>) -> Result<Stri
         "--verbose",
         "--output-format",
         "stream-json",
+        "--include-partial-messages",
         "--dangerously-skip-permissions",
         "Reply with OK and nothing else.",
     ]);
@@ -590,29 +592,107 @@ fn run_claude_connection_test(config: &ProviderRuntimeConfig<'_>) -> Result<Stri
     }
     apply_claude_runtime_env(&mut command, ProviderRuntimeConfig { ..*config });
 
-    let output = command
-        .output()
+    let mut child = command
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
         .map_err(|error| format!("failed to launch claude: {error}"))?;
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    debug!(stdout=%stdout, stderr=%stderr, status=?output.status.code(), "claude connection test raw output");
 
-    if !output.status.success() {
-        return Err(render_process_error("claude", stdout.trim(), stderr.trim()));
-    }
+    let stdout = child
+        .stdout
+        .take()
+        .ok_or_else(|| "failed to capture claude stdout".to_string())?;
+    let stderr = child
+        .stderr
+        .take()
+        .ok_or_else(|| "failed to capture claude stderr".to_string())?;
 
+    let stderr_handle = thread::spawn(move || read_to_string(stderr));
+    let (line_tx, line_rx) = mpsc::channel::<Result<String, String>>();
+    thread::spawn(move || {
+        for line in BufReader::new(stdout).lines() {
+            let send_result = match line {
+                Ok(line) => line_tx.send(Ok(line)),
+                Err(error) => line_tx.send(Err(format!("failed to read claude output: {error}"))),
+            };
+            if send_result.is_err() {
+                break;
+            }
+        }
+    });
+
+    let timeout = Duration::from_secs(20);
+    let started_at = Instant::now();
     let mut assistant_text = String::new();
-    for line in stdout.lines() {
-        let parsed = parse_claude_json_line(line, &assistant_text);
+
+    loop {
+        let remaining = timeout
+            .checked_sub(started_at.elapsed())
+            .unwrap_or_else(|| Duration::from_secs(0));
+        if remaining.is_zero() {
+            let _ = child.kill();
+            let stderr = stderr_handle.join().unwrap_or_default();
+            warn!(assistant_text=%assistant_text, stderr=%stderr, "claude connection test timed out");
+            return Err(format!(
+                "claude connection test timed out after {} seconds. Parsed assistant text: {}",
+                timeout.as_secs(),
+                assistant_text.trim()
+            ));
+        }
+
+        let line = match line_rx.recv_timeout(remaining) {
+            Ok(Ok(line)) => line,
+            Ok(Err(error)) => {
+                let _ = child.kill();
+                let stderr = stderr_handle.join().unwrap_or_default();
+                error!(error=%error, stderr=%stderr, "claude connection test output read failed");
+                return Err(error);
+            }
+            Err(mpsc::RecvTimeoutError::Timeout) => {
+                let _ = child.kill();
+                let stderr = stderr_handle.join().unwrap_or_default();
+                warn!(assistant_text=%assistant_text, stderr=%stderr, "claude connection test timed out waiting for output");
+                return Err(format!(
+                    "claude connection test timed out after {} seconds. Parsed assistant text: {}",
+                    timeout.as_secs(),
+                    assistant_text.trim()
+                ));
+            }
+            Err(mpsc::RecvTimeoutError::Disconnected) => break,
+        };
+
+        let parsed = parse_claude_json_line(&line, &assistant_text);
         if let Some(error) = parsed.error {
-            error!(line=%line, error=%error, "claude connection test parsed error");
+            let _ = child.kill();
+            let stderr = stderr_handle.join().unwrap_or_default();
+            error!(line=%line, error=%error, stderr=%stderr, "claude connection test parsed error");
             return Err(error);
         }
         if let Some(delta) = parsed.delta {
             if parsed.role == MessageRole::Assistant {
                 assistant_text.push_str(&delta);
+                if assistant_text.trim() == "OK" {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    let stderr = stderr_handle.join().unwrap_or_default();
+                    debug!(stderr=%stderr, "claude connection test completed early after OK");
+                    info!(assistant_text="OK", "claude connection test parsed assistant text");
+                    return Ok("Received expected OK confirmation from Claude Code.".into());
+                }
             }
         }
+    }
+
+    let status = child
+        .wait()
+        .map_err(|error| format!("failed to wait for claude: {error}"))?;
+    let stderr = stderr_handle
+        .join()
+        .map_err(|_| "failed to join claude stderr reader".to_string())?;
+    debug!(status=?status.code(), stderr=%stderr, assistant_text=%assistant_text, "claude connection test finished without early success");
+
+    if !status.success() {
+        return Err(render_process_error("claude", assistant_text.trim(), stderr.trim()));
     }
 
     let final_text = assistant_text.trim().to_string();

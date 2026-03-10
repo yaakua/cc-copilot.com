@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { openPath } from "@tauri-apps/plugin-opener";
+import { openPath, revealItemInDir } from "@tauri-apps/plugin-opener";
 import type { BackendProviderAccountStatus } from "../../../lib/backend";
 import { getLogFilePath } from "../../../lib/backend";
 import type { ProviderKind, ProviderProfile } from "../../../types/domain";
@@ -145,7 +145,11 @@ export function ProviderProfileEditor({
     setIsOpeningLog(true);
     try {
       const logPath = await getLogFilePath();
-      await openPath(logPath);
+      try {
+        await openPath(logPath);
+      } catch {
+        await revealItemInDir(logPath);
+      }
     } catch (error) {
       setFeedback({
         ok: false,

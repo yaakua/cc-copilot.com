@@ -81,6 +81,13 @@ export function ProfileEditorForm({
       placeholder: "https://anthropic-gateway.example.com",
     };
   }, [draft.provider]);
+  const savedApiKeyPreview =
+    mode === "edit" && draft.authKind === "apiKey" ? selectedProfile?.apiKeyPreview ?? null : null;
+  const shouldShowApiKeyMigrationHint =
+    mode === "edit" &&
+    draft.authKind === "apiKey" &&
+    selectedProfile?.apiKeyPresent &&
+    !savedApiKeyPreview;
 
   return (
     <div className="flex h-full flex-col">
@@ -229,7 +236,9 @@ export function ProfileEditorForm({
               placeholder={
                 draft.authKind === "apiKey"
                   ? selectedProfile
-                    ? "留空则保留当前 Key"
+                    ? savedApiKeyPreview
+                      ? `当前已保存：${savedApiKeyPreview}`
+                      : "留空则保留当前 Key"
                     : "sk-..."
                   : "当前模式不需要 API Key"
               }
@@ -239,6 +248,19 @@ export function ProfileEditorForm({
           </div>
         </label>
       </div>
+
+      {savedApiKeyPreview && !draft.apiKey.trim() && (
+        <div className="mt-3 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-[12px] leading-5 text-emerald-800">
+          当前已保存的 API Key：`{savedApiKeyPreview}`。留空保存会继续保留这把 key。
+        </div>
+      )}
+
+      {shouldShowApiKeyMigrationHint && !draft.apiKey.trim() && (
+        <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[12px] leading-5 text-amber-800">
+          如果这个 Profile 是在改为 JSON 存储之前创建的，请重新输入 API Key 并保存一次，确保密钥写入本地
+          `profile-secrets.json`。
+        </div>
+      )}
 
       {draft.authKind === "official" && draft.provider === "codex" && (
         <div className="mt-3 rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 text-[12px] leading-5 text-sky-700">

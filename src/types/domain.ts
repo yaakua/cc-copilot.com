@@ -77,6 +77,7 @@ export interface ProviderProfile {
   baseUrl: string;
   model: string | null;
   apiKeyPresent: boolean;
+  apiKeyPreview?: string | null;
   runtimeHome?: string | null;
 }
 
