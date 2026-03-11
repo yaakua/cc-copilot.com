@@ -1,3 +1,4 @@
+import { useEffect, useMemo, useRef } from "react";
 import { Bot, RotateCcw } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -13,6 +14,7 @@ interface ThreadTimelineProps {
   onRetryLastMessage: () => void;
   onAssignProfile: (profileId: string) => void;
   onCreateProfile: () => void;
+  fullWidth?: boolean;
 }
 
 export function ThreadTimeline({
@@ -23,7 +25,10 @@ export function ThreadTimeline({
   onRetryLastMessage,
   onAssignProfile,
   onCreateProfile,
+  fullWidth = false,
 }: ThreadTimelineProps) {
+  const scrollContainerRef = useRef<HTMLDivElement | null>(null);
+  const bottomAnchorRef = useRef<HTMLDivElement | null>(null);
   const messages = activePane?.messages ?? [];
   const isRunning = activePane?.status === "running";
   const hasUserMessages = messages.some((message) => message.role === "user");
@@ -36,8 +41,32 @@ export function ThreadTimeline({
       .find((message) => message.role === "user")
       ?.id ?? null
     : null;
+  const scrollSignature = useMemo(
+    () => messages.map((message) => `${message.id}:${message.body.length}:${message.kind}`).join("|"),
+    [messages],
+  );
+
+  useEffect(() => {
+    const container = scrollContainerRef.current;
+    if (!container) {
+      return;
+    }
+
+    const frame = window.requestAnimationFrame(() => {
+      bottomAnchorRef.current?.scrollIntoView({ block: "end", behavior: isRunning ? "auto" : "smooth" });
+    });
+
+    return () => window.cancelAnimationFrame(frame);
+  }, [activePane?.id, isRunning, scrollSignature]);
+
   return (
-    <div className="flex flex-col h-full w-full max-w-4xl mx-auto p-4 md:p-5 lg:p-6 overflow-y-auto overflow-x-hidden space-y-6 scroll-smooth">
+    <div
+      className={cn(
+        "scrollbar-none flex h-full w-full flex-col overflow-y-auto overflow-x-hidden p-4 scroll-smooth md:p-5 lg:p-6",
+        fullWidth ? "max-w-none" : "mx-auto max-w-4xl",
+      )}
+      ref={scrollContainerRef}
+    >
       {activePane && !hasUserMessages && (
         <SessionSetupBar
           activeProfile={activeProfile}
@@ -51,11 +80,13 @@ export function ThreadTimeline({
       )}
 
       {/* Messages Transcript */}
-      <section className="space-y-4 flex-1 pb-8">
-        <div className="flex items-center justify-between">
-          <strong className="text-[15px] font-semibold text-foreground">
-            {activePane?.title ?? "当前激活窗口"}
-          </strong>
+      <section className="flex-1 space-y-4 pb-8">
+        <div className="flex items-center justify-between gap-3">
+          <div className="flex min-w-0 items-center gap-2">
+            <strong className="truncate text-[15px] font-semibold text-foreground">
+              {activePane?.title ?? "当前激活窗口"}
+            </strong>
+          </div>
           <div className="flex items-center gap-2">
             {isRunning && (
               <span className="inline-flex items-center gap-1 rounded-full bg-sky-50 px-2 py-0.5 text-xs font-medium text-sky-700">
@@ -174,6 +205,7 @@ export function ThreadTimeline({
             </div>
           )}
         </div>
+        <div aria-hidden="true" ref={bottomAnchorRef} />
       </section>
     </div>
   );

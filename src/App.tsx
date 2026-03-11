@@ -51,6 +51,7 @@ function App() {
     startProfileCreation,
     handleSendMessage,
     handleRetryLastMessage,
+    retryLastMessageForPane,
     cancelPaneRun,
   } = useDashboard();
   const [profileManagerOpen, setProfileManagerOpen] = useState(false);
@@ -74,6 +75,9 @@ function App() {
   );
   const activeProfile = activePane ? paneProfiles[activePane.id] ?? null : null;
   const activeProvider = activePane?.provider ?? activeSession?.provider ?? null;
+  const activeProviderTypeLabel =
+    activeProvider === "codex" ? "Codex" : activeProvider === "claude" ? "Claude Code" : null;
+  const activeProviderNameLabel = activeProfile?.label?.trim() || null;
   const activeProviderProfiles = useMemo(() => profiles, [profiles]);
 
   return (
@@ -97,7 +101,7 @@ function App() {
         {/* Top Header */}
         <header className="flex items-center justify-between px-3 py-1.5 border-b bg-background/80 backdrop-blur-md z-10 sticky top-0 shadow-sm">
           <div className="flex items-center space-x-2">
-            {activeProvider && (
+            {activeProviderTypeLabel && (
               <span
                 className={cn(
                   "inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-semibold",
@@ -107,12 +111,17 @@ function App() {
                 )}
               >
                 {activeProvider === "codex" ? <Command size={12} /> : <Bot size={12} />}
-                {activeProvider === "codex" ? "Codex" : "Claude Code"}
+                {activeProviderTypeLabel}
               </span>
             )}
             <h1 className="text-[13px] font-semibold text-foreground m-0">
               {activeSession?.title ?? activePane?.title ?? "Claude Copilot"}
             </h1>
+            {activeProviderNameLabel && (
+              <span className="inline-flex items-center rounded-full border border-border bg-muted px-2 py-0.5 text-[11px] font-semibold text-foreground">
+                {activeProviderNameLabel}
+              </span>
+            )}
             <span className="text-[11px] font-medium text-muted-foreground bg-muted px-2 py-0.5 rounded-full">
               {currentProject?.name ?? "No Project"}
             </span>
@@ -160,6 +169,7 @@ function App() {
                   onTogglePaneSelection={handleTogglePaneSelection}
                   selectedPaneIds={dashboard.workspace.selectedPaneIds}
                   onAssignProfile={assignProfileToPane}
+                  onRetryLastMessage={retryLastMessageForPane}
                   onCreateProfile={(paneId) => {
                     const pane = dashboard.workspace.panes.find((candidate) => candidate.id === paneId);
                     if (!pane) {

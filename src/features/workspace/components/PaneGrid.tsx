@@ -1,8 +1,8 @@
 import { useState, useEffect, useMemo } from "react";
-import { X, Maximize2 } from "lucide-react";
+import { X } from "lucide-react";
 import type { Pane, ProviderProfile } from "../../../types/domain";
 import { cn } from "../../../lib/utils";
-import { SessionSetupBar } from "../../session/components/SessionSetupBar";
+import { ThreadTimeline } from "../../thread/components/ThreadTimeline";
 
 interface PaneGridProps {
   panes: Pane[];
@@ -20,6 +20,7 @@ interface PaneGridProps {
   onChangeProvider: (paneId: string, provider: "claude" | "codex") => void;
   onAssignProfile: (paneId: string, profileId: string) => void;
   onCreateProfile: (paneId: string) => void;
+  onRetryLastMessage: (paneId: string) => void;
 }
 
 export function PaneGrid({
@@ -36,6 +37,7 @@ export function PaneGrid({
   onChangeProvider,
   onAssignProfile,
   onCreateProfile,
+  onRetryLastMessage,
 }: PaneGridProps) {
   const [paneMeta, setPaneMeta] = useState<Record<string, { slot: number }>>({});
   const [confirmCloseId, setConfirmCloseId] = useState<string | null>(null);
@@ -96,8 +98,6 @@ export function PaneGrid({
     const isActive = pane.id === activePaneId;
     const isSelected = selectedPaneIds.includes(pane.id);
     const meta = paneMeta[pane.id];
-    const previewMessages = pane.messages.slice(-3);
-    const hasUserMessages = pane.messages.some((message) => message.role === "user");
     const displayNum = meta ? meta.slot + 1 : 0;
     const hasRightCol = rightCol.length > 0;
     const paneProfile = paneProfiles[pane.id] ?? null;
@@ -213,49 +213,17 @@ export function PaneGrid({
           </div>
         </div>
 
-        <div className="flex-1 p-3 pt-0 bg-background flex flex-col gap-2 overflow-y-auto">
-          {!hasUserMessages && (
-            <SessionSetupBar
-              activeProfile={paneProfile}
-              availableProfiles={availableProfiles}
-              canSwitchProvider={!hasUserMessages}
-              onAssignProfile={(profileId) => onAssignProfile(pane.id, profileId)}
-              onChangeProvider={(provider) => onChangeProvider(pane.id, provider)}
-              onCreateProfile={() => onCreateProfile(pane.id)}
-              provider={pane.provider}
-              stopPropagation
-            />
-          )}
-
-          {previewMessages.map((message) => (
-            <div
-              className={cn(
-                "p-3 rounded-xl text-xs border shadow-[0_1px_2px_rgba(0,0,0,0.02)] bg-background transition-shadow",
-                message.role === "assistant"
-                  ? "border-l-[3px] border-l-slate-400"
-                  : message.role === "system"
-                    ? "border-l-[3px] border-l-orange-500"
-                    : "border-l-[3px] border-l-primary/60"
-              )}
-              key={message.id}
-            >
-              <div className="flex items-center justify-between mb-1.5">
-                <span className="text-[9px] font-bold uppercase tracking-wider text-muted-foreground/80">
-                  {message.role}
-                </span>
-              </div>
-              <p className="line-clamp-2 text-foreground leading-relaxed">{message.body}</p>
-            </div>
-          ))}
-
-          {previewMessages.length === 0 && (
-            <div className="flex-1 flex flex-col items-center justify-center text-muted-foreground/50 gap-2">
-              <Maximize2 size={24} />
-              <span className="text-xs font-medium">
-                {pane.isDraft ? "空白会话，发送后再创建" : "无消息记录"}
-              </span>
-            </div>
-          )}
+        <div className="flex-1 min-h-0 bg-background">
+          <ThreadTimeline
+            activePane={pane}
+            activeProfile={paneProfile}
+            availableProfiles={availableProfiles}
+            fullWidth
+            onAssignProfile={(profileId) => onAssignProfile(pane.id, profileId)}
+            onChangeProvider={(provider) => onChangeProvider(pane.id, provider)}
+            onCreateProfile={() => onCreateProfile(pane.id)}
+            onRetryLastMessage={() => onRetryLastMessage(pane.id)}
+          />
         </div>
       </div>
     );

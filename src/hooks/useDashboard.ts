@@ -572,6 +572,66 @@ export function useDashboard() {
     }
 
     if (mode === "split") {
+      const reusableDraftPane = dashboard.workspace.panes.find(
+        (pane) => pane.id === dashboard.workspace.activePaneId && pane.isDraft,
+      );
+
+      if (reusableDraftPane) {
+        setDashboard((current) => ({
+          ...current,
+          workspace: {
+            ...current.workspace,
+            projectId,
+            panes: current.workspace.panes.map((pane) =>
+              pane.id === reusableDraftPane.id
+                ? createPaneFromSession(session, reusableDraftPane.id)
+                : pane,
+            ),
+            activePaneId: reusableDraftPane.id,
+            selectedPaneIds: [reusableDraftPane.id],
+          },
+        }));
+
+        try {
+          const openedPane = await openPane({
+            sessionId,
+            title: session.title,
+            kind: "chat",
+            profileId: session.profileId,
+            focus: true,
+          });
+
+          setDashboard((current) => ({
+            ...current,
+            workspace: {
+              ...current.workspace,
+              panes: current.workspace.panes.map((pane) =>
+                pane.id === reusableDraftPane.id
+                  ? {
+                    ...createPaneFromSession(session, openedPane.id),
+                    messages:
+                      current.workspace.panes.find((candidate) => candidate.id === reusableDraftPane.id)
+                        ?.messages ?? [createWorkspaceAttachedMessage(session.title)],
+                  }
+                  : pane,
+              ),
+              activePaneId:
+                current.workspace.activePaneId === reusableDraftPane.id
+                  ? openedPane.id
+                  : current.workspace.activePaneId,
+              selectedPaneIds: current.workspace.selectedPaneIds.map((id) =>
+                id === reusableDraftPane.id ? openedPane.id : id,
+              ),
+            },
+          }));
+
+          await refreshFromBackend();
+        } catch {
+          // Local preview mode fallback.
+        }
+        return;
+      }
+
       await handleAddPaneWithOptions({
         projectId,
         sessionId,
@@ -1451,6 +1511,7 @@ export function useDashboard() {
     handleToggleRemote,
     handleSendMessage,
     handleRetryLastMessage,
+    retryLastMessageForPane,
     cancelPaneRun: handleCancelPaneRun,
   };
 }

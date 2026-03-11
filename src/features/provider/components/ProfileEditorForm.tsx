@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Check, FileText, Globe, Key, Loader2, Server, Sparkles, Trash2 } from "lucide-react";
 import type { ProviderKind, ProviderProfile } from "../../../types/domain";
 import type { BackendProviderAccountStatus } from "../../../lib/backend";
@@ -60,6 +60,7 @@ export function ProfileEditorForm({
   onTest,
   onChange,
 }: ProfileEditorFormProps) {
+  const [isEditingApiKey, setIsEditingApiKey] = useState(false);
   const providerLabel = draft.provider === "codex" ? "Codex" : "Claude Code";
   const providerTone =
     draft.provider === "codex"
@@ -88,6 +89,12 @@ export function ProfileEditorForm({
     draft.authKind === "apiKey" &&
     selectedProfile?.apiKeyPresent &&
     !savedApiKeyPreview;
+  const apiKeyInputValue =
+    !isEditingApiKey && !draft.apiKey.trim() && savedApiKeyPreview ? savedApiKeyPreview : draft.apiKey;
+
+  useEffect(() => {
+    setIsEditingApiKey(false);
+  }, [mode, selectedProfile?.id, draft.authKind, savedApiKeyPreview]);
 
   return (
     <div className="flex h-full flex-col">
@@ -232,7 +239,20 @@ export function ProfileEditorForm({
             <input
               className="w-full rounded-lg border bg-background py-2 pl-9 pr-3 text-[13px] focus:outline-none focus:ring-2 focus:ring-sky-300 disabled:cursor-not-allowed disabled:opacity-60"
               disabled={draft.authKind !== "apiKey"}
-              onChange={(event) => onChange({ apiKey: event.currentTarget.value })}
+              onChange={(event) => {
+                setIsEditingApiKey(true);
+                onChange({ apiKey: event.currentTarget.value });
+              }}
+              onBlur={() => {
+                if (!draft.apiKey.trim()) {
+                  setIsEditingApiKey(false);
+                }
+              }}
+              onFocus={() => {
+                if (!draft.apiKey.trim() && savedApiKeyPreview) {
+                  setIsEditingApiKey(true);
+                }
+              }}
               placeholder={
                 draft.authKind === "apiKey"
                   ? selectedProfile
@@ -242,8 +262,8 @@ export function ProfileEditorForm({
                     : "sk-..."
                   : "当前模式不需要 API Key"
               }
-              type="password"
-              value={draft.apiKey}
+              type={!isEditingApiKey && !draft.apiKey.trim() && savedApiKeyPreview ? "text" : "password"}
+              value={apiKeyInputValue}
             />
           </div>
         </label>
