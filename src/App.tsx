@@ -56,7 +56,6 @@ function App() {
     handleSendMessage,
     handleRetryLastMessage,
     retryLastMessageForPane,
-    cancelPaneRun,
   } = useDashboard();
   const [profileManagerOpen, setProfileManagerOpen] = useState(false);
 
@@ -280,7 +279,6 @@ function App() {
                   panes={dashboard.workspace.panes}
                   paneProfiles={paneProfiles}
                   profiles={profiles}
-                  onCancelRun={cancelPaneRun}
                   onClosePane={handleClosePane}
                   onChangeProvider={setDraftPaneProvider}
                   onFocusPane={handleFocusPane}
