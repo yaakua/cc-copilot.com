@@ -1,5 +1,6 @@
 /** @type {import('tailwindcss').Config} */
 export default {
+  darkMode: "class",
   content: [
     "./index.html",
     "./src/**/*.{js,ts,jsx,tsx}",
@@ -40,6 +41,7 @@ export default {
           DEFAULT: "hsl(var(--card))",
           foreground: "hsl(var(--card-foreground))",
         },
+        sidebar: "hsl(var(--sidebar))",
       },
     },
   },
@@ -47,4 +49,3 @@ export default {
     require('@tailwindcss/typography'),
   ],
 }
-

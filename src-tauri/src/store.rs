@@ -156,7 +156,7 @@ impl Store {
                 pane.status = PaneStatus::Closed;
                 pane.is_focused = false;
                 pane.updated_at = now_ms();
-            } else if pane.status == PaneStatus::Open {
+            } else if pane.status == PaneStatus::Open && fallback_pane_id.is_none() {
                 fallback_pane_id = Some(pane.id.clone());
             }
         }
@@ -262,7 +262,9 @@ impl Store {
         let should_focus = input.focus.unwrap_or(true);
         if should_focus {
             for pane in &mut self.panes {
-                pane.is_focused = false;
+                if pane.status == PaneStatus::Open {
+                    pane.is_focused = false;
+                }
             }
         }
 
@@ -320,7 +322,9 @@ impl Store {
         let should_focus = input.focus.unwrap_or(true);
         if should_focus {
             for pane in &mut self.panes {
-                pane.is_focused = false;
+                if pane.status == PaneStatus::Open {
+                    pane.is_focused = false;
+                }
             }
         }
 
@@ -407,7 +411,9 @@ impl Store {
         }
 
         for pane in &mut self.panes {
-            pane.is_focused = false;
+            if pane.status == PaneStatus::Open {
+                pane.is_focused = false;
+            }
         }
         let pane = &mut self.panes[pane_index];
         pane.is_focused = true;

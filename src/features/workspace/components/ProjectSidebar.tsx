@@ -1,28 +1,13 @@
 import { useEffect, useState } from "react";
-import { Folder, Loader2, Plus, Settings, Bot, Terminal } from "lucide-react";
-
-function formatTimeAgo(dateString: string) {
-  try {
-    const date = new Date(dateString);
-    const diffMs = Date.now() - date.getTime();
-    if (isNaN(diffMs)) return "";
-
-    const diffMins = Math.floor(diffMs / 60000);
-    const diffHours = Math.floor(diffMins / 60);
-    const diffDays = Math.floor(diffHours / 24);
-
-    if (diffDays > 0) return `${diffDays} 天`;
-    if (diffHours > 0) return `${diffHours} 小时`;
-    if (diffMins > 0) return `${diffMins} 分`;
-    return "刚刚";
-  } catch {
-    return "";
-  }
-}
+import { Columns2, Copy, Folder, Loader2, Plus, Search, Settings, Trash2 } from "lucide-react";
+import { formatTimeAgo } from "../../../lib/utils";
 import type { Project, ProviderKind } from "../../../types/domain";
 import { cn } from "../../../lib/utils";
+import { ClaudeIcon } from "../../../components/icons/ClaudeIcon";
+import { CodexIcon } from "../../../components/icons/CodexIcon";
 
 interface ProjectSidebarProps {
+  collapsed?: boolean;
   projects: Project[];
   activeSessionId: string | null;
   openSessionIds: Set<string>;
@@ -39,6 +24,7 @@ interface ProjectSidebarProps {
 }
 
 export function ProjectSidebar({
+  collapsed = false,
   projects,
   activeSessionId,
   openSessionIds,
@@ -65,6 +51,9 @@ export function ProjectSidebar({
   } | null>(null);
   const [projectDeleteTarget, setProjectDeleteTarget] = useState<Project | null>(null);
 
+  // M1: Session search
+  const [searchQuery, setSearchQuery] = useState("");
+
   // Close dropdown if clicked outside
   useEffect(() => {
     const handleClickOutside = () => {
@@ -75,9 +64,68 @@ export function ProjectSidebar({
     return () => window.removeEventListener("click", handleClickOutside);
   }, []);
 
+  // M1: Cmd/Ctrl+K to focus search
+  useEffect(() => {
+    function handleKeyDown(event: KeyboardEvent) {
+      if ((event.metaKey || event.ctrlKey) && event.key === "k") {
+        event.preventDefault();
+        const searchInput = document.getElementById("sidebar-search-input");
+        searchInput?.focus();
+      }
+    }
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, []);
+
+  // M1: Total session count
+  const totalSessions = projects.reduce((acc, p) => acc + p.sessions.length, 0);
+
+  // Collapsed view: show only icons
+  if (collapsed) {
+    return (
+      <aside className="flex flex-col h-full items-center pt-1 pb-3 gap-1">
+        <div className="flex-1 overflow-y-auto scrollbar-none w-full flex flex-col items-center gap-1 px-1">
+          {projects.map((project) =>
+            project.sessions.map((session) => {
+              const isActive = session.id === activeSessionId;
+              return (
+                <button
+                  className={cn(
+                    "w-9 h-9 rounded-lg flex items-center justify-center transition-colors shrink-0",
+                    isActive
+                      ? "bg-muted text-foreground"
+                      : "text-muted-foreground hover:bg-muted/60 hover:text-foreground",
+                  )}
+                  key={session.id}
+                  onClick={() => onOpenSession(project.id, session.id, "replace")}
+                  title={session.title}
+                  type="button"
+                >
+                  {session.provider === "claude" ? (
+                    <ClaudeIcon size={18} className="opacity-60" />
+                  ) : (
+                    <CodexIcon size={18} className="opacity-60" />
+                  )}
+                </button>
+              );
+            }),
+          )}
+        </div>
+        <button
+          className="w-9 h-9 rounded-lg flex items-center justify-center text-muted-foreground hover:bg-muted/60 hover:text-foreground transition-colors shrink-0"
+          onClick={onOpenGlobalSettings}
+          title="全局设置"
+          type="button"
+        >
+          <Settings size={18} />
+        </button>
+      </aside>
+    );
+  }
+
   return (
-    <aside className="flex flex-col h-full bg-slate-50/30 dark:bg-slate-900/10 pt-4">
-      <div className="flex items-center justify-between px-6 mb-4">
+    <aside className="flex flex-col h-full bg-slate-50/30 dark:bg-slate-900/10">
+      <div className="flex items-center justify-between px-4 mb-2">
         <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">工作区</span>
         <button
           className="text-muted-foreground hover:text-foreground hover:bg-muted/80 p-1.5 rounded-md transition-colors"
@@ -89,8 +137,32 @@ export function ProjectSidebar({
         </button>
       </div>
 
-      <div className="flex-1 overflow-y-auto px-3 space-y-6">
+      {/* M1: Search bar (shown when > 5 sessions) */}
+      {totalSessions > 5 && (
+        <div className="px-3 mb-2">
+          <div className="relative">
+            <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground/60" />
+            <input
+              id="sidebar-search-input"
+              className="w-full rounded-lg border border-border/60 bg-background pl-8 pr-3 py-1.5 text-xs placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-primary/30"
+              placeholder="搜索会话 (⌘K)"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+            />
+          </div>
+        </div>
+      )}
+
+      <div className="flex-1 overflow-y-auto scrollbar-none px-3 space-y-6">
         {projects.map((project) => {
+          const filteredSessions = searchQuery.trim()
+            ? project.sessions.filter((s) =>
+              s.title.toLowerCase().includes(searchQuery.toLowerCase()),
+            )
+            : project.sessions;
+
+          if (searchQuery.trim() && filteredSessions.length === 0) return null;
+
           return (
             <section className="space-y-2" key={project.id}>
               <div className="group flex items-center justify-between px-2 py-1 text-sm font-semibold text-foreground relative">
@@ -150,7 +222,7 @@ export function ProjectSidebar({
               </div>
 
               <div className="space-y-0.5">
-                {project.sessions.map((session) => {
+                {filteredSessions.map((session) => {
                   const isActive = session.id === activeSessionId;
                   const isOpen = openSessionIds.has(session.id);
                   const openCount = openSessionCounts[session.id] ?? 0;
@@ -180,9 +252,9 @@ export function ProjectSidebar({
                     >
                       <div className="flex items-center gap-2 flex-1 min-w-0 pr-3">
                         {session.provider === "claude" ? (
-                          <Bot size={13} className="shrink-0 opacity-70" />
+                          <ClaudeIcon size={13} className="shrink-0 opacity-50" />
                         ) : (
-                          <Terminal size={13} className="shrink-0 opacity-70" />
+                          <CodexIcon size={13} className="shrink-0 opacity-50" />
                         )}
 
                         <span className="truncate text-[13px] leading-tight flex-1 text-left">
@@ -194,7 +266,7 @@ export function ProjectSidebar({
                         )}
 
                         {session.unreadCount > 0 && (
-                          <span className="shrink-0 rounded bg-primary/20 px-1 py-0.5 text-[9px] font-bold text-primary">
+                          <span className="shrink-0 rounded bg-primary/20 px-1 py-0.5 text-[10px] font-bold text-primary">
                             {session.unreadCount}
                           </span>
                         )}
@@ -231,6 +303,7 @@ export function ProjectSidebar({
         </button>
       </div>
 
+      {/* M2: Context menu with icons */}
       {sessionMenu && (
         <div
           className="fixed z-[100] min-w-40 rounded-xl border border-border bg-popover p-1 shadow-xl"
@@ -238,17 +311,18 @@ export function ProjectSidebar({
           onClick={(event) => event.stopPropagation()}
         >
           <button
-            className="flex w-full items-center rounded-lg px-3 py-2 text-left text-sm text-foreground hover:bg-muted"
+            className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-foreground hover:bg-muted"
             onClick={() => {
               onOpenSession(sessionMenu.projectId, sessionMenu.sessionId, "split");
               setSessionMenu(null);
             }}
             type="button"
           >
+            <Columns2 size={14} className="text-muted-foreground" />
             分屏打开
           </button>
           <button
-            className="flex w-full items-center rounded-lg px-3 py-2 text-left text-sm text-foreground hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50"
+            className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-foreground hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50"
             disabled={!projects
               .find((candidate) => candidate.id === sessionMenu.projectId)
               ?.sessions.find((candidate) => candidate.id === sessionMenu.sessionId)
@@ -264,10 +338,11 @@ export function ProjectSidebar({
             }}
             type="button"
           >
+            <Copy size={14} className="text-muted-foreground" />
             复制原始会话 ID
           </button>
           <button
-            className="flex w-full items-center rounded-lg px-3 py-2 text-left text-sm text-destructive hover:bg-destructive/10"
+            className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-destructive hover:bg-destructive/10"
             onClick={() => {
               const project = projects.find((candidate) => candidate.id === sessionMenu.projectId);
               const session = project?.sessions.find((candidate) => candidate.id === sessionMenu.sessionId);
@@ -282,6 +357,7 @@ export function ProjectSidebar({
             }}
             type="button"
           >
+            <Trash2 size={14} />
             删除会话
           </button>
         </div>
@@ -299,7 +375,7 @@ export function ProjectSidebar({
             <div className="space-y-2">
               <h3 className="text-base font-semibold text-foreground">删除会话</h3>
               <p className="text-sm leading-6 text-muted-foreground">
-                确定删除会话“{sessionDeleteTarget.title}”吗？此操作不会恢复。
+                确定删除会话"{sessionDeleteTarget.title}"吗？此操作不会恢复。
               </p>
             </div>
             <div className="mt-5 flex justify-end gap-2">
@@ -337,7 +413,7 @@ export function ProjectSidebar({
             <div className="space-y-2">
               <h3 className="text-base font-semibold text-foreground">删除工作区</h3>
               <p className="text-sm leading-6 text-muted-foreground">
-                确定删除工作区“{projectDeleteTarget.name}”吗？此操作不会恢复。
+                确定删除工作区"{projectDeleteTarget.name}"吗？此操作不会恢复。
               </p>
             </div>
             <div className="mt-5 flex justify-end gap-2">

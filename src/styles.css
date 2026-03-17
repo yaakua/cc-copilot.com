@@ -33,6 +33,8 @@
     --ring: 222.2 84% 4.9%;
 
     --radius: 0.5rem;
+
+    --sidebar: 210 40% 98%;
   }
 
   .dark {
@@ -63,6 +65,8 @@
     --border: 217.2 32.6% 17.5%;
     --input: 217.2 32.6% 17.5%;
     --ring: 212.7 26.8% 83.9%;
+
+    --sidebar: 222.2 84% 6%;
   }
 }
 
@@ -82,6 +86,7 @@
 }
 
 @layer utilities {
+  /* Hidden scrollbar */
   .scrollbar-none {
     -ms-overflow-style: none;
     scrollbar-width: none;
@@ -91,5 +96,41 @@
     display: none;
     width: 0;
     height: 0;
+  }
+
+  /* M6: Thin scrollbar */
+  .scrollbar-thin {
+    scrollbar-width: thin;
+    scrollbar-color: rgba(0, 0, 0, 0.15) transparent;
+  }
+
+  .scrollbar-thin::-webkit-scrollbar {
+    width: 4px;
+    height: 4px;
+  }
+
+  .scrollbar-thin::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  .scrollbar-thin::-webkit-scrollbar-thumb {
+    background-color: rgba(0, 0, 0, 0.15);
+    border-radius: 9999px;
+  }
+
+  .scrollbar-thin::-webkit-scrollbar-thumb:hover {
+    background-color: rgba(0, 0, 0, 0.3);
+  }
+
+  .dark .scrollbar-thin {
+    scrollbar-color: rgba(255, 255, 255, 0.15) transparent;
+  }
+
+  .dark .scrollbar-thin::-webkit-scrollbar-thumb {
+    background-color: rgba(255, 255, 255, 0.15);
+  }
+
+  .dark .scrollbar-thin::-webkit-scrollbar-thumb:hover {
+    background-color: rgba(255, 255, 255, 0.3);
   }
 }

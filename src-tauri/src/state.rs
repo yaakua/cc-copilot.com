@@ -384,13 +384,13 @@ impl AppState {
         let app_state = self.clone();
 
         thread::spawn(move || {
-            let stream_message_id = format!("stream-{}", dispatch.session_id);
+            let stream_message_id = format!("stream-{}", dispatch.pane_id);
             let _ = app.emit(
                 "composer://stream",
                 ComposerStreamEvent {
                     pane_id: dispatch.pane_id.clone(),
                     session_id: dispatch.session_id.clone(),
-                    message_id: format!("status-{}", dispatch.session_id),
+                    message_id: format!("status-{}", dispatch.pane_id),
                     stage: ComposerStreamStage::Started,
                     kind: ComposerStreamEventKind::Status,
                     role: crate::models::MessageRole::System,
@@ -499,13 +499,13 @@ impl AppState {
         let app_state = self.clone();
 
         thread::spawn(move || {
-            let stream_message_id = format!("stream-{}", dispatch.session_id);
+            let stream_message_id = format!("stream-{}", dispatch.pane_id);
             let _ = app.emit(
                 "composer://stream",
                 ComposerStreamEvent {
                     pane_id: dispatch.pane_id.clone(),
                     session_id: dispatch.session_id.clone(),
-                    message_id: format!("status-{}", dispatch.session_id),
+                    message_id: format!("status-{}", dispatch.pane_id),
                     stage: ComposerStreamStage::Started,
                     kind: ComposerStreamEventKind::Status,
                     role: crate::models::MessageRole::System,

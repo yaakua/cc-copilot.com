@@ -640,7 +640,7 @@ export function useDashboard() {
       return;
     }
 
-    const targetPaneId = dashboard.workspace.activePaneId;
+    const targetPaneId = dashboardRef.current.workspace.activePaneId;
     if (!targetPaneId) {
       setDashboard((current) => {
         const nextPane = createPaneFromSession(session);
@@ -704,9 +704,15 @@ export function useDashboard() {
     if (!project || dashboard.workspace.panes.length >= 4) {
       return;
     }
+
+    // Find the most recently used profile from existing panes
+    const recentProfileId = activePane?.profileId
+      ?? dashboard.workspace.panes.find(p => p.profileId)?.profileId
+      ?? null;
+
     const nextPane = createDraftPane(
       activePane?.provider ?? defaultProvider,
-      activePane?.profileId ?? null,
+      recentProfileId,
     );
     setDashboard((current) => {
       const nextPanes = [...current.workspace.panes, nextPane];
@@ -886,6 +892,22 @@ export function useDashboard() {
     });
   }
 
+  function handleSelectAllPanes() {
+    setDashboard((current) => {
+      const allPaneIds = current.workspace.panes.map((pane) => pane.id);
+      const allSelected = allPaneIds.length > 0 &&
+        allPaneIds.every((id) => current.workspace.selectedPaneIds.includes(id));
+
+      return {
+        ...current,
+        workspace: {
+          ...current.workspace,
+          selectedPaneIds: allSelected ? [] : allPaneIds,
+        },
+      };
+    });
+  }
+
   async function handleAssignProfileToPane(paneId: string, profileId: string) {
     const targetPane =
       dashboard.workspace.panes.find((candidate) => candidate.id === paneId) ?? null;
@@ -937,7 +959,7 @@ export function useDashboard() {
       workspace: {
         ...current.workspace,
         panes: current.workspace.panes.map((pane) =>
-          pane.id === paneId
+          pane.id === paneId || pane.sessionId === targetPane?.sessionId
             ? {
               ...pane,
               provider,
@@ -1194,9 +1216,10 @@ export function useDashboard() {
       return;
     }
 
-    const materializedPaneIds = await Promise.all(
-      initialTargetPaneIds.map((paneId) => ensurePaneReadyForSend(paneId)),
-    );
+    const materializedPaneIds: (string | null)[] = [];
+    for (const paneId of initialTargetPaneIds) {
+      materializedPaneIds.push(await ensurePaneReadyForSend(paneId));
+    }
     const targetPaneIds = materializedPaneIds.filter((paneId): paneId is string => Boolean(paneId));
     if (targetPaneIds.length === 0) {
       return;
@@ -1304,21 +1327,24 @@ export function useDashboard() {
   }
 
   async function handleCancelPaneRun(paneId: string) {
-    setDashboard((current) => ({
-      ...current,
-      projects: current.projects.map((project) => ({
-        ...project,
-        sessions: project.sessions.map((session) =>
-          session.id === activePane.sessionId ? { ...session, status: "running" } : session,
-        ),
-      })),
-      workspace: {
-        ...current.workspace,
-        panes: current.workspace.panes.map((pane) =>
-          pane.id === paneId ? { ...pane, status: "idle" } : pane,
-        ),
-      },
-    }));
+    setDashboard((current) => {
+      const cancelTarget = current.workspace.panes.find((p) => p.id === paneId);
+      return {
+        ...current,
+        projects: current.projects.map((project) => ({
+          ...project,
+          sessions: project.sessions.map((session) =>
+            session.id === cancelTarget?.sessionId ? { ...session, status: "idle" } : session,
+          ),
+        })),
+        workspace: {
+          ...current.workspace,
+          panes: current.workspace.panes.map((pane) =>
+            pane.id === paneId ? { ...pane, status: "idle" } : pane,
+          ),
+        },
+      };
+    });
 
     try {
       await cancelPaneRun({ paneId });
@@ -1495,6 +1521,7 @@ export function useDashboard() {
     handleClosePane,
     handleFocusPane,
     handleTogglePaneSelection,
+    handleSelectAllPanes,
     setDraftPaneProvider: handleSetPaneProvider,
     assignProfileToPane: handleAssignProfileToPane,
     saveProfile: handleSaveProfile,
@@ -1607,7 +1634,8 @@ function mergeDashboardStateWithDraftPanes(
     return next;
   }
 
-  const panes = [...next.workspace.panes, ...draftPanes];
+  const maxDraftsToKeep = Math.max(0, 4 - next.workspace.panes.length);
+  const panes = [...next.workspace.panes, ...draftPanes.slice(0, maxDraftsToKeep)];
   const paneIds = new Set(panes.map((pane) => pane.id));
   const activePaneId = paneIds.has(current.workspace.activePaneId ?? "")
     ? current.workspace.activePaneId
