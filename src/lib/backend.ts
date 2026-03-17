@@ -27,6 +27,8 @@ export const COMMANDS = {
   retryComposerStream: "retry_composer_stream",
   cancelPaneRun: "cancel_pane_run",
   toggleRemoteTunnel: "toggle_remote_tunnel",
+  scanCliConfigs: "scan_cli_configs",
+  autoImportCliProfiles: "auto_import_cli_profiles",
 } as const;
 
 export type BackendProviderKind = "anthropic" | "openAi" | "mock";
@@ -101,6 +103,18 @@ export interface BackendDashboardState {
   remote: BackendRemoteState;
   activeProjectId?: string | null;
   activeSessionId?: string | null;
+}
+
+export interface BackendProviderProfileRecord {
+  id: string;
+  provider: BackendProviderKind;
+  label: string;
+  authKind?: "apiKey" | "official" | "system";
+  baseUrl: string;
+  model?: string | null;
+  apiKeyPresent: boolean;
+  apiKeyPreview?: string | null;
+  runtimeHome?: string | null;
 }
 
 export interface BackendSessionRecord {
@@ -203,7 +217,7 @@ export async function createSession(input: {
   return invoke<BackendSessionRecord>(COMMANDS.createSession, { input });
 }
 
-export async function deleteSession(input: { projectId: string; sessionId: string }) {
+export async function deleteSession(input: { projectId?: string | null; sessionId: string }) {
   return invoke<BackendSessionRecord>(COMMANDS.deleteSession, { input });
 }
 
@@ -319,4 +333,18 @@ export function onComposerStream(
   return listen<BackendComposerStreamEvent>("composer://stream", (event) => {
     handler(event.payload);
   });
+}
+
+export interface DetectedCliConfig {
+  provider: string;
+  config_path: string;
+  has_auth: boolean;
+}
+
+export async function scanCliConfigs() {
+  return invoke<DetectedCliConfig[]>(COMMANDS.scanCliConfigs);
+}
+
+export async function autoImportCliProfiles() {
+  return invoke<BackendProviderProfileRecord[]>(COMMANDS.autoImportCliProfiles);
 }

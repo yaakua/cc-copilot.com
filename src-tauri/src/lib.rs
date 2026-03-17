@@ -48,7 +48,9 @@ pub fn run() {
             commands::retry_composer_stream,
             commands::cancel_pane_run,
             commands::get_remote_status,
-            commands::toggle_remote_tunnel
+            commands::toggle_remote_tunnel,
+            commands::scan_cli_configs,
+            commands::auto_import_cli_profiles
         ])
         .run(tauri::generate_context!())
         .unwrap_or_else(|error| {

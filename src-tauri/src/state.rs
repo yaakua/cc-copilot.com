@@ -168,6 +168,74 @@ impl AppState {
         self.mutate(|store| store.delete_session(input))
     }
 
+    pub fn auto_import_cli_profiles(&self) -> Result<Vec<ProviderProfileRecord>, String> {
+        let detected_configs = crate::providers::scan_cli_configs();
+        let mut imported_profiles = Vec::new();
+
+        for config in detected_configs {
+            if !config.has_auth {
+                continue;
+            }
+
+            let provider = match config.provider.as_str() {
+                "codex" => ProviderKind::OpenAi,
+                "claude" => ProviderKind::Anthropic,
+                _ => continue,
+            };
+
+            // Check if a profile already exists for this config path
+            let store = self.lock()?;
+            let existing_profile = store.provider_profiles.iter().find(|p| {
+                p.provider == provider
+                    && p.auth_kind == ProfileAuthKind::System
+                    && p.runtime_home.as_deref() == Some(&config.config_path)
+            });
+
+            if existing_profile.is_some() {
+                drop(store);
+                continue;
+            }
+            drop(store);
+
+            // Create a new profile for this detected config
+            let label = match provider {
+                ProviderKind::OpenAi => "Codex CLI".to_string(),
+                ProviderKind::Anthropic => "Claude Code CLI".to_string(),
+                _ => continue,
+            };
+
+            let profile_input = SaveProviderProfileInput {
+                id: None,
+                provider,
+                label,
+                auth_kind: Some(ProfileAuthKind::System),
+                base_url: String::new(),
+                api_key: String::new(),
+                model: None,
+                reuse_current_login: Some(true),
+            };
+
+            match self.save_provider_profile(profile_input) {
+                Ok(profile) => {
+                    // Update runtime_home to point to the detected config path
+                    let mut store = self.inner.lock().map_err(|e| e.to_string())?;
+                    if let Some(p) = store.provider_profiles.iter_mut().find(|p| p.id == profile.id) {
+                        p.runtime_home = Some(config.config_path.clone());
+                    }
+                    drop(store);
+                    let _ = self.storage.save(&*self.inner.lock().map_err(|e| e.to_string())?);
+
+                    imported_profiles.push(profile);
+                }
+                Err(e) => {
+                    eprintln!("Failed to import profile for {}: {}", config.provider, e);
+                }
+            }
+        }
+
+        Ok(imported_profiles)
+    }
+
     pub fn save_provider_profile(
         &self,
         input: SaveProviderProfileInput,
@@ -1111,7 +1179,7 @@ mod tests {
     use super::AppState;
     use crate::models::{
         AssignPaneProfileInput, CreateProjectInput, CreateSessionInput, DeleteSessionInput,
-        MessageRole, OpenPaneInput, PaneKind, PaneTarget, ProfileAuthKind, ProviderKind,
+        MessageRole, OpenPaneInput, PaneKind, PaneStatus, PaneTarget, ProfileAuthKind, ProviderKind,
         ReplacePaneSessionInput, SaveProviderProfileInput, SendComposerMessageInput,
         SetWorkspaceLayoutInput, ToggleRemoteTunnelInput,
     };
@@ -1260,7 +1328,7 @@ mod tests {
 
         state
             .delete_session(DeleteSessionInput {
-                project_id,
+                project_id: Some(project_id),
                 session_id: session_id.clone(),
             })
             .expect("session should delete");
@@ -1406,6 +1474,158 @@ mod tests {
             Some(profile_b.id.as_str())
         );
         assert_eq!(dashboard.sessions[0].provider_session_id, None);
+    }
+
+    #[test]
+    fn deleting_project_closes_all_related_panes() {
+        let dir = tempdir().expect("temp dir should exist");
+        let path = dir.path().join("dashboard-state.json");
+        let state = AppState::new_for_path(path);
+
+        // Create two projects
+        let project_a = state
+            .create_project(CreateProjectInput {
+                name: "Project A".into(),
+                path: "/tmp/project-a".into(),
+            })
+            .expect("project A should be created");
+        let project_b = state
+            .create_project(CreateProjectInput {
+                name: "Project B".into(),
+                path: "/tmp/project-b".into(),
+            })
+            .expect("project B should be created");
+
+        // Create sessions for both projects
+        let session_a = state
+            .create_session(CreateSessionInput {
+                project_id: project_a.id.clone(),
+                title: "Session A".into(),
+                provider: None,
+                profile_id: None,
+            })
+            .expect("session A should be created");
+        let session_b = state
+            .create_session(CreateSessionInput {
+                project_id: project_b.id.clone(),
+                title: "Session B".into(),
+                provider: None,
+                profile_id: None,
+            })
+            .expect("session B should be created");
+
+        // Open panes for both sessions
+        state
+            .open_pane(OpenPaneInput {
+                session_id: session_a.id.clone(),
+                title: "Pane A".into(),
+                kind: PaneKind::Chat,
+                profile_id: None,
+                focus: Some(true),
+            })
+            .expect("pane A should open");
+        state
+            .open_pane(OpenPaneInput {
+                session_id: session_b.id.clone(),
+                title: "Pane B".into(),
+                kind: PaneKind::Chat,
+                profile_id: None,
+                focus: Some(true),
+            })
+            .expect("pane B should open");
+
+        // Verify we have 2 open panes
+        let dashboard = state.dashboard_state().expect("dashboard should load");
+        assert_eq!(dashboard.panes.iter().filter(|p| p.status == PaneStatus::Open).count(), 2);
+
+        // Delete project A
+        state
+            .delete_project(crate::models::DeleteProjectInput {
+                project_id: project_a.id.clone(),
+            })
+            .expect("project A should be deleted");
+
+        // Verify project A is deleted
+        let dashboard = state.dashboard_state().expect("dashboard should load");
+        assert!(!dashboard.projects.iter().any(|p| p.id == project_a.id));
+
+        // Verify session A is deleted
+        assert!(!dashboard.sessions.iter().any(|s| s.id == session_a.id));
+
+        // Verify pane A is closed
+        assert_eq!(
+            dashboard.panes.iter().filter(|p| p.session_id == session_a.id && p.status == PaneStatus::Open).count(),
+            0
+        );
+
+        // Verify pane B is still open and focused
+        assert_eq!(dashboard.panes.iter().filter(|p| p.status == PaneStatus::Open).count(), 1);
+        let pane_b = dashboard.panes.iter().find(|p| p.session_id == session_b.id).expect("pane B should exist");
+        assert_eq!(pane_b.status, PaneStatus::Open);
+        assert!(pane_b.is_focused);
+
+        // Verify active session is now session B
+        assert_eq!(dashboard.active_session_id.as_deref(), Some(session_b.id.as_str()));
+    }
+
+    #[test]
+    fn deleting_last_project_closes_all_panes_and_shows_welcome() {
+        let dir = tempdir().expect("temp dir should exist");
+        let path = dir.path().join("dashboard-state.json");
+        let state = AppState::new_for_path(path);
+
+        // Create one project with a session and pane
+        let project = state
+            .create_project(CreateProjectInput {
+                name: "Project".into(),
+                path: "/tmp/project".into(),
+            })
+            .expect("project should be created");
+        let session = state
+            .create_session(CreateSessionInput {
+                project_id: project.id.clone(),
+                title: "Session".into(),
+                provider: None,
+                profile_id: None,
+            })
+            .expect("session should be created");
+        state
+            .open_pane(OpenPaneInput {
+                session_id: session.id.clone(),
+                title: "Pane".into(),
+                kind: PaneKind::Chat,
+                profile_id: None,
+                focus: Some(true),
+            })
+            .expect("pane should open");
+
+        // Verify we have 1 open pane
+        let dashboard = state.dashboard_state().expect("dashboard should load");
+        assert_eq!(dashboard.panes.iter().filter(|p| p.status == PaneStatus::Open).count(), 1);
+
+        // Delete the project
+        state
+            .delete_project(crate::models::DeleteProjectInput {
+                project_id: project.id.clone(),
+            })
+            .expect("project should be deleted");
+
+        // Verify no projects remain
+        let dashboard = state.dashboard_state().expect("dashboard should load");
+        assert_eq!(dashboard.projects.len(), 0);
+
+        // Verify no sessions remain
+        assert_eq!(dashboard.sessions.len(), 0);
+
+        // Verify no open panes remain
+        assert_eq!(dashboard.panes.iter().filter(|p| p.status == PaneStatus::Open).count(), 0);
+
+        // Verify active project and session are None
+        assert_eq!(dashboard.active_project_id, None);
+        assert_eq!(dashboard.active_session_id, None);
+
+        // Verify layout mode is single (for welcome screen)
+        assert_eq!(dashboard.workspace.layout_mode, "single");
     }
 
     fn create_workspace_with_two_sessions(root: &Path) -> AppState {

@@ -112,13 +112,70 @@ impl Store {
             .ok_or_else(|| "project not found".to_string())?;
         let project = self.projects.remove(index);
 
-        if self.active_project_id.as_deref() == Some(project.id.as_str()) {
-            // Keep active project as the first one or None
-            self.active_project_id = self.projects.first().map(|p| p.id.clone());
-            if self.projects.is_empty() {
-                self.active_session_id = None;
+        // Find all sessions belonging to this project
+        let project_session_ids: Vec<String> = self
+            .sessions
+            .iter()
+            .filter(|session| session.project_id == project.id)
+            .map(|session| session.id.clone())
+            .collect();
+
+        // Close all panes associated with these sessions
+        let now = now_ms();
+        let mut fallback_pane_id: Option<String> = None;
+
+        for pane in &mut self.panes {
+            if project_session_ids.contains(&pane.session_id) && pane.status == PaneStatus::Open {
+                pane.status = PaneStatus::Closed;
+                pane.is_focused = false;
+                pane.updated_at = now;
+            } else if pane.status == PaneStatus::Open && fallback_pane_id.is_none() {
+                fallback_pane_id = Some(pane.id.clone());
             }
         }
+
+        // Delete all messages and drafts for these sessions
+        self.messages
+            .retain(|message| !project_session_ids.contains(&message.session_id));
+        self.drafts
+            .retain(|draft| !project_session_ids.contains(&draft.session_id));
+
+        // Delete all sessions for this project
+        self.sessions
+            .retain(|session| session.project_id != project.id);
+
+        // Update active project and session
+        if self.active_project_id.as_deref() == Some(project.id.as_str()) {
+            self.active_project_id = self.projects.first().map(|p| p.id.clone());
+            self.active_session_id = None;
+        }
+
+        // If there's a fallback pane from another project, focus it
+        if let Some(fallback_id) = fallback_pane_id {
+            if let Some(fallback_pane) = self
+                .panes
+                .iter_mut()
+                .find(|pane| pane.id == fallback_id && pane.status == PaneStatus::Open)
+            {
+                fallback_pane.is_focused = true;
+                fallback_pane.updated_at = now;
+                self.active_session_id = Some(fallback_pane.session_id.clone());
+            }
+        }
+
+        // Update layout mode based on remaining open panes
+        let open_pane_count = self
+            .panes
+            .iter()
+            .filter(|pane| pane.status == PaneStatus::Open)
+            .count();
+        self.workspace.layout_mode = match open_pane_count {
+            0 | 1 => "single".into(),
+            2 => "dual".into(),
+            3 => "triple".into(),
+            _ => "quad".into(),
+        };
+
         Ok(project)
     }
 
@@ -126,24 +183,28 @@ impl Store {
         &mut self,
         input: crate::models::DeleteSessionInput,
     ) -> Result<SessionRecord, String> {
-        let project_index = self
-            .projects
-            .iter()
-            .position(|project| project.id == input.project_id)
-            .ok_or_else(|| "project not found".to_string())?;
+        // Find the session first
         let session_index = self
             .sessions
             .iter()
-            .position(|session| {
-                session.id == input.session_id && session.project_id == input.project_id
-            })
+            .position(|session| session.id == input.session_id)
             .ok_or_else(|| "session not found".to_string())?;
 
         let session = self.sessions.remove(session_index);
-        self.projects[project_index]
-            .session_ids
-            .retain(|session_id| session_id != &session.id);
-        self.projects[project_index].updated_at = now_ms();
+
+        // If project_id is provided, update the project
+        if let Some(project_id) = input.project_id.as_ref().or(Some(&session.project_id)) {
+            if let Some(project_index) = self
+                .projects
+                .iter()
+                .position(|project| &project.id == project_id)
+            {
+                self.projects[project_index]
+                    .session_ids
+                    .retain(|session_id| session_id != &session.id);
+                self.projects[project_index].updated_at = now_ms();
+            }
+        }
 
         self.messages
             .retain(|message| message.session_id != session.id);

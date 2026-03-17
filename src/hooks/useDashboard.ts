@@ -423,6 +423,13 @@ export function useDashboard() {
       });
       setRequestError(null);
       await refreshFromBackend();
+
+      // Auto-create a session after project creation
+      const updatedDashboard = await getDashboardState();
+      const newProject = updatedDashboard.projects.find(p => p.path === selectedPath);
+      if (newProject) {
+        await handleCreateSession(newProject.id);
+      }
     } catch (error) {
       setRequestError(
         error instanceof Error ? error.message : "Failed to add workspace.",
@@ -911,6 +918,20 @@ export function useDashboard() {
   async function handleAssignProfileToPane(paneId: string, profileId: string) {
     const targetPane =
       dashboard.workspace.panes.find((candidate) => candidate.id === paneId) ?? null;
+
+    // Save last used profile to localStorage
+    if (profileId && targetPane) {
+      const profile = profiles.find((p) => p.id === profileId);
+      if (profile) {
+        try {
+          const lastUsedKey = `last-used-profile-${profile.provider}`;
+          localStorage.setItem(lastUsedKey, profileId);
+        } catch {
+          // ignore localStorage errors
+        }
+      }
+    }
+
     setDashboard((current) => ({
       ...current,
       workspace: {
@@ -1578,6 +1599,23 @@ function defaultProfileForProvider(
   profiles: ProviderProfile[],
   provider: "claude" | "codex",
 ) {
+  // Try to get last used profile from localStorage
+  try {
+    const lastUsedKey = `last-used-profile-${provider}`;
+    const lastUsedProfileId = localStorage.getItem(lastUsedKey);
+    if (lastUsedProfileId) {
+      const lastUsedProfile = profiles.find((profile) =>
+        profile.provider === provider && profile.id === lastUsedProfileId
+      );
+      if (lastUsedProfile) {
+        return lastUsedProfile;
+      }
+    }
+  } catch {
+    // ignore localStorage errors
+  }
+
+  // Fallback to first profile of this provider
   return profiles.find((profile) => profile.provider === provider) ?? null;
 }
 

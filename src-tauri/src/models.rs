@@ -259,7 +259,7 @@ pub struct DeleteProjectInput {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct DeleteSessionInput {
-    pub project_id: String,
+    pub project_id: Option<String>,
     pub session_id: String,
 }
 

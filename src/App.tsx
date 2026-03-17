@@ -7,6 +7,7 @@ import { ComposerBar } from "./features/session/components/ComposerBar";
 import { ThreadTimeline } from "./features/thread/components/ThreadTimeline";
 import { PaneGrid } from "./features/workspace/components/PaneGrid";
 import { ProjectSidebar } from "./features/workspace/components/ProjectSidebar";
+import { WelcomeScreen } from "./components/WelcomeScreen";
 import { useDashboard } from "./hooks/useDashboard";
 import { cn } from "./lib/utils";
 import { ClaudeIcon } from "./components/icons/ClaudeIcon";
@@ -58,6 +59,21 @@ function App() {
     retryLastMessageForPane,
   } = useDashboard();
   const [profileManagerOpen, setProfileManagerOpen] = useState(false);
+
+  // Check if this is first launch (no profiles and no sessions)
+  const isFirstLaunch = useMemo(() => {
+    return !isHydrating && profiles.length === 0 && dashboard.projects.every(p => p.sessions.length === 0);
+  }, [isHydrating, profiles.length, dashboard.projects]);
+
+  // Check if there are no open panes (should show welcome screen)
+  const hasNoPanes = useMemo(() => {
+    return !isHydrating && dashboard.workspace.panes.length === 0;
+  }, [isHydrating, dashboard.workspace.panes.length]);
+
+  // Check if there are no projects (should show welcome screen)
+  const hasNoProjects = useMemo(() => {
+    return !isHydrating && dashboard.projects.length === 0;
+  }, [isHydrating, dashboard.projects.length]);
 
   // H1: Collapsible sidebar state (persisted to localStorage)
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
@@ -217,6 +233,16 @@ function App() {
           </div>
         </section>
       </main>
+    );
+  }
+
+  // Show welcome screen on first launch, when no panes are open, or when no projects exist
+  if (isFirstLaunch || hasNoPanes || hasNoProjects) {
+    return (
+      <WelcomeScreen
+        onStartSetup={() => setProfileManagerOpen(true)}
+        onQuickStart={handleCreateProject}
+      />
     );
   }
 

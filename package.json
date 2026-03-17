@@ -10,6 +10,7 @@
     "build:web": "tsc && vite build",
     "tauri:dev": "tauri dev",
     "build:mac": "node ./scripts/ensure-platform.mjs darwin && npm run build:web && tauri build --bundles app",
+    "build:mac:signed": "./scripts/build-macos.sh",
     "build:win": "node ./scripts/ensure-platform.mjs win32 && npm run build:web && tauri build --bundles msi",
     "preview": "vite preview",
     "tauri": "tauri"

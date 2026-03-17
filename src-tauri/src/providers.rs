@@ -229,7 +229,10 @@ where
     F: FnMut(ProviderStreamChunk),
     G: FnMut(u32),
 {
-    let mut command = Command::new("codex");
+    let codex_path = find_command_path("codex")
+        .ok_or_else(|| "codex CLI not found. Please install it first: https://github.com/xychatai/codex".to_string())?;
+
+    let mut command = Command::new(codex_path);
     command.current_dir(&dispatch.project_path);
     if let Some(provider_session_id) = dispatch.provider_session_id.as_deref() {
         command.args([
@@ -324,7 +327,10 @@ where
     F: FnMut(ProviderStreamChunk),
     G: FnMut(u32),
 {
-    let mut command = Command::new("claude");
+    let claude_path = find_command_path("claude")
+        .ok_or_else(|| "Claude Code CLI not found. Please install it first: https://claude.ai/download".to_string())?;
+
+    let mut command = Command::new(claude_path);
     info!(profile_id=?dispatch.profile_id, profile_label=?dispatch.profile_label, has_base_url=dispatch.base_url.is_some(), has_api_key=dispatch.api_key.is_some(), model=?dispatch.model, project_path=%dispatch.project_path, "starting claude stream");
     command.current_dir(&dispatch.project_path).arg("-p");
     if let Some(provider_session_id) = dispatch.provider_session_id.as_deref() {
@@ -534,7 +540,10 @@ fn write_codex_runtime(config: &ProviderRuntimeConfig<'_>) -> Result<PathBuf, St
 }
 
 fn run_codex_connection_test(config: &ProviderRuntimeConfig<'_>) -> Result<String, String> {
-    let mut command = Command::new("codex");
+    let codex_path = find_command_path("codex")
+        .ok_or_else(|| "codex CLI not found. Please install it first: https://github.com/xychatai/codex".to_string())?;
+
+    let mut command = Command::new(codex_path);
     let project_path = current_project_path();
     command.current_dir(&project_path).args([
         "exec",
@@ -576,7 +585,10 @@ fn run_codex_connection_test(config: &ProviderRuntimeConfig<'_>) -> Result<Strin
 
 fn run_claude_connection_test(config: &ProviderRuntimeConfig<'_>) -> Result<String, String> {
     info!(profile_id=?config.profile_id, profile_label=?config.profile_label, base_url=?config.base_url, model=?config.model, "running claude connection test");
-    let mut command = Command::new("claude");
+    let claude_path = find_command_path("claude")
+        .ok_or_else(|| "Claude Code CLI not found. Please install it first: https://claude.ai/download".to_string())?;
+
+    let mut command = Command::new(claude_path);
     let project_path = current_project_path();
     command.current_dir(&project_path).args([
         "-p",
@@ -1113,7 +1125,10 @@ fn provider_name(provider: &ProviderKind) -> &'static str {
 }
 
 fn version_output(command: &str) -> Result<String, String> {
-    let output = Command::new(command)
+    let command_path = find_command_path(command)
+        .unwrap_or_else(|| PathBuf::from(command));
+
+    let output = Command::new(command_path)
         .arg("--version")
         .output()
         .map_err(|error| format!("failed to launch {command}: {error}"))?;
@@ -1147,6 +1162,111 @@ fn timestamp_ms() -> u128 {
         .duration_since(UNIX_EPOCH)
         .map(|duration| duration.as_millis())
         .unwrap_or(0)
+}
+
+#[derive(serde::Serialize)]
+pub struct DetectedCliConfig {
+    pub provider: String,
+    pub config_path: String,
+    pub has_auth: bool,
+}
+
+pub fn scan_cli_configs() -> Vec<DetectedCliConfig> {
+    let mut configs = Vec::new();
+
+    // 扫描 codex 配置 (在 ~/.codex 目录)
+    if let Some(home) = env::var("HOME").ok() {
+        let codex_config = PathBuf::from(&home).join(".codex");
+        if codex_config.exists() {
+            // 检查是否有认证信息
+            let auth_file = codex_config.join("auth.json");
+            configs.push(DetectedCliConfig {
+                provider: "codex".to_string(),
+                config_path: codex_config.to_string_lossy().to_string(),
+                has_auth: auth_file.exists(),
+            });
+        }
+    }
+
+    // ��描 claude code 配置
+    if let Some(home) = env::var("HOME").ok() {
+        let claude_config = PathBuf::from(&home).join(".config").join("claude-code");
+        if claude_config.exists() {
+            configs.push(DetectedCliConfig {
+                provider: "claude".to_string(),
+                config_path: claude_config.to_string_lossy().to_string(),
+                has_auth: true,
+            });
+        }
+    }
+
+    configs
+}
+
+fn find_command_path(command: &str) -> Option<PathBuf> {
+    // 1. 先尝试 which 命令（适用于 macOS/Linux）
+    if let Ok(output) = Command::new("which").arg(command).output() {
+        if output.status.success() {
+            let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            if !path.is_empty() {
+                return Some(PathBuf::from(path));
+            }
+        }
+    }
+
+    // 2. 尝试 where 命令（适用于 Windows）
+    if cfg!(target_os = "windows") {
+        if let Ok(output) = Command::new("where").arg(command).output() {
+            if output.status.success() {
+                let path = String::from_utf8_lossy(&output.stdout)
+                    .lines()
+                    .next()
+                    .map(|s| s.trim().to_string());
+                if let Some(path) = path {
+                    if !path.is_empty() {
+                        return Some(PathBuf::from(path));
+                    }
+                }
+            }
+        }
+    }
+
+    // 3. 在常见位置查找
+    let common_paths = if cfg!(target_os = "windows") {
+        vec![
+            Some(PathBuf::from(format!("C:\\Program Files\\{}\\{}.exe", command, command))),
+            env::var("USERPROFILE")
+                .ok()
+                .map(|home| PathBuf::from(home).join(".bun").join("bin").join(format!("{}.exe", command))),
+            env::var("USERPROFILE")
+                .ok()
+                .map(|home| PathBuf::from(home).join("AppData").join("Local").join(command).join(format!("{}.exe", command))),
+        ]
+    } else {
+        vec![
+            Some(PathBuf::from(format!("/usr/local/bin/{}", command))),
+            Some(PathBuf::from(format!("/usr/bin/{}", command))),
+            Some(PathBuf::from(format!("/opt/homebrew/bin/{}", command))),
+            env::var("HOME")
+                .ok()
+                .map(|home| PathBuf::from(home).join(".bun").join("bin").join(command)),
+            env::var("HOME")
+                .ok()
+                .map(|home| PathBuf::from(home).join(".local").join("bin").join(command)),
+            env::var("HOME")
+                .ok()
+                .map(|home| PathBuf::from(home).join("bin").join(command)),
+        ]
+    };
+
+    for path in common_paths.into_iter().flatten() {
+        if path.exists() && path.is_file() {
+            return Some(path);
+        }
+    }
+
+    // 4. 最后返回 None，让调用者决定如何处理
+    None
 }
 
 #[cfg(test)]

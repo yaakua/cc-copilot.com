@@ -13,8 +13,21 @@ use crate::{
         SetWorkspaceLayoutInput, SkillSummary, TestProviderProfileInput, ToggleRemoteTunnelInput,
         WorkspaceSummary,
     },
+    providers::DetectedCliConfig,
     state::AppState,
 };
+
+#[tauri::command]
+pub fn scan_cli_configs() -> Result<Vec<DetectedCliConfig>, String> {
+    Ok(crate::providers::scan_cli_configs())
+}
+
+#[tauri::command]
+pub fn auto_import_cli_profiles(
+    state: State<'_, AppState>,
+) -> Result<Vec<ProviderProfileRecord>, String> {
+    state.auto_import_cli_profiles()
+}
 
 #[tauri::command]
 pub fn get_dashboard_state(state: State<'_, AppState>) -> Result<DashboardState, String> {
