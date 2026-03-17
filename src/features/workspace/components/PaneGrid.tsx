@@ -14,7 +14,6 @@ interface PaneGridProps {
   canAddPane: boolean;
   canClosePane: boolean;
   onAddPane: () => void;
-  onCancelRun: (paneId: string) => void;
   onClosePane: (paneId: string) => void;
   onFocusPane: (paneId: string) => void;
   onTogglePaneSelection: (paneId: string) => void;
@@ -36,7 +35,6 @@ export function PaneGrid({
   canAddPane,
   canClosePane,
   onAddPane,
-  onCancelRun,
   onClosePane,
   onFocusPane,
   onTogglePaneSelection,
@@ -204,7 +202,7 @@ export function PaneGrid({
                 )}
               >
                 {pane.provider === "codex" ? <CodexIcon size={10} className="opacity-70" /> : <ClaudeIcon size={10} className="opacity-70" />}
-                <span className="truncate max-w-[80px]">{paneProfile.name}</span>
+                <span className="truncate max-w-[80px]">{paneProfile.label}</span>
               </span>
             )}
 

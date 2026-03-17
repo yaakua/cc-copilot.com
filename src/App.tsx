@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Command, Folder, Moon, PanelLeftClose, PanelLeftOpen, Plus, Sun } from "lucide-react";
+import { Folder, Moon, PanelLeftClose, PanelLeftOpen, Plus, Sun } from "lucide-react";
 import { ProfileManagerDialog } from "./features/provider/components/ProfileManagerDialog";
 import { QuickProfileDialog } from "./features/provider/components/QuickProfileDialog";
 import { ProviderSetupDialog } from "./features/provider/components/ProviderSetupDialog";
@@ -194,8 +194,6 @@ function App() {
 
   // H4: Pane dots
   const paneCount = dashboard.workspace.panes.length;
-  const maxPanes = 4;
-
   // L5: Loading skeleton
   if (isHydrating) {
     return (
