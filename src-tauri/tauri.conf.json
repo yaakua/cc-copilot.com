@@ -34,10 +34,6 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ],
-    "macOS": {
-      "signingIdentity": null,
-      "entitlements": null
-    },
     "windows": {
       "certificateThumbprint": null,
       "digestAlgorithm": "sha256",
