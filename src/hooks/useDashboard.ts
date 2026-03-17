@@ -500,7 +500,19 @@ export function useDashboard() {
 
   async function handleCreateSession(projectId: string) {
     const provider = defaultProvider;
-    const defaultProfileId = defaultProfileForProvider(profiles, provider)?.id ?? null;
+    const defaultProfile = defaultProfileForProvider(profiles, provider);
+    const defaultProfileId = defaultProfile?.id ?? null;
+
+    // Save the default profile to localStorage so it's remembered for next time
+    if (defaultProfile) {
+      try {
+        const lastUsedKey = `last-used-profile-${provider}`;
+        localStorage.setItem(lastUsedKey, defaultProfile.id);
+      } catch {
+        // ignore localStorage errors
+      }
+    }
+
     return handleCreateSessionWithOptions(projectId, {
       provider,
       profileId: defaultProfileId,
@@ -958,7 +970,19 @@ export function useDashboard() {
     paneId: string,
     provider: "claude" | "codex",
   ) {
-    const defaultProfileId = defaultProfileForProvider(profiles, provider)?.id ?? null;
+    const defaultProfile = defaultProfileForProvider(profiles, provider);
+    const defaultProfileId = defaultProfile?.id ?? null;
+
+    // Save the default profile to localStorage so it's remembered for next time
+    if (defaultProfile) {
+      try {
+        const lastUsedKey = `last-used-profile-${provider}`;
+        localStorage.setItem(lastUsedKey, defaultProfile.id);
+      } catch {
+        // ignore localStorage errors
+      }
+    }
+
     const targetPane =
       dashboard.workspace.panes.find((candidate) => candidate.id === paneId) ?? null;
 
